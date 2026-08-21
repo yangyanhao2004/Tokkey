@@ -1,0 +1,16 @@
+{
+  "name": "tokie",
+  "version": "0.1.0",
+  "description": "Tokie desktop application built with Electron",
+  "main": "src/main/main.js",
+  "author": "qi liu",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "devDependencies": {
+    "electron": "^43.4.1"
+  }
+}

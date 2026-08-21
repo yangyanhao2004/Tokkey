@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Renderer runs only bundled local code: no remote scripts, no inline scripts. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:"
+    />
+    <title>Tokie</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="app__header">
+        <h1 class="app__title">Tokie</h1>
+        <p class="app__subtitle">Electron app scaffold — ready to build on.</p>
+      </header>
+
+      <section class="card">
+        <h2 class="card__title">Runtime</h2>
+        <!-- Filled in by RendererApp from the main process over IPC. -->
+        <dl class="info" id="info"></dl>
+      </section>
+    </main>
+
+    <script src="RendererApp.js"></script>
+  </body>
+</html>
