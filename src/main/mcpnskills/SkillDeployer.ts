@@ -234,7 +234,7 @@ export class SkillDeployer {
     const parentPath = path.dirname(destinationPath);
     const temporaryPath = path.join(
       parentPath,
-      `.${path.basename(destinationPath)}.tokie-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      `.${path.basename(destinationPath)}.tokiie-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
     );
     mkdirSync(parentPath, { recursive: true });
     try {

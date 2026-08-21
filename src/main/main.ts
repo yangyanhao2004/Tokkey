@@ -1,4 +1,4 @@
-import TokieApp from './TokieApp';
+import TokiieApp from './TokiieApp';
 
-// Entry point: the whole main process is driven by the TokieApp instance.
-new TokieApp().start();
+// Entry point: the whole main process is driven by the TokiieApp instance.
+new TokiieApp().start();

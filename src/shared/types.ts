@@ -9,7 +9,7 @@ export interface AppInfo {
 }
 
 /** Renderer-facing API exposed by the preload bridge. */
-export interface TokieApi {
+export interface TokiieApi {
   getAppInfo(): Promise<AppInfo>;
   getInstalledSkills(): Promise<InstalledSkill[]>;
   getSkillAgentSelection(skillId: string): Promise<SkillAgentSelection>;

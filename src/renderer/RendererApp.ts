@@ -2,7 +2,7 @@ import type { AppInfo } from '../shared/types';
 
 /**
  * Drives the renderer UI. It never touches Node or Electron directly and talks
- * to the main process only through the `window.tokie` preload bridge.
+ * to the main process only through the `window.tokiie` preload bridge.
  */
 class RendererApp {
   private readonly infoElement: HTMLElement;
@@ -17,7 +17,7 @@ class RendererApp {
 
   /** Boots the UI once the DOM is available. */
   async start(): Promise<void> {
-    const appInfo = await window.tokie.getAppInfo();
+    const appInfo = await window.tokiie.getAppInfo();
     this.renderInfo(appInfo);
   }
 

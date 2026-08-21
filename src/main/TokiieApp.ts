@@ -2,7 +2,7 @@ import path from 'node:path';
 import { app, BrowserWindow, shell } from 'electron';
 import IpcController from './IpcController';
 
-interface TokieAppOptions {
+interface TokiieAppOptions {
   width?: number;
   height?: number;
 }
@@ -11,7 +11,7 @@ interface TokieAppOptions {
  * Owns the Electron application lifecycle and the main browser window.
  * All main-process wiring goes through this class so the entry point stays trivial.
  */
-export default class TokieApp {
+export default class TokiieApp {
   private readonly width: number;
   private readonly height: number;
   private readonly ipcController: IpcController;
@@ -21,7 +21,7 @@ export default class TokieApp {
   /**
    * @param options initial window dimensions
    */
-  constructor(options: TokieAppOptions = {}) {
+  constructor(options: TokiieAppOptions = {}) {
     this.width = options.width ?? 1200;
     this.height = options.height ?? 800;
     // The single main window; null whenever no window is open (normal on macOS).

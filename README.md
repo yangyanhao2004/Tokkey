@@ -1,4 +1,4 @@
-# Tokie
+# Tokiie
 
 Desktop application built with [Electron](https://www.electronjs.org/).
 
@@ -24,10 +24,10 @@ compiled from `src/` into `dist/`, which is the directory Electron runs.
 ```
 src/
 ├── main/                 # main process (Node side)
-│   ├── main.ts           # entry point, boots TokieApp
-│   ├── TokieApp.ts       # app lifecycle + main window
+│   ├── main.ts           # entry point, boots TokiieApp
+│   ├── TokiieApp.ts      # app lifecycle + main window
 │   ├── IpcController.ts  # all IPC handlers exposed to the renderer
-│   └── preload.ts        # context bridge, exposes window.tokie
+│   └── preload.ts        # context bridge, exposes window.tokiie
 ├── renderer/             # renderer process (UI side)
     ├── index.html        # entry page
     ├── RendererApp.ts    # UI logic
@@ -40,7 +40,7 @@ src/
 ## Adding a renderer API
 
 1. Add the handler to `IpcController.handlers` in `src/main/IpcController.ts`.
-2. Expose it on `window.tokie` in `src/main/preload.ts`.
+2. Expose it on `window.tokiie` in `src/main/preload.ts`.
 
 Context isolation is on and node integration is off, so the renderer can only
 reach the main process through the channels listed in those two files.

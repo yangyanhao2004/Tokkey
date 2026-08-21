@@ -1,7 +1,7 @@
 {
-  "name": "tokie",
+  "name": "tokiie",
   "version": "0.1.0",
-  "description": "Tokie desktop application built with Electron",
+  "description": "Tokiie desktop application built with Electron",
   "main": "dist/main/main.js",
   "author": "qi liu",
   "license": "MIT",
