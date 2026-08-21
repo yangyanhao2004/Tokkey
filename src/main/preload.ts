@@ -15,7 +15,10 @@ class PreloadBridge {
       getSkillAgentSelection: (skillId) => ipcRenderer.invoke('skills:get-agent-selection', skillId),
       applySkillAgentSelection: (skillId, selectedAgents) =>
         ipcRenderer.invoke('skills:apply-agent-selection', skillId, selectedAgents),
-      uninstallSkill: (skillId) => ipcRenderer.invoke('skills:uninstall', skillId)
+      uninstallSkill: (skillId) => ipcRenderer.invoke('skills:uninstall', skillId),
+      listCachedRepositories: () => ipcRenderer.invoke('discover-repos:list-cached'),
+      addRepository: (input, branch) => ipcRenderer.invoke('discover-repos:add', input, branch),
+      installRepositorySkill: (request) => ipcRenderer.invoke('discover-repos:install-skill', request)
     };
     contextBridge.exposeInMainWorld('tokiie', api);
   }

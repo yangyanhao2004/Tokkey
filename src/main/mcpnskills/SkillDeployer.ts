@@ -13,7 +13,7 @@ import LocalSkillCatalogScanner from './SkillCatalogScanner';
 import { SkillFilesystemLayout, type SkillFilesystemLayoutOptions } from './SkillFilesystem';
 
 /** Stable ordering used by selection responses and filesystem transitions. */
-export const SKILL_AGENT_ORDER: readonly SkillAgent[] = ['claudeCode', 'codex'];
+export const SKILL_AGENT_ORDER: readonly SkillAgent[] = ['hermes', 'claudeCode', 'codex'];
 
 /** Error carrying the path and requested selection that failed. */
 export class SkillDeploymentError extends Error {
@@ -187,10 +187,19 @@ export class SkillDeployer {
       }
       for (const candidatePath of this.getAgentPaths(agent, relativePath)) {
         if (this.pathExists(candidatePath)) {
-          if (!this.isSkillPath(skill, candidatePath, canonicalPath)) {
-            throw new Error(`Agent path is occupied by another skill: ${candidatePath}`);
+          const installation = skill.installations.find(
+            (entry) => path.resolve(entry.absolutePath) === path.resolve(candidatePath)
+          );
+          // Remove links owned by the app, and migrate a sole agent-owned source to canonical storage.
+          const isPrimaryAgentSource = installation !== undefined &&
+            installation === skill.primaryInstallation &&
+            installation.root !== 'amis';
+          if (
+            this.isSkillPath(skill, candidatePath, canonicalPath) &&
+            (installation?.isSymlink === true || isPrimaryAgentSource)
+          ) {
+            this.removePath(candidatePath);
           }
-          this.removePath(candidatePath);
         }
       }
     }

@@ -1,7 +1,22 @@
 import { app, ipcMain, type IpcMainInvokeEvent } from 'electron';
-import type { AppInfo, InstalledSkill, SkillAgent, SkillAgentSelection } from '../shared/types';
+import type {
+  AppInfo,
+  CachedRepository,
+  InstallRepositorySkillRequest,
+  InstalledSkill,
+  RepositorySyncResult,
+  SkillAgent,
+  SkillAgentSelection,
+  SkillInstallResult
+} from '../shared/types';
 import { LocalSkillCatalogScanner } from './mcpnskills/SkillCatalogScanner';
 import { SKILL_AGENT_ORDER, SkillDeployer } from './mcpnskills/SkillDeployer';
+import CachedRepositoryCatalog from './mcpnskills/CachedRepositoryCatalog';
+import DiscoverRepositories from './mcpnskills/DiscoverRepositories';
+import RepositoryCloneCache from './mcpnskills/RepositoryCloneCache';
+import RepositorySkillScanner from './mcpnskills/RepositorySkillScanner';
+import SkillFolderImporter from './mcpnskills/SkillFolderImporter';
+import SkillInstaller from './mcpnskills/SkillInstaller';
 
 type IpcHandler = (...args: unknown[]) => unknown;
 
@@ -13,13 +28,16 @@ export default class IpcController {
   private readonly handlers: Record<string, IpcHandler>;
   private readonly skillCatalogScanner: LocalSkillCatalogScanner;
   private readonly skillDeployer: SkillDeployer;
+  private readonly discoverRepositories: DiscoverRepositories;
 
   constructor(
     skillCatalogScanner: LocalSkillCatalogScanner = new LocalSkillCatalogScanner(),
-    skillDeployer: SkillDeployer = new SkillDeployer({ scanner: skillCatalogScanner })
+    skillDeployer: SkillDeployer = new SkillDeployer({ scanner: skillCatalogScanner }),
+    discoverRepositories: DiscoverRepositories | null = null
   ) {
     this.skillCatalogScanner = skillCatalogScanner;
     this.skillDeployer = skillDeployer;
+    this.discoverRepositories = discoverRepositories ?? this.createDiscoverRepositories();
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
@@ -31,7 +49,12 @@ export default class IpcController {
           this.requireSkillId(skillId),
           this.requireSkillAgents(selectedAgents)
         ),
-      'skills:uninstall': (skillId: unknown) => this.uninstallSkill(this.requireSkillId(skillId))
+      'skills:uninstall': (skillId: unknown) => this.uninstallSkill(this.requireSkillId(skillId)),
+      'discover-repos:list-cached': () => this.listCachedRepositories(),
+      'discover-repos:add': (input: unknown, branch: unknown) =>
+        this.addRepository(this.requireString(input, 'Repository input'), this.requireOptionalString(branch)),
+      'discover-repos:install-skill': (request: unknown) =>
+        this.installRepositorySkill(this.requireInstallRequest(request))
     };
   }
 
@@ -87,6 +110,21 @@ export default class IpcController {
     return this.skillDeployer.uninstallSkill(skill);
   }
 
+  /** Lists repository cards from the local cache without running Git. */
+  listCachedRepositories(): Promise<CachedRepository[]> {
+    return this.discoverRepositories.listCached();
+  }
+
+  /** Downloads or refreshes one GitHub checkout and returns its rebuilt cards. */
+  addRepository(input: string, branch = ''): Promise<RepositorySyncResult> {
+    return this.discoverRepositories.addRepository(input, branch);
+  }
+
+  /** Installs one cached card through the main-process repository service. */
+  installRepositorySkill(request: InstallRepositorySkillRequest): Promise<SkillInstallResult> {
+    return this.discoverRepositories.installSkill(request);
+  }
+
   private async findSkill(skillId: string): Promise<InstalledSkill> {
     const skill = (await this.getInstalledSkills()).find((candidate) => candidate.id === skillId);
     if (!skill) {
@@ -113,5 +151,62 @@ export default class IpcController {
       return agent as SkillAgent;
     });
     return [...new Set(selectedAgents)];
+  }
+
+  private requireInstallRequest(value: unknown): InstallRepositorySkillRequest {
+    if (!value || typeof value !== 'object') {
+      throw new TypeError('Repository skill request must be an object');
+    }
+    const request = value as Record<string, unknown>;
+    const conflictStrategy = request.conflictStrategy;
+    if (
+      conflictStrategy !== 'replace' &&
+      conflictStrategy !== 'keepBoth' &&
+      conflictStrategy !== 'skip' &&
+      conflictStrategy !== 'reportConflict'
+    ) {
+      throw new TypeError(`Unsupported skill conflict strategy: ${String(conflictStrategy)}`);
+    }
+    return {
+      source: this.requireString(request.source, 'Repository source'),
+      relativePath: this.requireString(request.relativePath, 'Repository skill path'),
+      enabledAgents: this.requireSkillAgents(request.enabledAgents),
+      conflictStrategy
+    };
+  }
+
+  private requireString(value: unknown, label: string): string {
+    if (typeof value !== 'string' || value.trim().length === 0) {
+      throw new TypeError(`${label} must be a non-empty string`);
+    }
+    return value;
+  }
+
+  private requireOptionalString(value: unknown): string {
+    if (value === undefined || value === null) {
+      return '';
+    }
+    if (typeof value !== 'string') {
+      throw new TypeError('Git branch must be a string');
+    }
+    return value;
+  }
+
+  private createDiscoverRepositories(): DiscoverRepositories {
+    const cache = new RepositoryCloneCache();
+    const repositoryScanner = new RepositorySkillScanner();
+    const catalog = new CachedRepositoryCatalog({
+      cache,
+      scanner: repositoryScanner,
+      installedCatalog: this.skillCatalogScanner
+    });
+    const importer = new SkillFolderImporter({ filesystem: this.skillCatalogScanner.getFilesystem() });
+    const installer = new SkillInstaller({
+      catalog,
+      installedCatalog: this.skillCatalogScanner,
+      importer,
+      deployer: this.skillDeployer
+    });
+    return new DiscoverRepositories({ cache, catalog, installer });
   }
 }

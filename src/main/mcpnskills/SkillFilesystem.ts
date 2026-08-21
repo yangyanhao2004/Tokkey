@@ -6,6 +6,7 @@ import type { SkillAgent, SkillRoot } from '../../shared/types';
 export const SKILL_ROOT_RELATIVE_PATHS: Readonly<Record<SkillRoot, string>> = {
   amis: '.amis/skills',
   claudeCode: '.claude/skills',
+  hermes: '.hermes/skills',
   codex: '.codex/skills',
   agents: '.agents/skills'
 };
@@ -52,6 +53,7 @@ export class SkillFilesystemLayout {
   /** Returns all locations an agent may use, in preferred order. */
   getAgentSkillPaths(agent: SkillAgent, relativePath: string): string[] {
     const roots: Record<SkillAgent, SkillRoot[]> = {
+      hermes: ['hermes'],
       claudeCode: ['claudeCode'],
       // Prefer the shared Codex root when it already contains the skill.
       codex: ['agents', 'codex']
