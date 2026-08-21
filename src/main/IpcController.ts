@@ -1,5 +1,6 @@
 import { app, ipcMain, type IpcMainInvokeEvent } from 'electron';
-import type { AppInfo } from '../shared/types';
+import type { AppInfo, InstalledSkill } from '../shared/types';
+import { LocalSkillCatalogScanner } from './skills/SkillCatalogScanner';
 
 type IpcHandler = (...args: unknown[]) => unknown;
 
@@ -9,11 +10,14 @@ type IpcHandler = (...args: unknown[]) => unknown;
  */
 export default class IpcController {
   private readonly handlers: Record<string, IpcHandler>;
+  private readonly skillCatalogScanner: LocalSkillCatalogScanner;
 
-  constructor() {
+  constructor(skillCatalogScanner: LocalSkillCatalogScanner = new LocalSkillCatalogScanner()) {
+    this.skillCatalogScanner = skillCatalogScanner;
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
-      'app:get-info': () => this.getAppInfo()
+      'app:get-info': () => this.getAppInfo(),
+      'skills:list-installed': () => this.getInstalledSkills()
     };
   }
 
@@ -37,5 +41,10 @@ export default class IpcController {
       node: process.versions.node,
       platform: process.platform
     };
+  }
+
+  /** Lists local skills for the future skills page without exposing filesystem APIs to it. */
+  async getInstalledSkills(): Promise<InstalledSkill[]> {
+    return this.skillCatalogScanner.scanInstalledSkills();
   }
 }

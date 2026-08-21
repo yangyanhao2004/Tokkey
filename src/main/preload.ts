@@ -10,7 +10,8 @@ class PreloadBridge {
   /** Exposes the API object on the isolated renderer window. */
   expose(): void {
     const api: TokieApi = {
-      getAppInfo: () => ipcRenderer.invoke('app:get-info')
+      getAppInfo: () => ipcRenderer.invoke('app:get-info'),
+      getInstalledSkills: () => ipcRenderer.invoke('skills:list-installed')
     };
     contextBridge.exposeInMainWorld('tokie', api);
   }
