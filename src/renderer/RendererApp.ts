@@ -1,25 +1,31 @@
-'use strict';
+import type { AppInfo } from '../shared/types';
 
 /**
  * Drives the renderer UI. It never touches Node or Electron directly and talks
  * to the main process only through the `window.tokie` preload bridge.
  */
 class RendererApp {
+  private readonly infoElement: HTMLElement;
+
   constructor() {
-    this.infoElement = document.getElementById('info');
+    const infoElement = document.getElementById('info');
+    if (!(infoElement instanceof HTMLElement)) {
+      throw new Error('The runtime info element is missing.');
+    }
+    this.infoElement = infoElement;
   }
 
   /** Boots the UI once the DOM is available. */
-  async start() {
+  async start(): Promise<void> {
     const appInfo = await window.tokie.getAppInfo();
     this.renderInfo(appInfo);
   }
 
   /**
    * Renders the runtime information as definition-list rows.
-   * @param {Record<string, string>} appInfo key/value pairs from the main process
+   * @param appInfo runtime key/value pairs from the main process
    */
-  renderInfo(appInfo) {
+  renderInfo(appInfo: AppInfo): void {
     this.infoElement.replaceChildren(
       ...Object.entries(appInfo).flatMap(([key, value]) => {
         const term = document.createElement('dt');
@@ -33,5 +39,5 @@ class RendererApp {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-  new RendererApp().start();
+  void new RendererApp().start();
 });

@@ -2,15 +2,18 @@
   "name": "tokie",
   "version": "0.1.0",
   "description": "Tokie desktop application built with Electron",
-  "main": "src/main/main.js",
+  "main": "dist/main/main.js",
   "author": "qi liu",
   "license": "MIT",
   "private": true,
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev"
+    "build": "tsc && mkdir -p dist/renderer && cp src/renderer/index.html dist/renderer/index.html && cp src/renderer/styles.css dist/renderer/styles.css",
+    "typecheck": "tsc --noEmit",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron . --dev"
   },
   "devDependencies": {
-    "electron": "^43.4.1"
+    "electron": "^43.4.1",
+    "typescript": "^7.0.2"
   }
 }

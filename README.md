@@ -11,29 +11,36 @@ Desktop application built with [Electron](https://www.electronjs.org/).
 
 ```bash
 npm install   # install dependencies
+npm run build # compile TypeScript and copy renderer assets
 npm start     # run the app
 npm run dev   # run with DevTools open
 ```
+
+`npm start` and `npm run dev` build the app automatically. TypeScript source is
+compiled from `src/` into `dist/`, which is the directory Electron runs.
 
 ## Project structure
 
 ```
 src/
 ├── main/                 # main process (Node side)
-│   ├── main.js           # entry point, boots TokieApp
-│   ├── TokieApp.js       # app lifecycle + main window
-│   ├── IpcController.js  # all IPC handlers exposed to the renderer
-│   └── preload.js        # context bridge, exposes window.tokie
-└── renderer/             # renderer process (UI side)
+│   ├── main.ts           # entry point, boots TokieApp
+│   ├── TokieApp.ts       # app lifecycle + main window
+│   ├── IpcController.ts  # all IPC handlers exposed to the renderer
+│   └── preload.ts        # context bridge, exposes window.tokie
+├── renderer/             # renderer process (UI side)
     ├── index.html        # entry page
-    ├── RendererApp.js    # UI logic
+    ├── RendererApp.ts    # UI logic
+    ├── window.d.ts        # type declaration for the preload bridge
     └── styles.css        # styles
+└── shared/               # contracts shared by both processes
+    └── types.ts          # IPC data and bridge contracts
 ```
 
 ## Adding a renderer API
 
-1. Add the handler to `IpcController.handlers` in `src/main/IpcController.js`.
-2. Expose it on `window.tokie` in `src/main/preload.js`.
+1. Add the handler to `IpcController.handlers` in `src/main/IpcController.ts`.
+2. Expose it on `window.tokie` in `src/main/preload.ts`.
 
 Context isolation is on and node integration is off, so the renderer can only
 reach the main process through the channels listed in those two files.

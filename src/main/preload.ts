@@ -1,6 +1,5 @@
-'use strict';
-
-const { contextBridge, ipcRenderer } = require('electron');
+import { contextBridge, ipcRenderer } from 'electron';
+import type { TokieApi } from '../shared/types';
 
 /**
  * The only bridge between renderer and main process. It exposes a small,
@@ -9,10 +8,11 @@ const { contextBridge, ipcRenderer } = require('electron');
  */
 class PreloadBridge {
   /** Exposes the API object on the isolated renderer window. */
-  expose() {
-    contextBridge.exposeInMainWorld('tokie', {
+  expose(): void {
+    const api: TokieApi = {
       getAppInfo: () => ipcRenderer.invoke('app:get-info')
-    });
+    };
+    contextBridge.exposeInMainWorld('tokie', api);
   }
 }
 

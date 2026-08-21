@@ -1,12 +1,15 @@
-'use strict';
+import { app, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import type { AppInfo } from '../shared/types';
 
-const { app, ipcMain } = require('electron');
+type IpcHandler = (...args: unknown[]) => unknown;
 
 /**
  * Central place for every main-process IPC handler exposed to the renderer.
- * Channel names live here and in preload.js only, so the surface stays auditable.
+ * Channel names live here and in preload.ts only, so the surface stays auditable.
  */
-class IpcController {
+export default class IpcController {
+  private readonly handlers: Record<string, IpcHandler>;
+
   constructor() {
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
@@ -15,26 +18,24 @@ class IpcController {
   }
 
   /** Registers every handler on ipcMain. Call once, before any window opens. */
-  register() {
+  register(): void {
     Object.entries(this.handlers).forEach(([channel, handler]) => {
-      ipcMain.handle(channel, (event, ...args) => handler(...args));
+      ipcMain.handle(channel, (_event: IpcMainInvokeEvent, ...args: unknown[]) => handler(...args));
     });
   }
 
   /**
    * Runtime information about the app and its platform, used by the renderer.
-   * @returns {{name: string, version: string, electron: string, chrome: string, node: string, platform: string}}
+   * @returns Runtime information about the current Electron process.
    */
-  getAppInfo() {
+  getAppInfo(): AppInfo {
     return {
       name: app.getName(),
       version: app.getVersion(),
-      electron: process.versions.electron,
-      chrome: process.versions.chrome,
+      electron: process.versions.electron ?? 'unknown',
+      chrome: process.versions.chrome ?? 'unknown',
       node: process.versions.node,
       platform: process.platform
     };
   }
 }
-
-module.exports = IpcController;

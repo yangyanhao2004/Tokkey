@@ -1,22 +1,29 @@
-'use strict';
+import path from 'node:path';
+import { app, BrowserWindow, shell } from 'electron';
+import IpcController from './IpcController';
 
-const path = require('node:path');
-const { app, BrowserWindow, shell } = require('electron');
-const IpcController = require('./IpcController');
+interface TokieAppOptions {
+  width?: number;
+  height?: number;
+}
 
 /**
  * Owns the Electron application lifecycle and the main browser window.
  * All main-process wiring goes through this class so the entry point stays trivial.
  */
-class TokieApp {
+export default class TokieApp {
+  private readonly width: number;
+  private readonly height: number;
+  private readonly ipcController: IpcController;
+  private readonly isDev: boolean;
+  private mainWindow: BrowserWindow | null;
+
   /**
-   * @param {object} options
-   * @param {number} [options.width]  initial window width in pixels
-   * @param {number} [options.height] initial window height in pixels
+   * @param options initial window dimensions
    */
-  constructor(options = {}) {
-    this.width = options.width || 1200;
-    this.height = options.height || 800;
+  constructor(options: TokieAppOptions = {}) {
+    this.width = options.width ?? 1200;
+    this.height = options.height ?? 800;
     // The single main window; null whenever no window is open (normal on macOS).
     this.mainWindow = null;
     // Renderer-facing IPC handlers are registered once, before any window exists.
@@ -29,7 +36,7 @@ class TokieApp {
    * Boots the application: enforces a single instance, registers IPC handlers
    * and binds every lifecycle event the app cares about.
    */
-  start() {
+  start(): void {
     // A second launch should focus the running window instead of starting a new app.
     if (!app.requestSingleInstanceLock()) {
       app.quit();
@@ -41,7 +48,7 @@ class TokieApp {
   }
 
   /** Binds all Electron lifecycle events to their handlers. */
-  bindLifecycleEvents() {
+  bindLifecycleEvents(): void {
     app.on('second-instance', () => this.focusMainWindow());
     app.whenReady().then(() => this.onReady());
     app.on('activate', () => this.onActivate());
@@ -49,19 +56,19 @@ class TokieApp {
   }
 
   /** Creates the first window once Electron has finished initialising. */
-  onReady() {
+  onReady(): void {
     this.createMainWindow();
   }
 
   /** On macOS, clicking the dock icon re-opens a window when none is left. */
-  onActivate() {
+  onActivate(): void {
     if (BrowserWindow.getAllWindows().length === 0) {
       this.createMainWindow();
     }
   }
 
   /** On Windows/Linux the app exits with its last window; macOS keeps running. */
-  onWindowAllClosed() {
+  onWindowAllClosed(): void {
     if (process.platform !== 'darwin') {
       app.quit();
     }
@@ -70,10 +77,10 @@ class TokieApp {
   /**
    * Creates the main window with a hardened renderer (context isolation on,
    * node integration off) and loads the renderer entry page.
-   * @returns {BrowserWindow}
+   * @returns The newly created main window.
    */
-  createMainWindow() {
-    this.mainWindow = new BrowserWindow({
+  createMainWindow(): BrowserWindow {
+    const mainWindow = new BrowserWindow({
       width: this.width,
       height: this.height,
       minWidth: 640,
@@ -90,27 +97,28 @@ class TokieApp {
       }
     });
 
-    this.mainWindow.once('ready-to-show', () => this.mainWindow.show());
-    this.mainWindow.on('closed', () => {
+    this.mainWindow = mainWindow;
+    mainWindow.once('ready-to-show', () => mainWindow.show());
+    mainWindow.on('closed', () => {
       this.mainWindow = null;
     });
 
-    this.applyNavigationPolicy(this.mainWindow);
-    this.mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+    this.applyNavigationPolicy(mainWindow);
+    mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
     if (this.isDev) {
-      this.mainWindow.webContents.openDevTools({ mode: 'detach' });
+      mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
 
-    return this.mainWindow;
+    return mainWindow;
   }
 
   /**
    * Keeps the renderer inside the bundled app: external links open in the
    * system browser and in-app navigation away from local files is blocked.
-   * @param {BrowserWindow} window
+   * @param window browser window whose navigation should be restricted
    */
-  applyNavigationPolicy(window) {
+  applyNavigationPolicy(window: BrowserWindow): void {
     window.webContents.setWindowOpenHandler(({ url }) => {
       shell.openExternal(url);
       return { action: 'deny' };
@@ -125,7 +133,7 @@ class TokieApp {
   }
 
   /** Restores and focuses the main window, used when a second instance starts. */
-  focusMainWindow() {
+  focusMainWindow(): void {
     if (!this.mainWindow) {
       return;
     }
@@ -135,5 +143,3 @@ class TokieApp {
     this.mainWindow.focus();
   }
 }
-
-module.exports = TokieApp;
