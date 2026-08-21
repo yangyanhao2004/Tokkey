@@ -7,7 +7,6 @@ import {
   type Dirent,
   type Stats
 } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type {
   InstalledSkill,
@@ -19,6 +18,7 @@ import {
   SKILL_ROOTS,
   type SkillContentHashing as SkillContentHashingType
 } from './SkillDeduplicator';
+import { SkillFilesystemLayout, type SkillFilesystemLayoutOptions } from './SkillFilesystem';
 
 export { FileSkillContentHasher, SkillDeduplicator, SKILL_ROOTS } from './SkillDeduplicator';
 export type { SkillContentHashing } from './SkillDeduplicator';
@@ -26,14 +26,6 @@ export type { SkillContentHashing } from './SkillDeduplicator';
 /** Maximum namespace depth below a skill root. */
 const MAX_SCAN_DEPTH = 3;
 const MANIFEST_FILE_NAME = 'SKILL.md';
-
-/** Relative locations for each skill root below the user's home directory. */
-const ROOT_RELATIVE_PATHS: Readonly<Record<SkillRoot, string>> = {
-  amis: '.amis/skills',
-  claudeCode: '.claude/skills',
-  codex: '.codex/skills',
-  agents: '.agents/skills'
-};
 
 /** A filesystem identity after symlink resolution. */
 export type SkillFileId = string;
@@ -288,34 +280,36 @@ export class SkillRootWalker {
 }
 
 export interface LocalSkillCatalogScannerOptions {
-  homeDirectory?: string;
-  rootOverrides?: Partial<Record<SkillRoot, string>>;
+  homeDirectory?: SkillFilesystemLayoutOptions['homeDirectory'];
+  rootOverrides?: SkillFilesystemLayoutOptions['rootOverrides'];
+  filesystem?: SkillFilesystemLayout;
   walker?: SkillRootWalker;
   contentHasher?: SkillContentHashingType;
 }
 
 /** Filesystem-backed scanner used by the main process to list installed skills. */
 export class LocalSkillCatalogScanner {
-  private readonly rootPaths: Readonly<Record<SkillRoot, string>>;
+  private readonly filesystem: SkillFilesystemLayout;
   private readonly walker: SkillRootWalker;
   private readonly deduplicator: SkillDeduplicator;
 
   constructor(options: LocalSkillCatalogScannerOptions = {}) {
-    const homeDirectory = path.resolve(options.homeDirectory ?? os.homedir());
-    this.rootPaths = Object.fromEntries(
-      SKILL_ROOTS.map((root) => [
-        root,
-        path.resolve(options.rootOverrides?.[root] ?? path.join(homeDirectory, ROOT_RELATIVE_PATHS[root]))
-      ])
-    ) as Record<SkillRoot, string>;
+    this.filesystem = options.filesystem ?? new SkillFilesystemLayout(options);
     this.walker = options.walker ?? new SkillRootWalker();
     this.deduplicator = new SkillDeduplicator(options.contentHasher);
   }
 
   /** Scans all roots in priority order and returns one object per deduplicated skill. */
   async scanInstalledSkills(): Promise<InstalledSkill[]> {
-    const discovered = SKILL_ROOTS.flatMap((root) => this.walker.walk(root, this.rootPaths[root]));
+    const discovered = SKILL_ROOTS.flatMap((root) =>
+      this.walker.walk(root, this.filesystem.getRootPath(root))
+    );
     return this.deduplicator.deduplicate(discovered);
+  }
+
+  /** Exposes the shared path layout to filesystem-backed skill operations. */
+  getFilesystem(): SkillFilesystemLayout {
+    return this.filesystem;
   }
 }
 

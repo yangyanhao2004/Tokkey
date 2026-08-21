@@ -12,6 +12,9 @@ export interface AppInfo {
 export interface TokieApi {
   getAppInfo(): Promise<AppInfo>;
   getInstalledSkills(): Promise<InstalledSkill[]>;
+  getSkillAgentSelection(skillId: string): Promise<SkillAgentSelection>;
+  applySkillAgentSelection(skillId: string, selectedAgents: SkillAgent[]): Promise<InstalledSkill[]>;
+  uninstallSkill(skillId: string): Promise<InstalledSkill[]>;
 }
 
 /** Filesystem roots whose contents are visible to the supported agents. */
@@ -40,6 +43,12 @@ export interface SkillInstallation {
 export interface SkillAgentBadge {
   agent: SkillAgent;
   state: 'checked' | 'unchecked';
+}
+
+/** Current agent selection for a skill-management dialog. */
+export interface SkillAgentSelection {
+  skill: InstalledSkill;
+  selectedAgents: SkillAgent[];
 }
 
 /** A serializable, deduplicated skill record ready for frontend rendering. */
