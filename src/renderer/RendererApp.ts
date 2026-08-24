@@ -5,7 +5,10 @@ type McpConnectionType = InstalledMcp['connectionType'];
 type McpConfigurationDraft = Parameters<Window['tokiie']['prepareMcpConfiguration']>[0];
 type McpConfigurationPreparation = ReturnType<Window['tokiie']['prepareMcpConfiguration']>;
 type ApplyMcpConfigurationRequest = Parameters<Window['tokiie']['applyMcpConfiguration']>[0];
-type CatalogMode = 'skills' | 'mcps';
+type LocalModelCatalogScan = Awaited<ReturnType<Window['tokiie']['listLocalModels']>>;
+type LocalModelRow = LocalModelCatalogScan['models'][number];
+type LocalModelProvider = LocalModelCatalogScan['selectedProvider'];
+type CatalogMode = 'skills' | 'mcps' | 'models';
 type McpEditorMode = 'wizard' | 'json';
 
 const MCP_AGENT_ORDER: readonly McpAgent[] = ['claudeCode', 'hermes', 'codex'];
@@ -115,21 +118,49 @@ class SkillsAndMcpsViewModel {
   private readonly scan: () => Promise<McpCatalogScan>;
   private readonly prepare: (draft: McpConfigurationDraft) => McpConfigurationPreparation;
   private readonly apply: (request: ApplyMcpConfigurationRequest) => Promise<McpCatalogScan>;
+  private readonly scanModels: (request?: Parameters<Window['tokiie']['listLocalModels']>[0]) => Promise<LocalModelCatalogScan>;
+  private readonly refreshModels: (request?: Parameters<Window['tokiie']['refreshLocalModels']>[0]) => Promise<LocalModelCatalogScan>;
+  private readonly startModelDownload: (modelId: string) => Promise<LocalModelCatalogScan>;
+  private readonly cancelModelDownload: (modelId: string) => Promise<LocalModelCatalogScan>;
+  private readonly deleteModel: (modelId: string) => Promise<LocalModelCatalogScan>;
+  private readonly deployModel: (modelId: string) => Promise<LocalModelCatalogScan>;
   private isLoading = false;
   private selectedMode: CatalogMode = 'mcps';
   private searchQuery = '';
   private installedMcps: InstalledMcp[] = [];
   private failures: McpCatalogScan['failures'] = [];
   private presentedAddition: AddMcpPresentation | null = null;
+  private localModelScan: LocalModelCatalogScan = {
+    providers: [],
+    selectedProvider: 'all',
+    models: [],
+    capability: { target: 'mac', freeDiskBytes: null, totalRamBytes: null, platform: 'unknown' },
+    failures: []
+  };
+  private localModelQuery = '';
+  private localModelProvider: LocalModelProvider = 'all';
+  private isLoadingModels = false;
 
   constructor(options: {
     scan: () => Promise<McpCatalogScan>;
     prepare: (draft: McpConfigurationDraft) => McpConfigurationPreparation;
     apply: (request: ApplyMcpConfigurationRequest) => Promise<McpCatalogScan>;
+    scanModels: (request?: Parameters<Window['tokiie']['listLocalModels']>[0]) => Promise<LocalModelCatalogScan>;
+    refreshModels: (request?: Parameters<Window['tokiie']['refreshLocalModels']>[0]) => Promise<LocalModelCatalogScan>;
+    startModelDownload: (modelId: string) => Promise<LocalModelCatalogScan>;
+    cancelModelDownload: (modelId: string) => Promise<LocalModelCatalogScan>;
+    deleteModel: (modelId: string) => Promise<LocalModelCatalogScan>;
+    deployModel: (modelId: string) => Promise<LocalModelCatalogScan>;
   }) {
     this.scan = options.scan;
     this.prepare = options.prepare;
     this.apply = options.apply;
+    this.scanModels = options.scanModels;
+    this.refreshModels = options.refreshModels;
+    this.startModelDownload = options.startModelDownload;
+    this.cancelModelDownload = options.cancelModelDownload;
+    this.deleteModel = options.deleteModel;
+    this.deployModel = options.deployModel;
   }
 
   get mode(): CatalogMode {
@@ -152,13 +183,36 @@ class SkillsAndMcpsViewModel {
     return this.presentedAddition;
   }
 
+  get modelScan(): LocalModelCatalogScan {
+    return {
+      ...this.localModelScan,
+      providers: [...this.localModelScan.providers],
+      models: [...this.localModelScan.models],
+      failures: [...this.localModelScan.failures]
+    };
+  }
+
+  get modelProvider(): LocalModelProvider {
+    return this.localModelProvider;
+  }
+
+  get modelQuery(): string {
+    return this.localModelQuery;
+  }
+
+  get modelsLoading(): boolean {
+    return this.isLoadingModels;
+  }
+
   selectMode(mode: CatalogMode): Promise<void> {
     if (mode === this.selectedMode) {
       return Promise.resolve();
     }
     this.selectedMode = mode;
     this.searchQuery = '';
-    return mode === 'mcps' ? this.loadInstalledMcps() : Promise.resolve();
+    if (mode === 'mcps') return this.loadInstalledMcps();
+    if (mode === 'models') return this.loadLocalModels();
+    return Promise.resolve();
   }
 
   setSearchQuery(query: string): void {
@@ -175,6 +229,54 @@ class SkillsAndMcpsViewModel {
 
   refresh(): Promise<void> {
     return this.loadInstalledMcps();
+  }
+
+  refreshModelsCatalog(): Promise<void> {
+    return this.loadLocalModels(true);
+  }
+
+  pollModels(): Promise<void> {
+    return this.loadLocalModels();
+  }
+
+  setModelQuery(query: string): void {
+    this.localModelQuery = query;
+  }
+
+  setModelProvider(provider: LocalModelProvider): Promise<void> {
+    this.localModelProvider = provider;
+    return this.loadLocalModels();
+  }
+
+  filteredModels(): LocalModelRow[] {
+    const query = this.localModelQuery.trim().toLocaleLowerCase();
+    const provider = this.localModelProvider.toLocaleLowerCase();
+    return this.localModelScan.models.filter((model) => {
+      const providerMatches = provider === 'all' || model.provider.toLocaleLowerCase() === provider;
+      const queryMatches = query.length === 0 || `${model.name} ${model.series} ${model.provider} ${model.fileName}`.toLocaleLowerCase().includes(query);
+      return providerMatches && queryMatches;
+    });
+  }
+
+  async startModel(modelId: string): Promise<void> {
+    this.isLoadingModels = true;
+    try {
+      this.localModelScan = await this.startModelDownload(modelId);
+    } finally {
+      this.isLoadingModels = false;
+    }
+  }
+
+  async cancelModel(modelId: string): Promise<void> {
+    this.localModelScan = await this.cancelModelDownload(modelId);
+  }
+
+  async deleteLocalModel(modelId: string): Promise<void> {
+    this.localModelScan = await this.deleteModel(modelId);
+  }
+
+  async deployLocalModel(modelId: string): Promise<void> {
+    this.localModelScan = await this.deployModel(modelId);
   }
 
   beginAddingMcp(): boolean {
@@ -336,6 +438,19 @@ class SkillsAndMcpsViewModel {
       this.failures = MCP_AGENT_ORDER.map((agent) => ({ agent, message }));
     } finally {
       this.isLoading = false;
+    }
+  }
+
+  private async loadLocalModels(forceRefresh = false): Promise<void> {
+    if (this.isLoadingModels) return;
+    this.isLoadingModels = true;
+    try {
+      const request = { provider: this.localModelProvider, query: this.localModelQuery };
+      this.localModelScan = forceRefresh ? await this.refreshModels(request) : await this.scanModels(request);
+    } catch (error) {
+      this.localModelScan = { ...this.localModelScan, failures: [error instanceof Error ? error.message : String(error)] };
+    } finally {
+      this.isLoadingModels = false;
     }
   }
 }
@@ -702,6 +817,7 @@ class RendererApp {
   private readonly viewModel: SkillsAndMcpsViewModel;
   private detailDialog: HTMLDialogElement | null = null;
   private addDialog: AddMcpDialog | null = null;
+  private modelPollTimer: number | null = null;
 
   constructor() {
     const rootElement = document.getElementById('app');
@@ -712,13 +828,25 @@ class RendererApp {
     this.viewModel = new SkillsAndMcpsViewModel({
       scan: () => window.tokiie.getInstalledMcps(),
       prepare: (draft) => window.tokiie.prepareMcpConfiguration(draft),
-      apply: (request) => window.tokiie.applyMcpConfiguration(request)
+      apply: (request) => window.tokiie.applyMcpConfiguration(request),
+      scanModels: (request) => window.tokiie.listLocalModels(request),
+      refreshModels: (request) => window.tokiie.refreshLocalModels(request),
+      startModelDownload: (modelId) => window.tokiie.startLocalModelDownload(modelId),
+      cancelModelDownload: (modelId) => window.tokiie.cancelLocalModelDownload(modelId),
+      deleteModel: (modelId) => window.tokiie.deleteLocalModel(modelId),
+      deployModel: (modelId) => window.tokiie.deployLocalModel(modelId)
     });
   }
 
   /** Loads the selected MCP mode and paints the initial catalog. */
   async start(): Promise<void> {
     await this.viewModel.refresh();
+    // DownloadItem progress lives in the main process, so poll the lightweight lifecycle projection while visible.
+    this.modelPollTimer = window.setInterval(() => {
+      if (this.viewModel.mode === 'models' && !this.viewModel.modelsLoading) {
+        void this.viewModel.pollModels().then(() => this.render());
+      }
+    }, 1000);
     this.render();
   }
 
@@ -732,7 +860,9 @@ class RendererApp {
     page.append(
       this.createHeader(),
       this.createModeSwitcher(),
-      this.viewModel.mode === 'mcps' ? this.createMcpPanel() : this.createSkillsPanel()
+      this.viewModel.mode === 'mcps'
+        ? this.createMcpPanel()
+        : this.viewModel.mode === 'models' ? this.createModelsPanel() : this.createSkillsPanel()
     );
     return page;
   }
@@ -745,10 +875,10 @@ class RendererApp {
     eyebrow.textContent = 'Settings';
     const title = document.createElement('h1');
     title.className = 'app__title';
-    title.textContent = 'Skills & MCPs';
+    title.textContent = 'Skills, MCPs & Models';
     const subtitle = document.createElement('p');
     subtitle.className = 'app__subtitle';
-    subtitle.textContent = 'Manage the tools available to your agents.';
+    subtitle.textContent = 'Manage local models and the tools available to your agents.';
     header.append(eyebrow, title, subtitle);
     return header;
   }
@@ -757,11 +887,11 @@ class RendererApp {
     const nav = document.createElement('nav');
     nav.className = 'mode-switcher';
     nav.setAttribute('aria-label', 'Settings sections');
-    for (const mode of ['skills', 'mcps'] as const) {
+    for (const mode of ['skills', 'mcps', 'models'] as const) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = `mode-switcher__button${this.viewModel.mode === mode ? ' mode-switcher__button--selected' : ''}`;
-      button.textContent = mode === 'skills' ? 'Skills' : 'MCPs';
+      button.textContent = mode === 'skills' ? 'Skills' : mode === 'mcps' ? 'MCPs' : 'Models';
       button.setAttribute('aria-pressed', String(this.viewModel.mode === mode));
       button.addEventListener('click', () => {
         void this.viewModel.selectMode(mode).then(() => this.render());
@@ -952,6 +1082,217 @@ class RendererApp {
     message.textContent = 'Skill discovery and installation are available from the Skills section.';
     panel.append(title, message);
     return panel;
+  }
+
+  private createModelsPanel(): HTMLElement {
+    const scan = this.viewModel.modelScan;
+    const panel = document.createElement('section');
+    panel.className = 'catalog-panel model-panel';
+    const toolbar = document.createElement('div');
+    toolbar.className = 'catalog-toolbar model-toolbar';
+    const search = document.createElement('label');
+    search.className = 'search-field';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.placeholder = 'Search local models';
+    searchInput.value = this.viewModel.modelQuery;
+    searchInput.addEventListener('input', () => {
+      const caret = searchInput.selectionStart ?? searchInput.value.length;
+      this.viewModel.setModelQuery(searchInput.value);
+      this.render();
+      const next = this.rootElement.querySelector<HTMLInputElement>('.model-toolbar input[type="search"]');
+      next?.focus();
+      next?.setSelectionRange(caret, caret);
+    });
+    search.append(searchInput);
+    const providerSelect = document.createElement('select');
+    providerSelect.className = 'model-provider-select';
+    providerSelect.setAttribute('aria-label', 'Model provider');
+    [['all', 'All providers'], ...scan.providers.map((provider) => [provider, provider] as [string, string])].forEach(([value, label]) => {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      option.selected = value === this.viewModel.modelProvider;
+      providerSelect.append(option);
+    });
+    providerSelect.addEventListener('change', () => {
+      void this.viewModel.setModelProvider(providerSelect.value as LocalModelProvider).then(() => this.render());
+    });
+    const refreshButton = document.createElement('button');
+    refreshButton.type = 'button';
+    refreshButton.className = 'button button--secondary';
+    refreshButton.textContent = this.viewModel.modelsLoading ? 'Refreshing...' : 'Refresh catalog';
+    refreshButton.disabled = this.viewModel.modelsLoading;
+    refreshButton.addEventListener('click', () => {
+      void this.viewModel.refreshModelsCatalog().then(() => this.render());
+    });
+    const actions = document.createElement('div');
+    actions.className = 'catalog-toolbar__actions';
+    actions.append(providerSelect, refreshButton);
+    toolbar.append(search, actions);
+    panel.append(toolbar, this.createModelCapability(scan), this.createModelContent());
+    return panel;
+  }
+
+  private createModelCapability(scan: LocalModelCatalogScan): HTMLElement {
+    const summary = document.createElement('div');
+    summary.className = 'model-capability';
+    const target = document.createElement('strong');
+    target.textContent = 'This Mac';
+    const disk = document.createElement('span');
+    disk.textContent = scan.capability.freeDiskBytes === null
+      ? 'Disk space unavailable'
+      : `${this.formatBytes(scan.capability.freeDiskBytes)} free`;
+    const ram = document.createElement('span');
+    ram.textContent = scan.capability.totalRamBytes === null
+      ? 'Memory unavailable'
+      : `${this.formatBytes(scan.capability.totalRamBytes)} RAM`;
+    summary.append(target, disk, ram);
+    return summary;
+  }
+
+  private createModelContent(): HTMLElement {
+    const content = document.createElement('div');
+    content.className = 'catalog-content';
+    const models = this.viewModel.filteredModels();
+    if (models.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'empty-state';
+      const title = document.createElement('h2');
+      title.textContent = this.viewModel.modelQuery.trim() ? 'No model matches' : 'No local models yet';
+      const message = document.createElement('p');
+      message.textContent = this.viewModel.modelScan.failures.length > 0
+        ? this.viewModel.modelScan.failures.join(' ')
+        : 'Refresh the catalog to load available models.';
+      empty.append(title, message);
+      content.append(empty);
+    } else {
+      const grid = document.createElement('div');
+      grid.className = 'model-grid';
+      models.forEach((model) => grid.append(this.createModelCard(model)));
+      content.append(grid);
+    }
+    return content;
+  }
+
+  private createModelCard(model: LocalModelRow): HTMLElement {
+    const card = document.createElement('article');
+    card.className = `model-card model-card--${model.lifecycle}`;
+    const header = document.createElement('div');
+    header.className = 'model-card__header';
+    const titleWrap = document.createElement('div');
+    const title = document.createElement('h2');
+    title.className = 'model-card__title';
+    title.textContent = model.name;
+    const series = document.createElement('p');
+    series.className = 'model-card__series';
+    series.textContent = `${model.provider} / ${model.series}`;
+    titleWrap.append(title, series);
+    const state = document.createElement('span');
+    state.className = `model-state model-state--${model.lifecycle}`;
+    state.textContent = this.modelLifecycleLabel(model.lifecycle);
+    header.append(titleWrap, state);
+    const metadata = document.createElement('div');
+    metadata.className = 'model-card__metadata';
+    metadata.append(this.createModelMeta('Disk', model.sizeBytes === null ? 'Unknown' : this.formatBytes(model.sizeBytes)), this.createModelMeta('RAM', model.requiredRamBytes === null ? 'Unknown' : this.formatBytes(model.requiredRamBytes)), this.createModelMeta('File', model.fileName));
+    card.append(header, metadata);
+    if (model.progress !== null && model.lifecycle === 'downloading') {
+      const progress = document.createElement('progress');
+      progress.className = 'model-progress';
+      progress.max = 1;
+      progress.value = model.progress;
+      const progressLabel = document.createElement('span');
+      progressLabel.className = 'model-progress__label';
+      progressLabel.textContent = `${Math.round(model.progress * 100)}%`;
+      card.append(progress, progressLabel);
+    }
+    if (model.error) {
+      const error = document.createElement('p');
+      error.className = 'model-card__error';
+      error.textContent = model.error;
+      card.append(error);
+    }
+    const actions = document.createElement('div');
+    actions.className = 'model-card__actions';
+    if (model.lifecycle === 'downloadable' || model.lifecycle === 'downloadFailed') {
+      actions.append(this.createModelAction(model.lifecycle === 'downloadFailed' ? 'Retry download' : 'Download', async () => {
+        await this.viewModel.startModel(model.id);
+        this.render();
+      }));
+    } else if (model.lifecycle === 'downloading') {
+      actions.append(this.createModelAction('Cancel', async () => {
+        await this.viewModel.cancelModel(model.id);
+        this.render();
+      }, 'button button--secondary'));
+    } else if (model.lifecycle === 'downloaded' || model.lifecycle === 'deployed') {
+      if (model.lifecycle === 'downloaded') {
+        actions.append(this.createModelAction('Deploy', async () => {
+          await this.viewModel.deployLocalModel(model.id);
+          this.render();
+        }));
+      }
+      actions.append(this.createModelAction('Delete', async () => {
+        await this.viewModel.deleteLocalModel(model.id);
+        this.render();
+      }, 'button button--quiet'));
+    }
+    if (model.lifecycle === 'unsupported') {
+      const unsupported = document.createElement('span');
+      unsupported.className = 'model-card__unsupported';
+      unsupported.textContent = 'Unavailable for this Mac';
+      actions.append(unsupported);
+    }
+    card.append(actions);
+    return card;
+  }
+
+  private createModelMeta(label: string, value: string): HTMLElement {
+    const meta = document.createElement('span');
+    meta.className = 'model-meta';
+    meta.textContent = `${label}: ${value}`;
+    return meta;
+  }
+
+  private createModelAction(label: string, action: () => Promise<void>, className = 'button button--primary'): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = className;
+    button.textContent = label;
+    button.addEventListener('click', () => {
+      button.disabled = true;
+      void action().catch((error) => {
+        console.error(error);
+        this.render();
+      });
+    });
+    return button;
+  }
+
+  private modelLifecycleLabel(lifecycle: LocalModelRow['lifecycle']): string {
+    const labels: Record<LocalModelRow['lifecycle'], string> = {
+      downloadable: 'Ready',
+      pendingArtifact: 'Loading',
+      downloading: 'Downloading',
+      downloaded: 'Downloaded',
+      downloadFailed: 'Retry available',
+      deployPreparing: 'Starting',
+      deployed: 'Running',
+      deployStopping: 'Stopping',
+      deployFailed: 'Deploy failed',
+      unsupported: 'Unavailable'
+    };
+    return labels[lifecycle];
+  }
+
+  private formatBytes(bytes: number): string {
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let index = 0;
+    while (value >= 1024 && index < units.length - 1) {
+      value /= 1024;
+      index += 1;
+    }
+    return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
   }
 }
 

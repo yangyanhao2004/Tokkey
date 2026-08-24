@@ -57,6 +57,7 @@ export default class TokiieApp {
 
   /** Creates the first window once Electron has finished initialising. */
   onReady(): void {
+    this.ipcController.attachModelDownloadSession();
     this.createMainWindow();
   }
 

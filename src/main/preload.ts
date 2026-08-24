@@ -27,7 +27,13 @@ class PreloadBridge {
       searchSkills: (query) => ipcRenderer.invoke('discover-skills:search', query),
       refreshSkillsInstalledStatus: () => ipcRenderer.invoke('discover-skills:refresh-installed'),
       getSkillCardState: (listing) => ipcRenderer.invoke('discover-skills:card-state', listing),
-      installSkill: (request) => ipcRenderer.invoke('discover-skills:install', request)
+      installSkill: (request) => ipcRenderer.invoke('discover-skills:install', request),
+      listLocalModels: (request) => ipcRenderer.invoke('models:list', request),
+      refreshLocalModels: (request) => ipcRenderer.invoke('models:refresh', request),
+      startLocalModelDownload: (modelId) => ipcRenderer.invoke('models:start-download', modelId),
+      cancelLocalModelDownload: (modelId) => ipcRenderer.invoke('models:cancel-download', modelId),
+      deleteLocalModel: (modelId) => ipcRenderer.invoke('models:delete', modelId),
+      deployLocalModel: (modelId) => ipcRenderer.invoke('models:deploy', modelId)
     };
     contextBridge.exposeInMainWorld('tokiie', api);
   }

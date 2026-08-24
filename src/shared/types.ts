@@ -122,6 +122,75 @@ export interface TokiieApi {
   refreshSkillsInstalledStatus(): Promise<void>;
   getSkillCardState(listing: SkillsShSkill): Promise<SkillsShCardState>;
   installSkill(request: SkillsShInstallRequest): Promise<SkillsShInstallResult>;
+  listLocalModels(request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
+  refreshLocalModels(request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
+  startLocalModelDownload(modelId: string): Promise<LocalModelCatalogScan>;
+  cancelLocalModelDownload(modelId: string): Promise<LocalModelCatalogScan>;
+  deleteLocalModel(modelId: string): Promise<LocalModelCatalogScan>;
+  deployLocalModel(modelId: string): Promise<LocalModelCatalogScan>;
+}
+
+/** Supported catalog providers exposed by the remote catalog service. */
+export type LocalModelProvider = string;
+
+/** A single concrete model artifact shown in the local catalog. */
+export interface LocalModelDescriptor {
+  id: string;
+  provider: string;
+  series: string;
+  name: string;
+  fileName: string;
+  sizeBytes: number | null;
+  requiredRamBytes: number | null;
+  huggingFaceUrl: string | null;
+  modelScopeUrl: string | null;
+  downloadable: boolean;
+  sourceError: string | null;
+}
+
+/** Model lifecycle state projected by the main-process manager. */
+export type LocalModelLifecycle =
+  | 'downloadable'
+  | 'pendingArtifact'
+  | 'downloading'
+  | 'downloaded'
+  | 'downloadFailed'
+  | 'deployPreparing'
+  | 'deployed'
+  | 'deployStopping'
+  | 'deployFailed'
+  | 'unsupported';
+
+/** UI-ready model row with lifecycle and transfer information. */
+export interface LocalModelRow extends LocalModelDescriptor {
+  lifecycle: LocalModelLifecycle;
+  progress: number | null;
+  error: string | null;
+  endpoint: string | null;
+  isTargetSupported: boolean;
+}
+
+/** Local machine capability used for download gates and runtime display. */
+export interface LocalModelCapability {
+  target: 'mac';
+  freeDiskBytes: number | null;
+  totalRamBytes: number | null;
+  platform: string;
+}
+
+/** Catalog request shared by initial load and refresh. */
+export interface LocalModelCatalogRequest {
+  provider?: LocalModelProvider;
+  query?: string;
+}
+
+/** Complete local model catalog response. */
+export interface LocalModelCatalogScan {
+  providers: string[];
+  selectedProvider: LocalModelProvider;
+  models: LocalModelRow[];
+  capability: LocalModelCapability;
+  failures: string[];
 }
 
 /** Filesystem roots whose contents are visible to the supported agents. */

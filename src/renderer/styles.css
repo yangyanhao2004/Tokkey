@@ -306,6 +306,155 @@ button:disabled {
   font-size: 13px;
 }
 
+.model-toolbar {
+  align-items: stretch;
+}
+
+.model-provider-select {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
+  background: var(--color-surface);
+}
+
+.model-capability {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 14px 2px 18px;
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.model-capability strong {
+  color: var(--color-text);
+}
+
+.model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  max-height: calc(100vh - 300px);
+  padding: 2px;
+  overflow-y: auto;
+}
+
+.model-card {
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-surface);
+}
+
+.model-card--unsupported {
+  color: #7d848c;
+  background: #f7f8fa;
+}
+
+.model-card__header,
+.model-card__actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.model-card__title {
+  margin: 0;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-card__series {
+  margin: 4px 0 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.model-state {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: var(--color-surface-muted);
+  color: var(--color-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.model-state--downloaded,
+.model-state--deployed {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.model-state--downloading,
+.model-state--deployPreparing {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.model-state--downloadFailed,
+.model-state--deployFailed {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.model-card__metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 13px;
+  padding: 14px 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.model-meta {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-progress {
+  width: 100%;
+  height: 7px;
+  margin: 2px 0 5px;
+  accent-color: var(--color-accent);
+}
+
+.model-progress__label {
+  display: block;
+  color: var(--color-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+.model-card__error {
+  padding: 8px 10px;
+  margin: 0 0 12px;
+  border-radius: 5px;
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+  font-size: 12px;
+}
+
+.model-card__actions {
+  align-items: center;
+  margin-top: 3px;
+}
+
+.model-card__unsupported {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
 .detail-dialog {
   width: min(680px, calc(100vw - 40px));
   padding: 22px;
@@ -594,6 +743,11 @@ button:disabled {
   }
 
   .mcp-grid {
+    grid-template-columns: 1fr;
+    max-height: none;
+  }
+
+  .model-grid {
     grid-template-columns: 1fr;
     max-height: none;
   }

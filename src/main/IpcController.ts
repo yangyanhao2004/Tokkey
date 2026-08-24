@@ -19,6 +19,7 @@ import type {
   SkillInstallResult
 } from '../shared/types';
 import type { McpCatalogScan } from '../shared/types';
+import type { LocalModelCatalogRequest } from '../shared/types';
 import { McpConfigurationPreparer } from '../shared/McpConfiguration';
 import { LocalSkillCatalogScanner } from './mcpnskills/SkillCatalogScanner';
 import { SKILL_AGENT_ORDER, SkillDeployer } from './mcpnskills/SkillDeployer';
@@ -33,6 +34,7 @@ import LocalMcpCatalogScanner, { MCP_AGENT_ORDER } from './mcp/McpCatalogScanner
 import LocalMcpConfigurationApplier, {
   type McpConfigurationApplying
 } from './mcp/McpConfigurationApplier';
+import LocalModelManager from './models/LocalModelManager';
 
 type IpcHandler = (...args: unknown[]) => unknown;
 
@@ -48,6 +50,7 @@ export default class IpcController {
   private readonly discoverSkills: DiscoverSkillsService;
   private readonly mcpCatalogScanner: LocalMcpCatalogScanner;
   private readonly mcpConfigurationApplier: McpConfigurationApplying;
+  private readonly localModelManager: LocalModelManager;
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
   constructor(
@@ -56,7 +59,8 @@ export default class IpcController {
     discoverRepositories: DiscoverRepositories | null = null,
     discoverSkills: DiscoverSkillsService | null = null,
     mcpCatalogScanner: LocalMcpCatalogScanner | null = null,
-    mcpConfigurationApplier: McpConfigurationApplying | null = null
+    mcpConfigurationApplier: McpConfigurationApplying | null = null,
+    localModelManager: LocalModelManager | null = null
   ) {
     this.skillCatalogScanner = skillCatalogScanner;
     this.skillDeployer = skillDeployer;
@@ -67,6 +71,7 @@ export default class IpcController {
     });
     this.mcpCatalogScanner = mcpCatalogScanner ?? new LocalMcpCatalogScanner();
     this.mcpConfigurationApplier = mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
+    this.localModelManager = localModelManager ?? new LocalModelManager();
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
@@ -95,8 +100,19 @@ export default class IpcController {
       'discover-skills:card-state': (listing: unknown) =>
         this.getSkillCardState(this.requireSkillsShSkill(listing)),
       'discover-skills:install': (request: unknown) =>
-        this.installSkill(this.requireSkillsShInstallRequest(request))
+        this.installSkill(this.requireSkillsShInstallRequest(request)),
+      'models:list': (request: unknown) => this.listLocalModels(this.requireModelRequest(request)),
+      'models:refresh': (request: unknown) => this.refreshLocalModels(this.requireModelRequest(request)),
+      'models:start-download': (modelId: unknown) => this.startLocalModelDownload(this.requireModelId(modelId)),
+      'models:cancel-download': (modelId: unknown) => this.cancelLocalModelDownload(this.requireModelId(modelId)),
+      'models:delete': (modelId: unknown) => this.deleteLocalModel(this.requireModelId(modelId)),
+      'models:deploy': (modelId: unknown) => this.deployLocalModel(this.requireModelId(modelId))
     };
+  }
+
+  /** Connects native Electron downloads after app.whenReady(). */
+  attachModelDownloadSession(): void {
+    this.localModelManager.attachDownloadSession();
   }
 
   /** Registers every handler on ipcMain. Call once, before any window opens. */
@@ -149,6 +165,36 @@ export default class IpcController {
   async applyMcpConfiguration(request: ApplyMcpConfigurationRequest): Promise<McpCatalogScan> {
     await this.mcpConfigurationApplier.apply(request.configurationJson, request.selectedAgents);
     return this.scanInstalledMcps();
+  }
+
+  /** Lists cached or freshly fetched local model rows and their target capability. */
+  listLocalModels(request: LocalModelCatalogRequest = {}) {
+    return this.localModelManager.list(request);
+  }
+
+  /** Forces a provider refresh while preserving the selected renderer filters. */
+  refreshLocalModels(request: LocalModelCatalogRequest = {}) {
+    return this.localModelManager.refresh(request);
+  }
+
+  /** Starts a model transfer through Electron's native DownloadItem pipeline. */
+  startLocalModelDownload(modelId: string) {
+    return this.localModelManager.startDownload(modelId);
+  }
+
+  /** Cancels the active native download and removes its local files. */
+  cancelLocalModelDownload(modelId: string) {
+    return this.localModelManager.cancelDownload(modelId);
+  }
+
+  /** Removes the downloaded model and all local lifecycle state. */
+  deleteLocalModel(modelId: string) {
+    return this.localModelManager.deleteModel(modelId);
+  }
+
+  /** Marks a downloaded model as deployed for the local target. */
+  deployLocalModel(modelId: string) {
+    return this.localModelManager.deployModel(modelId);
   }
 
   /** Returns the current selection derived from the skill's filesystem locations. */
@@ -359,6 +405,24 @@ export default class IpcController {
       enabledAgents: this.requireSkillAgents(request.enabledAgents),
       conflictStrategy
     };
+  }
+
+  private requireModelRequest(value: unknown): LocalModelCatalogRequest {
+    if (value === undefined || value === null) return {};
+    if (!value || typeof value !== 'object') throw new TypeError('Model catalog request must be an object');
+    const request = value as Record<string, unknown>;
+    const provider = request.provider;
+    if (provider !== undefined && (typeof provider !== 'string' || provider.trim().length === 0)) {
+      throw new TypeError(`Unsupported model provider: ${String(provider)}`);
+    }
+    return {
+      provider: provider as LocalModelCatalogRequest['provider'],
+      query: request.query === undefined ? undefined : this.requireString(request.query, 'Model query')
+    };
+  }
+
+  private requireModelId(value: unknown): string {
+    return this.requireString(value, 'Model ID');
   }
 
   private createDiscoverRepositories(): DiscoverRepositories {
