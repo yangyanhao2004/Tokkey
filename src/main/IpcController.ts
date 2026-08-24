@@ -2,6 +2,11 @@ import { app, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type {
   AppInfo,
   CachedRepository,
+  SkillsShCardState,
+  SkillsShInstallRequest,
+  SkillsShInstallResult,
+  SkillsShPage,
+  SkillsShSkill,
   InstallRepositorySkillRequest,
   InstalledSkill,
   RepositorySyncResult,
@@ -17,6 +22,7 @@ import RepositoryCloneCache from './mcpnskills/RepositoryCloneCache';
 import RepositorySkillScanner from './mcpnskills/RepositorySkillScanner';
 import SkillFolderImporter from './mcpnskills/SkillFolderImporter';
 import SkillInstaller from './mcpnskills/SkillInstaller';
+import DiscoverSkillsService from './mcpnskills/DiscoverSkillsService';
 
 type IpcHandler = (...args: unknown[]) => unknown;
 
@@ -29,15 +35,21 @@ export default class IpcController {
   private readonly skillCatalogScanner: LocalSkillCatalogScanner;
   private readonly skillDeployer: SkillDeployer;
   private readonly discoverRepositories: DiscoverRepositories;
+  private readonly discoverSkills: DiscoverSkillsService;
 
   constructor(
     skillCatalogScanner: LocalSkillCatalogScanner = new LocalSkillCatalogScanner(),
     skillDeployer: SkillDeployer = new SkillDeployer({ scanner: skillCatalogScanner }),
-    discoverRepositories: DiscoverRepositories | null = null
+    discoverRepositories: DiscoverRepositories | null = null,
+    discoverSkills: DiscoverSkillsService | null = null
   ) {
     this.skillCatalogScanner = skillCatalogScanner;
     this.skillDeployer = skillDeployer;
     this.discoverRepositories = discoverRepositories ?? this.createDiscoverRepositories();
+    this.discoverSkills = discoverSkills ?? new DiscoverSkillsService({
+      installedCatalog: skillCatalogScanner,
+      deployer: skillDeployer
+    });
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
@@ -54,7 +66,16 @@ export default class IpcController {
       'discover-repos:add': (input: unknown, branch: unknown) =>
         this.addRepository(this.requireString(input, 'Repository input'), this.requireOptionalString(branch)),
       'discover-repos:install-skill': (request: unknown) =>
-        this.installRepositorySkill(this.requireInstallRequest(request))
+        this.installRepositorySkill(this.requireInstallRequest(request)),
+      'discover-skills:fetch-page': (page: unknown) =>
+        this.fetchSkillsPage(this.requirePage(page)),
+      'discover-skills:search': (query: unknown) =>
+        this.searchSkills(this.requireString(query, 'skills.sh search query')),
+      'discover-skills:refresh-installed': () => this.refreshSkillsInstalledStatus(),
+      'discover-skills:card-state': (listing: unknown) =>
+        this.getSkillCardState(this.requireSkillsShSkill(listing)),
+      'discover-skills:install': (request: unknown) =>
+        this.installSkill(this.requireSkillsShInstallRequest(request))
     };
   }
 
@@ -125,6 +146,31 @@ export default class IpcController {
     return this.discoverRepositories.installSkill(request);
   }
 
+  /** Fetches one UI-sized skills.sh page through the main process. */
+  fetchSkillsPage(page: number): Promise<SkillsShPage> {
+    return this.discoverSkills.fetchSkillsPage(page);
+  }
+
+  /** Searches skills.sh only after the renderer submits a trimmed query. */
+  searchSkills(query: string): Promise<SkillsShSkill[]> {
+    return this.discoverSkills.searchSkills(query);
+  }
+
+  /** Rebuilds installed comparison indexes for both directory tabs. */
+  refreshSkillsInstalledStatus(): Promise<void> {
+    return this.discoverSkills.refreshInstalledStatus();
+  }
+
+  /** Returns the session-aware installed state for one directory listing. */
+  getSkillCardState(listing: SkillsShSkill): Promise<SkillsShCardState> {
+    return this.discoverSkills.getSkillCardState(listing);
+  }
+
+  /** Resolves, imports, and deploys one skills.sh listing. */
+  installSkill(request: SkillsShInstallRequest): Promise<SkillsShInstallResult> {
+    return this.discoverSkills.installSkill(request);
+  }
+
   private async findSkill(skillId: string): Promise<InstalledSkill> {
     const skill = (await this.getInstalledSkills()).find((candidate) => candidate.id === skillId);
     if (!skill) {
@@ -190,6 +236,58 @@ export default class IpcController {
       throw new TypeError('Git branch must be a string');
     }
     return value;
+  }
+
+  private requirePage(value: unknown): number {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+      throw new TypeError('skills.sh page must be a non-negative integer');
+    }
+    return value;
+  }
+
+  private requireSkillsShSkill(value: unknown): SkillsShSkill {
+    if (!value || typeof value !== 'object') {
+      throw new TypeError('skills.sh skill must be an object');
+    }
+    const listing = value as Record<string, unknown>;
+    const source = this.requireString(listing.source, 'skills.sh source');
+    const skillId = this.requireString(listing.skillId, 'skills.sh skill ID');
+    const name = this.requireString(listing.name, 'skills.sh skill name');
+    const sourceKind = listing.sourceKind;
+    if (sourceKind !== 'repository' && sourceKind !== 'site') {
+      throw new TypeError(`Unsupported skills.sh source kind: ${String(sourceKind)}`);
+    }
+    return {
+      id: this.requireString(listing.id, 'skills.sh listing ID'),
+      source,
+      skillId,
+      name,
+      installs: typeof listing.installs === 'number' ? listing.installs : 0,
+      isOfficial: listing.isOfficial === true,
+      sourceKind,
+      url: this.requireString(listing.url, 'skills.sh listing URL')
+    };
+  }
+
+  private requireSkillsShInstallRequest(value: unknown): SkillsShInstallRequest {
+    if (!value || typeof value !== 'object') {
+      throw new TypeError('skills.sh install request must be an object');
+    }
+    const request = value as Record<string, unknown>;
+    const conflictStrategy = request.conflictStrategy;
+    if (
+      conflictStrategy !== 'replace' &&
+      conflictStrategy !== 'keepBoth' &&
+      conflictStrategy !== 'skip' &&
+      conflictStrategy !== 'reportConflict'
+    ) {
+      throw new TypeError(`Unsupported skill conflict strategy: ${String(conflictStrategy)}`);
+    }
+    return {
+      listing: this.requireSkillsShSkill(request.listing),
+      enabledAgents: this.requireSkillAgents(request.enabledAgents),
+      conflictStrategy
+    };
   }
 
   private createDiscoverRepositories(): DiscoverRepositories {

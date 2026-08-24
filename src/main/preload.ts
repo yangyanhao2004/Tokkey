@@ -18,7 +18,12 @@ class PreloadBridge {
       uninstallSkill: (skillId) => ipcRenderer.invoke('skills:uninstall', skillId),
       listCachedRepositories: () => ipcRenderer.invoke('discover-repos:list-cached'),
       addRepository: (input, branch) => ipcRenderer.invoke('discover-repos:add', input, branch),
-      installRepositorySkill: (request) => ipcRenderer.invoke('discover-repos:install-skill', request)
+      installRepositorySkill: (request) => ipcRenderer.invoke('discover-repos:install-skill', request),
+      fetchSkillsPage: (page) => ipcRenderer.invoke('discover-skills:fetch-page', page),
+      searchSkills: (query) => ipcRenderer.invoke('discover-skills:search', query),
+      refreshSkillsInstalledStatus: () => ipcRenderer.invoke('discover-skills:refresh-installed'),
+      getSkillCardState: (listing) => ipcRenderer.invoke('discover-skills:card-state', listing),
+      installSkill: (request) => ipcRenderer.invoke('discover-skills:install', request)
     };
     contextBridge.exposeInMainWorld('tokiie', api);
   }

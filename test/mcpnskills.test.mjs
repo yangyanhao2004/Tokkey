@@ -135,6 +135,9 @@ test('scans repository skill namespaces while ignoring generated directories', (
     workspace.write('checkout/skills/alpha/SKILL.md', '---\nname: alpha\ndescription: Alpha\n---\n');
     workspace.write('checkout/skills/team/beta/SKILL.md', '---\nname: beta\ndescription: Beta\n---\n');
     workspace.write('checkout/skills/node_modules/ignored/SKILL.md', '---\nname: ignored\n---\n');
+    workspace.write('checkout/skills/cache.egg-info/ignored/SKILL.md', '---\nname: ignored-egg\n---\n');
+    workspace.write('checkout/skills/cmake-build-debug/ignored/SKILL.md', '---\nname: ignored-cmake\n---\n');
+    workspace.write('checkout/skills/tmp/ignored/SKILL.md', '---\nname: ignored-tmp\n---\n');
     const repository = new RepositorySkillScanner().scan(checkout, 'owner/repository', 'abc');
     assert.equal(repository.commit, 'abc');
     assert.deepEqual(repository.skills.map((skill) => skill.relativePath), [

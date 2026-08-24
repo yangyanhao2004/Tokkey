@@ -15,13 +15,14 @@ import type {
 } from '../../shared/types';
 import {
   SkillDeduplicator,
-  SKILL_ROOTS,
-  type SkillContentHashing as SkillContentHashingType
+  SKILL_ROOTS
 } from './SkillDeduplicator';
+import type { SkillContentHashing as SkillContentHashingType } from './SkillContentHasher';
 import { SkillFilesystemLayout, type SkillFilesystemLayoutOptions } from './SkillFilesystem';
 
-export { FileSkillContentHasher, SkillDeduplicator, SKILL_ROOTS } from './SkillDeduplicator';
-export type { SkillContentHashing } from './SkillDeduplicator';
+export { SkillDeduplicator, SKILL_ROOTS } from './SkillDeduplicator';
+export { FileSkillContentHasher } from './SkillContentHasher';
+export type { SkillContentHashing } from './SkillContentHasher';
 
 /** Maximum namespace depth below a skill root. */
 const MAX_SCAN_DEPTH = 3;
@@ -312,5 +313,8 @@ export class LocalSkillCatalogScanner {
     return this.filesystem;
   }
 }
+
+/** Compatibility name matching the directory workflow vocabulary. */
+export class InstalledSkillCatalog extends LocalSkillCatalogScanner {}
 
 export default LocalSkillCatalogScanner;

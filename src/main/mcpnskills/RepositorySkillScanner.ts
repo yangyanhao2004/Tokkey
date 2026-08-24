@@ -21,7 +21,9 @@ const IGNORED_DIRECTORY_NAMES = new Set([
   '.mypy_cache',
   '__pycache__',
   'coverage',
-  'out'
+  'out',
+  'pycache',
+  'tmp'
 ]);
 
 /** One skill folder found in a repository checkout. */
@@ -33,6 +35,7 @@ export interface ScrapedSkill {
   manifest: SkillManifest;
   source: string;
   relativePath: string;
+  repositoryRelativePath: string;
   absolutePath: string;
 }
 
@@ -49,7 +52,7 @@ export interface RepositorySkillScannerOptions {
   logger?: (message: string) => void;
 }
 
-/** Applies the repository-specific SKILL.md discovery rules. */
+/** Given a local checkout path, it walks the tree and returns every skill folder it finds */
 export class RepositorySkillScanner {
   private readonly manifestParser: SkillManifestParser;
   private readonly logger: (message: string) => void;
@@ -101,6 +104,44 @@ export class RepositorySkillScanner {
     return this.scan(checkoutPath, coordinate, commit);
   }
 
+  /** Scans a skills.sh site cache where each direct child is one published skill. */
+  scanSite(siteRootPath: string, source: string): ScrapedRepository {
+    const resolvedSiteRoot = path.resolve(siteRootPath);
+    if (this.isSymlink(resolvedSiteRoot) || !this.isDirectory(resolvedSiteRoot)) {
+      throw new Error(`Site cache does not exist: ${resolvedSiteRoot}`);
+    }
+    const skills: ScrapedSkill[] = [];
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(resolvedSiteRoot, { withFileTypes: true }).sort((left, right) =>
+        left.name.localeCompare(right.name)
+      );
+    } catch (error) {
+      throw new Error(`Unable to scan site cache ${resolvedSiteRoot}: ${this.describeError(error)}`);
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith('.')) {
+        continue;
+      }
+      const skillPath = path.join(resolvedSiteRoot, entry.name);
+      if (this.isSymlink(skillPath) || !this.isDirectory(skillPath) || !this.hasFile(path.join(skillPath, MANIFEST_FILE_NAME))) {
+        continue;
+      }
+      skills.push(this.makeSkill(skillPath, resolvedSiteRoot, {
+        owner: source,
+        name: source,
+        source,
+        cloneUrl: `https://${source}`
+      }));
+    }
+    return {
+      coordinate: { owner: source, name: source, source, cloneUrl: `https://${source}` },
+      checkoutPath: resolvedSiteRoot,
+      commit: null,
+      skills: skills.sort((left, right) => left.relativePath.localeCompare(right.relativePath))
+    };
+  }
+
   /** Infers owner/repo for direct scanner callers that already have a cache path. */
   private coordinateFromCheckoutPath(checkoutPath: string): RepositoryCoordinate {
     const repositoryName = path.basename(checkoutPath);
@@ -132,7 +173,7 @@ export class RepositorySkillScanner {
 
     const discovered: string[] = [];
     for (const entry of entries) {
-      if (entry.name.startsWith('.') || IGNORED_DIRECTORY_NAMES.has(entry.name)) {
+      if (entry.name.startsWith('.') || this.shouldIgnoreDirectory(entry.name)) {
         continue;
       }
       const entryPath = path.join(directoryPath, entry.name);
@@ -175,6 +216,7 @@ export class RepositorySkillScanner {
       manifest,
       source: coordinate.source,
       relativePath: relativePath || name,
+      repositoryRelativePath: relativePath || name,
       absolutePath: path.normalize(skillDirectoryPath)
     };
   }
@@ -185,6 +227,14 @@ export class RepositorySkillScanner {
     } catch {
       return false;
     }
+  }
+
+  private shouldIgnoreDirectory(name: string): boolean {
+    return IGNORED_DIRECTORY_NAMES.has(name) ||
+      name.endsWith('.egg-info') ||
+      name.endsWith('.xcodeproj') ||
+      name.endsWith('.xcworkspace') ||
+      name.startsWith('cmake-build-');
   }
 
   private isDirectory(directoryPath: string): boolean {

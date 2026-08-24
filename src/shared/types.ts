@@ -18,6 +18,11 @@ export interface TokiieApi {
   listCachedRepositories(): Promise<CachedRepository[]>;
   addRepository(input: string, branch?: string): Promise<RepositorySyncResult>;
   installRepositorySkill(request: InstallRepositorySkillRequest): Promise<SkillInstallResult>;
+  fetchSkillsPage(page: number): Promise<SkillsShPage>;
+  searchSkills(query: string): Promise<SkillsShSkill[]>;
+  refreshSkillsInstalledStatus(): Promise<void>;
+  getSkillCardState(listing: SkillsShSkill): Promise<SkillsShCardState>;
+  installSkill(request: SkillsShInstallRequest): Promise<SkillsShInstallResult>;
 }
 
 /** Filesystem roots whose contents are visible to the supported agents. */
@@ -117,8 +122,56 @@ export interface InstallRepositorySkillRequest {
 
 /** Result returned after importing and linking a cached skill. */
 export interface SkillInstallResult {
-  status: 'installed' | 'reused' | 'replaced' | 'keptBoth' | 'skipped' | 'conflict';
+  status: 'installed' | 'alreadyInstalled' | 'reused' | 'replaced' | 'keptBoth' | 'skipped' | 'conflict';
   destinationPath: string | null;
   conflictPath: string | null;
   installedSkills: InstalledSkill[];
+}
+
+/** The source form used by skills.sh. */
+export type SkillsShSourceKind = 'repository' | 'site';
+
+/** One skill returned by skills.sh browse or search. */
+export interface SkillsShSkill {
+  id: string;
+  source: string;
+  skillId: string;
+  name: string;
+  installs: number;
+  isOfficial: boolean;
+  sourceKind: SkillsShSourceKind;
+  url: string;
+}
+
+/** One API-sized browse response from skills.sh. */
+export interface SkillsShPage {
+  skills: SkillsShSkill[];
+  total: number;
+  hasMore: boolean;
+  page: number;
+}
+
+/** The flat response returned by the skills.sh search endpoint. */
+export interface SkillsShSearchResult {
+  skills: SkillsShSkill[];
+  count: number;
+}
+
+/** Installed comparison for one skills.sh card. */
+export interface SkillsShCardState {
+  listing: SkillsShSkill;
+  installedSkill: InstalledSkill | null;
+}
+
+/** Renderer request for downloading and installing one skills.sh skill. */
+export interface SkillsShInstallRequest {
+  listing: SkillsShSkill;
+  enabledAgents: SkillAgent[];
+  conflictStrategy: SkillConflictStrategy;
+}
+
+/** Skills.sh install result; conflicts keep the resolved local folder available to the caller. */
+export interface SkillsShInstallResult extends SkillInstallResult {
+  listing: SkillsShSkill;
+  resolvedPath: string | null;
 }

@@ -109,7 +109,8 @@ export class RepositoryCloneCache {
     if (!this.isCheckoutPathSafe(checkoutPath)) {
       return false;
     }
-    if (!this.pathExists(path.join(checkoutPath, '.git'))) {
+    const gitMetadataPath = path.join(checkoutPath, '.git');
+    if (!this.pathExists(gitMetadataPath) || this.isSymbolicLink(gitMetadataPath)) {
       return false;
     }
     try {
@@ -186,6 +187,14 @@ export class RepositoryCloneCache {
     try {
       lstatSync(candidatePath);
       return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private isSymbolicLink(candidatePath: string): boolean {
+    try {
+      return lstatSync(candidatePath).isSymbolicLink();
     } catch {
       return false;
     }

@@ -47,6 +47,22 @@ export class SkillFolderImporter {
 
     const canonicalRoot = this.filesystem.getRootPath('amis');
     const requestedDestinationPath = this.filesystem.getCanonicalSkillPath(normalizedName);
+    if (path.resolve(normalizedSourcePath) === path.resolve(requestedDestinationPath)) {
+      return {
+        status: 'skipped',
+        destinationPath: requestedDestinationPath,
+        conflictPath: null
+      };
+    }
+    const destinationRelativeToSource = path.relative(normalizedSourcePath, requestedDestinationPath);
+    if (
+      destinationRelativeToSource !== '' &&
+      !destinationRelativeToSource.startsWith(`..${path.sep}`) &&
+      destinationRelativeToSource !== '..' &&
+      !path.isAbsolute(destinationRelativeToSource)
+    ) {
+      throw new Error(`Skill destination is inside source directory: ${requestedDestinationPath}`);
+    }
     if (this.pathExists(requestedDestinationPath)) {
       if (conflictStrategy === 'reportConflict') {
         return {
@@ -82,7 +98,8 @@ export class SkillFolderImporter {
         if (conflictStrategy !== 'replace') {
           throw new Error(`Skill destination became occupied during import: ${destinationPath}`);
         }
-        this.removePath(destinationPath);
+        this.replaceDestination(destinationPath, temporaryPath);
+        return { status, destinationPath, conflictPath: null };
       }
       renameSync(temporaryPath, destinationPath);
       return { status, destinationPath, conflictPath: null };
@@ -179,6 +196,27 @@ export class SkillFolderImporter {
 
   private removePath(candidatePath: string): void {
     rmSync(candidatePath, { recursive: true, force: false });
+  }
+
+  /** Replaces an occupied destination with rollback protection if publishing fails. */
+  private replaceDestination(destinationPath: string, temporaryPath: string): void {
+    const backupPath = path.join(
+      path.dirname(destinationPath),
+      `.amis-skill-backup-${randomUUID()}`
+    );
+    renameSync(destinationPath, backupPath);
+    try {
+      renameSync(temporaryPath, destinationPath);
+      this.removePath(backupPath);
+    } catch (error) {
+      if (this.pathExists(destinationPath)) {
+        this.removePath(destinationPath);
+      }
+      if (this.pathExists(backupPath)) {
+        renameSync(backupPath, destinationPath);
+      }
+      throw error;
+    }
   }
 
   private describeError(error: unknown): string {

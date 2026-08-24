@@ -100,7 +100,7 @@ export class SkillDeployer {
           if (
             this.pathExists(agentPath) &&
             this.isSymlink(agentPath) &&
-            this.isSkillPath(skill, agentPath, canonicalPath)
+            (this.isSkillPath(skill, agentPath, canonicalPath) || this.resolvePath(agentPath) === null)
           ) {
             this.removePath(agentPath);
           }
@@ -167,7 +167,8 @@ export class SkillDeployer {
       ...SKILL_AGENT_ORDER.flatMap((agent) => this.getAgentPaths(agent, relativePath))
     ];
     for (const candidatePath of candidatePaths) {
-      if (this.pathExists(candidatePath) && !this.isSkillPath(skill, candidatePath, canonicalPath)) {
+      const isBrokenLink = this.isSymlink(candidatePath) && this.resolvePath(candidatePath) === null;
+      if (this.pathExists(candidatePath) && !this.isSkillPath(skill, candidatePath, canonicalPath) && !isBrokenLink) {
         throw new Error(`Skill path is occupied by another skill: ${candidatePath}`);
       }
     }
@@ -194,9 +195,10 @@ export class SkillDeployer {
           const isPrimaryAgentSource = installation !== undefined &&
             installation === skill.primaryInstallation &&
             installation.root !== 'amis';
+          const isBrokenAgentLink = this.isSymlink(candidatePath) && this.resolvePath(candidatePath) === null;
           if (
-            this.isSkillPath(skill, candidatePath, canonicalPath) &&
-            (installation?.isSymlink === true || isPrimaryAgentSource)
+            (this.isSkillPath(skill, candidatePath, canonicalPath) || isBrokenAgentLink) &&
+            (installation?.isSymlink === true || isPrimaryAgentSource || isBrokenAgentLink)
           ) {
             this.removePath(candidatePath);
           }
@@ -221,13 +223,15 @@ export class SkillDeployer {
       }
       for (const candidatePath of candidatePaths) {
         if (candidatePath !== targetPath && this.pathExists(candidatePath)) {
-          if (!this.isSkillPath(skill, candidatePath, canonicalPath)) {
+          const isBrokenAgentLink = this.isSymlink(candidatePath) && this.resolvePath(candidatePath) === null;
+          if (!this.isSkillPath(skill, candidatePath, canonicalPath) && !isBrokenAgentLink) {
             throw new Error(`Agent path is occupied by another skill: ${candidatePath}`);
           }
           this.removePath(candidatePath);
         }
       }
-      if (this.pathExists(targetPath) && !this.isSkillPath(skill, targetPath, canonicalPath)) {
+      const isBrokenTarget = this.isSymlink(targetPath) && this.resolvePath(targetPath) === null;
+      if (this.pathExists(targetPath) && !this.isSkillPath(skill, targetPath, canonicalPath) && !isBrokenTarget) {
         throw new Error(`Agent path is occupied by another skill: ${targetPath}`);
       }
       this.ensureSymlink(targetPath, canonicalPath);
@@ -246,15 +250,26 @@ export class SkillDeployer {
       `.${path.basename(destinationPath)}.tokiie-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
     );
     mkdirSync(parentPath, { recursive: true });
+    let backupPath: string | null = null;
     try {
       cpSync(sourcePath, temporaryPath, { recursive: true, errorOnExist: true, force: false });
       if (this.pathExists(destinationPath)) {
-        this.removePath(destinationPath);
+        backupPath = path.join(parentPath, `.${path.basename(destinationPath)}.tokiie-backup-${Date.now()}`);
+        renameSync(destinationPath, backupPath);
       }
       renameSync(temporaryPath, destinationPath);
+      if (backupPath && this.pathExists(backupPath)) {
+        rmSync(backupPath, { recursive: true, force: true });
+      }
     } catch (error) {
       if (this.pathExists(temporaryPath)) {
         rmSync(temporaryPath, { recursive: true, force: true });
+      }
+      if (backupPath && this.pathExists(backupPath)) {
+        if (this.pathExists(destinationPath)) {
+          rmSync(destinationPath, { recursive: true, force: true });
+        }
+        renameSync(backupPath, destinationPath);
       }
       throw error;
     }
@@ -269,7 +284,7 @@ export class SkillDeployer {
       this.removePath(linkPath);
     }
     mkdirSync(path.dirname(linkPath), { recursive: true });
-    symlinkSync(canonicalPath, linkPath, 'dir');
+    symlinkSync(canonicalPath, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
   }
 
   private normalizeSelectedAgents(selectedAgents: Iterable<SkillAgent>): SkillAgent[] {

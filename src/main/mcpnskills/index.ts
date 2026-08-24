@@ -1,9 +1,9 @@
 export {
-  FileSkillContentHasher,
   SkillDeduplicator,
   SKILL_ROOTS
 } from './SkillDeduplicator';
-export { LocalSkillCatalogScanner, SkillManifestParser, SkillRootWalker } from './SkillCatalogScanner';
+export { default as FileSkillContentHasher } from './SkillContentHasher';
+export { InstalledSkillCatalog, LocalSkillCatalogScanner, SkillManifestParser, SkillRootWalker } from './SkillCatalogScanner';
 export { SkillDeployer, SkillDeploymentError, SKILL_AGENT_ORDER } from './SkillDeployer';
 export { SkillFilesystemLayout, SKILL_ROOT_RELATIVE_PATHS } from './SkillFilesystem';
 export { default as GitHubRepositoryCoordinate } from './GitHubRepositoryCoordinate';
@@ -14,6 +14,12 @@ export { default as CachedRepositoryCatalog, LocalCachedRepositoryCatalog } from
 export { default as SkillFolderImporter } from './SkillFolderImporter';
 export { default as SkillInstaller, RepositorySkillInstaller } from './SkillInstaller';
 export { default as DiscoverRepositories } from './DiscoverRepositories';
+export { default as SkillsShClient, SkillsShError } from './SkillsShClient';
+export { default as SiteSkillDownloader } from './SiteSkillDownloader';
+export { default as SkillSourceResolver } from './SkillSourceResolver';
+export { default as CachedSourceCatalog, LocalCachedSourceCatalog } from './CachedSourceCatalog';
+export { default as CachedInstalledSkillMatcher } from './CachedInstalledSkillMatcher';
+export { default as DiscoverSkillsService } from './DiscoverSkillsService';
 export type {
   DiscoveredSkill,
   LocalSkillCatalogScannerOptions,
@@ -21,7 +27,7 @@ export type {
 } from './SkillCatalogScanner';
 export type { SkillFilesystemLayoutOptions } from './SkillFilesystem';
 export type { SkillDeployerOptions } from './SkillDeployer';
-export type { SkillContentHashing } from './SkillDeduplicator';
+export type { SkillContentHashing } from './SkillContentHasher';
 export type {
   ScrapedRepository,
   ScrapedSkill,
@@ -34,6 +40,21 @@ export type { SkillFolderImporterOptions, SkillFolderImportResult } from './Skil
 export type { SkillInstallerOptions } from './SkillInstaller';
 export type { DiscoverRepositoriesOptions } from './DiscoverRepositories';
 export type {
+  SkillsShClientOptions,
+  SkillsShFetch,
+  SkillsShSleep
+} from './SkillsShClient';
+export type {
+  SiteSkillDownloaderOptions,
+  SiteSkillIndex,
+  SiteSkillIndexEntry,
+  SiteSkillDownload,
+  SiteSkillHttpClient
+} from './SiteSkillDownloader';
+export type { SkillSourceResolverOptions, ResolvedSkillSource } from './SkillSourceResolver';
+export type { CachedSourceCatalogOptions, CachedSource, CachedSourceSkill } from './CachedSourceCatalog';
+export type { DiscoverSkillsServiceOptions } from './DiscoverSkillsService';
+export type {
   CachedRepository,
   CachedRepositorySkill,
   InstallRepositorySkillRequest,
@@ -41,4 +62,13 @@ export type {
   RepositorySyncResult,
   SkillConflictStrategy,
   SkillInstallResult
+} from '../../shared/types';
+export type {
+  SkillsShCardState,
+  SkillsShInstallRequest,
+  SkillsShInstallResult,
+  SkillsShPage,
+  SkillsShSearchResult,
+  SkillsShSkill,
+  SkillsShSourceKind
 } from '../../shared/types';

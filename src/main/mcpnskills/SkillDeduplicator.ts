@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type {
   InstalledSkill,
@@ -8,6 +6,10 @@ import type {
   SkillRoot
 } from '../../shared/types';
 import type { DiscoveredSkill, SkillFileId } from './SkillCatalogScanner';
+import { FileSkillContentHasher, type SkillContentHashing } from './SkillContentHasher';
+
+export { FileSkillContentHasher } from './SkillContentHasher';
+export type { SkillContentHashing } from './SkillContentHasher';
 
 /** The scanner roots, ordered by preferred installation priority. */
 export const SKILL_ROOTS: readonly SkillRoot[] = [
@@ -18,7 +20,6 @@ export const SKILL_ROOTS: readonly SkillRoot[] = [
   'agents'
 ];
 
-const MANIFEST_FILE_NAME = 'SKILL.md';
 const AGENT_BADGE_ORDER: readonly SkillAgent[] = ['hermes', 'claudeCode', 'codex'];
 
 /** Agents that read each root. The Amis root is an app-owned source only. */
@@ -29,25 +30,6 @@ const ROOT_AGENTS: Readonly<Record<SkillRoot, readonly SkillAgent[]>> = {
   codex: ['codex'],
   agents: ['codex']
 };
-
-/** Provides a stable fingerprint for a skill's SKILL.md. */
-export interface SkillContentHashing {
-  contentHash(absolutePath: string): string | null;
-}
-
-/** Computes the SHA-256 fingerprint used only for physically distinct copies. */
-export class FileSkillContentHasher implements SkillContentHashing {
-  /** Hashes SKILL.md bytes and returns null when the file cannot be read. */
-  contentHash(absolutePath: string): string | null {
-    try {
-      return createHash('sha256')
-        .update(readFileSync(path.join(absolutePath, MANIFEST_FILE_NAME)))
-        .digest('hex');
-    } catch {
-      return null;
-    }
-  }
-}
 
 /** Collapses same-name discoveries only when identity or manifest bytes prove sameness. */
 export class SkillDeduplicator {

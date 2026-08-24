@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import type {
   CachedRepositorySkill,
@@ -12,12 +12,14 @@ import CachedRepositoryCatalog from './CachedRepositoryCatalog';
 import { SkillDeployer } from './SkillDeployer';
 import SkillFolderImporter from './SkillFolderImporter';
 import LocalSkillCatalogScanner from './SkillCatalogScanner';
+import CachedInstalledSkillMatcher from './CachedInstalledSkillMatcher';
 
 export interface SkillInstallerOptions {
   catalog: CachedRepositoryCatalog;
   installedCatalog: LocalSkillCatalogScanner;
   importer: SkillFolderImporter;
   deployer: SkillDeployer;
+  cachedInstalledMatcher?: CachedInstalledSkillMatcher;
 }
 
 /** Installs a cached repository card and then applies its complete agent selection. */
@@ -26,24 +28,25 @@ export class SkillInstaller {
   private readonly installedCatalog: LocalSkillCatalogScanner;
   private readonly importer: SkillFolderImporter;
   private readonly deployer: SkillDeployer;
+  private readonly cachedInstalledMatcher: CachedInstalledSkillMatcher;
 
   constructor(options: SkillInstallerOptions) {
     this.catalog = options.catalog;
     this.installedCatalog = options.installedCatalog;
     this.importer = options.importer;
     this.deployer = options.deployer;
+    this.cachedInstalledMatcher = options.cachedInstalledMatcher ?? new CachedInstalledSkillMatcher();
   }
 
   /** Resolves the source from cache state so renderer paths are never trusted. */
   async install(request: InstallRepositorySkillRequest): Promise<SkillInstallResult> {
     const sourceCard = await this.findSourceCard(request.source, request.relativePath);
     const installedSkills = await this.installedCatalog.scanInstalledSkills();
-    const duplicate = installedSkills.find(
-      (installedSkill) => installedSkill.name === sourceCard.name && this.hasMatchingManifest(sourceCard.absolutePath, installedSkill)
-    );
-    if (duplicate) {
+    const duplicate = this.cachedInstalledMatcher.findMatch(sourceCard.absolutePath, installedSkills);
+    if (duplicate && request.conflictStrategy === 'reportConflict') {
       const reconciledSkills = await this.deployer.applyAgentSelection(duplicate, request.enabledAgents);
       return {
+        // Keep the repository-tab compatibility status while the directory flow uses alreadyInstalled.
         status: 'reused',
         destinationPath: duplicate.primaryInstallation.absolutePath,
         conflictPath: null,
@@ -125,22 +128,6 @@ export class SkillInstaller {
     return skills.find((skill) =>
       skill.installations.some((installation) => path.resolve(installation.absolutePath) === normalizedDestination)
     ) ?? null;
-  }
-
-  private hasMatchingManifest(sourcePath: string, installedSkill: InstalledSkill): boolean {
-    let sourceManifest: Buffer;
-    try {
-      sourceManifest = readFileSync(path.join(sourcePath, 'SKILL.md'));
-    } catch {
-      return false;
-    }
-    return installedSkill.installations.some((installation) => {
-      try {
-        return sourceManifest.equals(readFileSync(path.join(installation.resolvedPath, 'SKILL.md')));
-      } catch {
-        return false;
-      }
-    });
   }
 
   private normalizeRelativePath(relativePath: string): string {

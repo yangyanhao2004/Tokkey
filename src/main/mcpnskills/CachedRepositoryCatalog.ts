@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, realpathSync, type Dirent } from 'node:fs';
+import { readdirSync, realpathSync, type Dirent } from 'node:fs';
 import path from 'node:path';
 import type {
   CachedRepository,
@@ -10,8 +10,7 @@ import LocalSkillCatalogScanner from './SkillCatalogScanner';
 import GitHubRepositoryCoordinate from './GitHubRepositoryCoordinate';
 import RepositoryCloneCache from './RepositoryCloneCache';
 import RepositorySkillScanner, { type ScrapedRepository, type ScrapedSkill } from './RepositorySkillScanner';
-
-const MANIFEST_FILE_NAME = 'SKILL.md';
+import CachedInstalledSkillMatcher from './CachedInstalledSkillMatcher';
 
 export interface CachedRepositoryCatalogOptions {
   cache?: RepositoryCloneCache;
@@ -19,13 +18,17 @@ export interface CachedRepositoryCatalogOptions {
   installedCatalog?: LocalSkillCatalogScanner;
   cacheRoot?: string;
   homeDirectory?: string;
+  cachedInstalledMatcher?: CachedInstalledSkillMatcher;
 }
 
 /** Read-only index of GitHub checkouts already present in the local cache. */
+/** It answers "what skills are available from repos I've
+  already downloaded, and which of them are already installed?" without touching Git or the network */
 export class CachedRepositoryCatalog {
   private readonly cache: RepositoryCloneCache;
   private readonly repositoryScanner: RepositorySkillScanner;
   private readonly installedCatalog: LocalSkillCatalogScanner | null;
+  private readonly cachedInstalledMatcher: CachedInstalledSkillMatcher;
 
   constructor(options: CachedRepositoryCatalogOptions = {}) {
     this.cache = options.cache ?? new RepositoryCloneCache({
@@ -34,6 +37,7 @@ export class CachedRepositoryCatalog {
     });
     this.repositoryScanner = options.scanner ?? new RepositorySkillScanner();
     this.installedCatalog = options.installedCatalog ?? null;
+    this.cachedInstalledMatcher = options.cachedInstalledMatcher ?? new CachedInstalledSkillMatcher();
   }
 
   /** Enumerates owner/repo directories without invoking Git or the network. */
@@ -132,9 +136,7 @@ export class CachedRepositoryCatalog {
   }
 
   private toCachedSkill(skill: ScrapedSkill, installedSkills: InstalledSkill[]): CachedRepositorySkill {
-    const matchingInstalledSkill = installedSkills.find(
-      (installedSkill) => installedSkill.name === skill.name && this.hasMatchingManifest(skill.absolutePath, installedSkill)
-    );
+    const matchingInstalledSkill = this.cachedInstalledMatcher.findMatch(skill.absolutePath, installedSkills);
     return {
       id: skill.id,
       name: skill.name,
@@ -146,25 +148,6 @@ export class CachedRepositoryCatalog {
       isInstalled: matchingInstalledSkill !== undefined,
       installedSkillId: matchingInstalledSkill?.id ?? null
     };
-  }
-
-  private hasMatchingManifest(sourcePath: string, installedSkill: InstalledSkill): boolean {
-    const sourceManifest = this.readManifest(sourcePath);
-    if (sourceManifest === null) {
-      return false;
-    }
-    return installedSkill.installations.some((installation) => {
-      const installedManifest = this.readManifest(installation.resolvedPath);
-      return installedManifest !== null && installedManifest.equals(sourceManifest);
-    });
-  }
-
-  private readManifest(skillPath: string): Buffer | null {
-    try {
-      return readFileSync(path.join(skillPath, MANIFEST_FILE_NAME));
-    } catch {
-      return null;
-    }
   }
 
   /** Prevents cache symlinks from making the catalog read outside its root. */
