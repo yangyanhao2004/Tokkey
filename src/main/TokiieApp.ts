@@ -87,7 +87,7 @@ export default class TokiieApp {
       minHeight: 480,
       // Avoid a white flash: show the window only once the page has painted.
       show: false,
-      backgroundColor: '#1e1e28',
+      backgroundColor: '#f5f6f8',
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),

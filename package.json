@@ -16,5 +16,8 @@
   "devDependencies": {
     "electron": "^43.4.1",
     "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5"
   }
 }

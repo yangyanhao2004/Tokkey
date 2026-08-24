@@ -14,6 +14,7 @@ import type {
   SkillAgentSelection,
   SkillInstallResult
 } from '../shared/types';
+import type { McpCatalogScan } from '../shared/types';
 import { LocalSkillCatalogScanner } from './mcpnskills/SkillCatalogScanner';
 import { SKILL_AGENT_ORDER, SkillDeployer } from './mcpnskills/SkillDeployer';
 import CachedRepositoryCatalog from './mcpnskills/CachedRepositoryCatalog';
@@ -23,6 +24,7 @@ import RepositorySkillScanner from './mcpnskills/RepositorySkillScanner';
 import SkillFolderImporter from './mcpnskills/SkillFolderImporter';
 import SkillInstaller from './mcpnskills/SkillInstaller';
 import DiscoverSkillsService from './mcpnskills/DiscoverSkillsService';
+import LocalMcpCatalogScanner from './mcp/McpCatalogScanner';
 
 type IpcHandler = (...args: unknown[]) => unknown;
 
@@ -36,12 +38,14 @@ export default class IpcController {
   private readonly skillDeployer: SkillDeployer;
   private readonly discoverRepositories: DiscoverRepositories;
   private readonly discoverSkills: DiscoverSkillsService;
+  private readonly mcpCatalogScanner: LocalMcpCatalogScanner;
 
   constructor(
     skillCatalogScanner: LocalSkillCatalogScanner = new LocalSkillCatalogScanner(),
     skillDeployer: SkillDeployer = new SkillDeployer({ scanner: skillCatalogScanner }),
     discoverRepositories: DiscoverRepositories | null = null,
-    discoverSkills: DiscoverSkillsService | null = null
+    discoverSkills: DiscoverSkillsService | null = null,
+    mcpCatalogScanner: LocalMcpCatalogScanner | null = null
   ) {
     this.skillCatalogScanner = skillCatalogScanner;
     this.skillDeployer = skillDeployer;
@@ -50,9 +54,11 @@ export default class IpcController {
       installedCatalog: skillCatalogScanner,
       deployer: skillDeployer
     });
+    this.mcpCatalogScanner = mcpCatalogScanner ?? new LocalMcpCatalogScanner();
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
+      'mcps:list-installed': () => this.scanInstalledMcps(),
       'skills:list-installed': () => this.getInstalledSkills(),
       'skills:get-agent-selection': (skillId: unknown) =>
         this.getSkillAgentSelection(this.requireSkillId(skillId)),
@@ -104,6 +110,16 @@ export default class IpcController {
   /** Lists local skills for the future skills page without exposing filesystem APIs to it. */
   async getInstalledSkills(): Promise<InstalledSkill[]> {
     return this.skillCatalogScanner.scanInstalledSkills();
+  }
+
+  /** Reads and normalizes the configured MCP servers for all supported agents. */
+  scanInstalledMcps(): Promise<McpCatalogScan> {
+    return this.mcpCatalogScanner.scanInstalledMcps();
+  }
+
+  /** Alias used by the renderer-facing catalog API. */
+  getInstalledMcps(): Promise<McpCatalogScan> {
+    return this.scanInstalledMcps();
   }
 
   /** Returns the current selection derived from the skill's filesystem locations. */

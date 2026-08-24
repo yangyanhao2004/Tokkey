@@ -11,6 +11,8 @@ class PreloadBridge {
   expose(): void {
     const api: TokiieApi = {
       getAppInfo: () => ipcRenderer.invoke('app:get-info'),
+      getInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),
+      scanInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),
       getInstalledSkills: () => ipcRenderer.invoke('skills:list-installed'),
       getSkillAgentSelection: (skillId) => ipcRenderer.invoke('skills:get-agent-selection', skillId),
       applySkillAgentSelection: (skillId, selectedAgents) =>

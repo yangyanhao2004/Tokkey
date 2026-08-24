@@ -72,3 +72,14 @@ export type {
   SkillsShSkill,
   SkillsShSourceKind
 } from '../../shared/types';
+
+// MCP catalog exports live beside the skill services while sharing this public barrel.
+export {
+  CanonicalMcpCodec,
+  ClaudeCodeMcpAdapter,
+  CodexMcpAdapter,
+  LocalMcpCatalogScanner,
+  McpCatalogDeduplicator,
+  McpConfigFileReader
+} from '../mcp/McpCatalogScanner';
+export type { DiscoveredMcp, McpAgentConfigAdapter, McpFileReader } from '../mcp/McpCatalogScanner';

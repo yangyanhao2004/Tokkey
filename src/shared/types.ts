@@ -8,9 +8,73 @@ export interface AppInfo {
   platform: string;
 }
 
+/** Supported local configuration sources for installed MCP servers. */
+export type McpAgent = 'claudeCode' | 'codex';
+
+/** Transport names used by the normalized MCP catalog. */
+export type McpConnectionType = 'stdio' | 'sse' | 'streamable_http';
+
+/** One MCP definition after an agent adapter has normalized its source format. */
+export interface McpServerConfiguration {
+  name: string;
+  connectionType: McpConnectionType;
+  command: string | null;
+  arguments: string[];
+  environment: Record<string, string>;
+  url: string | null;
+}
+
+/** A server discovered in one or more agent configuration files. */
+export interface InstalledMcp {
+  id: string;
+  name: string;
+  title: string;
+  connectionType: McpConnectionType;
+  command: string | null;
+  arguments: string[];
+  environment: Record<string, string>;
+  url: string | null;
+  agents: McpAgent[];
+  badges: McpAgentBadge[];
+  hasNameCollision: boolean;
+  definition: string;
+}
+
+/** The visual state for one agent badge on an MCP card. */
+export interface McpAgentBadge {
+  agent: McpAgent;
+  state: 'checked' | 'unchecked' | 'disabled';
+}
+
+/** A configuration entry that an adapter could not represent safely. */
+export interface McpSkippedEntry {
+  name: string;
+  reason: string;
+}
+
+/** Parsed output from one agent file, before cross-agent deduplication. */
+export interface McpAgentConfigurationReadout {
+  servers: McpServerConfiguration[];
+  skipped: McpSkippedEntry[];
+}
+
+/** A file-level MCP scan failure shown below the catalog. */
+export interface McpCatalogFailure {
+  agent: McpAgent;
+  message: string;
+}
+
+/** Complete result returned by one local catalog scan. */
+export interface McpCatalogScan {
+  servers: InstalledMcp[];
+  failures: McpCatalogFailure[];
+}
+
 /** Renderer-facing API exposed by the preload bridge. */
 export interface TokiieApi {
   getAppInfo(): Promise<AppInfo>;
+  getInstalledMcps(): Promise<McpCatalogScan>;
+  scanInstalledMcps(): Promise<McpCatalogScan>;
   getInstalledSkills(): Promise<InstalledSkill[]>;
   getSkillAgentSelection(skillId: string): Promise<SkillAgentSelection>;
   applySkillAgentSelection(skillId: string, selectedAgents: SkillAgent[]): Promise<InstalledSkill[]>;
