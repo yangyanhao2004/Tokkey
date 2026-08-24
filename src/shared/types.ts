@@ -9,7 +9,7 @@ export interface AppInfo {
 }
 
 /** Supported local configuration sources for installed MCP servers. */
-export type McpAgent = 'claudeCode' | 'codex';
+export type McpAgent = 'claudeCode' | 'hermes' | 'codex';
 
 /** Transport names used by the normalized MCP catalog. */
 export type McpConnectionType = 'stdio' | 'sse' | 'streamable_http';
@@ -22,6 +22,39 @@ export interface McpServerConfiguration {
   arguments: string[];
   environment: Record<string, string>;
   url: string | null;
+}
+
+/** Wizard fields accepted by the shared MCP configuration preparer. */
+export interface McpWizardDraft {
+  mode: 'wizard';
+  name: string;
+  connectionType: McpConnectionType;
+  commandLine: string;
+  environmentText: string;
+  url: string;
+}
+
+/** Full JSON input accepted by the shared MCP configuration preparer. */
+export interface McpJsonDraft {
+  mode: 'json';
+  jsonText: string;
+}
+
+/** Either editor representation used to create one canonical MCP document. */
+export type McpConfigurationDraft = McpWizardDraft | McpJsonDraft;
+
+/** Non-throwing result used by the renderer for live validation. */
+export interface McpConfigurationPreparation {
+  isValid: boolean;
+  canonicalJson: string | null;
+  configuration: McpServerConfiguration | null;
+  error: string | null;
+}
+
+/** One all-or-nothing request to persist an MCP for selected agents. */
+export interface ApplyMcpConfigurationRequest {
+  configurationJson: string;
+  selectedAgents: McpAgent[];
 }
 
 /** A server discovered in one or more agent configuration files. */
@@ -75,6 +108,8 @@ export interface TokiieApi {
   getAppInfo(): Promise<AppInfo>;
   getInstalledMcps(): Promise<McpCatalogScan>;
   scanInstalledMcps(): Promise<McpCatalogScan>;
+  prepareMcpConfiguration(draft: McpConfigurationDraft): McpConfigurationPreparation;
+  applyMcpConfiguration(request: ApplyMcpConfigurationRequest): Promise<McpCatalogScan>;
   getInstalledSkills(): Promise<InstalledSkill[]>;
   getSkillAgentSelection(skillId: string): Promise<SkillAgentSelection>;
   applySkillAgentSelection(skillId: string, selectedAgents: SkillAgent[]): Promise<InstalledSkill[]>;

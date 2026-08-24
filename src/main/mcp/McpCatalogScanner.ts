@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse as parseToml } from '@iarna/toml';
+import { parse as parseYaml } from 'yaml';
+import { McpConfigurationCodec } from '../../shared/McpConfiguration';
 import type {
   InstalledMcp,
   McpAgent,
@@ -15,7 +17,7 @@ import type {
 } from '../../shared/types';
 
 /** Stable order used by the catalog cards and their agent badges. */
-export const MCP_AGENT_ORDER: readonly McpAgent[] = ['claudeCode', 'codex'];
+export const MCP_AGENT_ORDER: readonly McpAgent[] = ['claudeCode', 'hermes', 'codex'];
 
 /** Adapter contract for one agent's user-scope MCP configuration file. */
 export interface McpAgentConfigAdapter {
@@ -148,7 +150,13 @@ export class ClaudeCodeMcpAdapter implements McpAgentConfigAdapter {
       return { servers: [], skipped: [] };
     }
     const root = JSON.parse(text) as unknown;
-    if (!this.support.isRecord(root) || !this.support.isRecord(root.mcpServers)) {
+    if (!this.support.isRecord(root)) {
+      throw new Error('Claude configuration must be an object');
+    }
+    if (root.mcpServers === undefined) {
+      return { servers: [], skipped: [] };
+    }
+    if (!this.support.isRecord(root.mcpServers)) {
       throw new Error('top-level mcpServers must be an object');
     }
     const servers: McpServerConfiguration[] = [];
@@ -160,8 +168,7 @@ export class ClaudeCodeMcpAdapter implements McpAgentConfigAdapter {
           throw new Error('entry must be an object');
         }
         const configuration = this.parseEntry(entry);
-        configuration.name = this.support.normalizeName(name);
-        servers.push(configuration);
+        servers.push({ ...configuration, name: this.support.normalizeName(name) });
       } catch (error) {
         skipped.push({ name, reason: this.describeError(error) });
       }
@@ -201,6 +208,81 @@ export class ClaudeCodeMcpAdapter implements McpAgentConfigAdapter {
   }
 }
 
+/** Parses Hermes' top-level ~/.hermes/config.yaml MCP mapping. */
+export class HermesMcpAdapter implements McpAgentConfigAdapter {
+  private readonly support = new McpAdapterSupport();
+
+  agent(): McpAgent {
+    return 'hermes';
+  }
+
+  filePath(homeDirectory: string): string {
+    return path.join(homeDirectory, '.hermes', 'config.yaml');
+  }
+
+  parse(text: string): McpAgentConfigurationReadout {
+    if (text.trim().length === 0) {
+      return { servers: [], skipped: [] };
+    }
+    const root = parseYaml(text) as unknown;
+    if (!this.support.isRecord(root)) {
+      throw new Error('Hermes configuration must be an object');
+    }
+    if (root.mcp_servers === undefined) {
+      return { servers: [], skipped: [] };
+    }
+    if (!this.support.isRecord(root.mcp_servers)) {
+      throw new Error('top-level mcp_servers must be an object');
+    }
+    const servers: McpServerConfiguration[] = [];
+    const skipped = [];
+    for (const name of Object.keys(root.mcp_servers).sort()) {
+      try {
+        const entry = root.mcp_servers[name];
+        if (!this.support.isRecord(entry)) {
+          throw new Error('entry must be an object');
+        }
+        const configuration = this.parseEntry(entry);
+        servers.push({ ...configuration, name: this.support.normalizeName(name) });
+      } catch (error) {
+        skipped.push({ name, reason: this.describeError(error) });
+      }
+    }
+    return { servers, skipped };
+  }
+
+  private parseEntry(entry: Record<string, unknown>): McpServerConfiguration {
+    const hasCommand = entry.command !== undefined;
+    const hasUrl = entry.url !== undefined;
+    if (hasCommand && hasUrl) {
+      throw new Error('server cannot include both command and url');
+    }
+    if (hasCommand) {
+      this.assertAllowedFields(entry, ['command', 'args', 'env']);
+      return this.support.makeStdio(entry.command, entry.args, entry.env);
+    }
+    this.assertAllowedFields(entry, ['url', 'transport']);
+    const connectionType = entry.transport === undefined
+      ? 'streamable_http'
+      : entry.transport;
+    if (connectionType !== 'streamable_http' && connectionType !== 'sse') {
+      throw new Error('unsupported transport');
+    }
+    return this.support.makeRemote(connectionType, entry.url);
+  }
+
+  private assertAllowedFields(entry: Record<string, unknown>, allowedFields: string[]): void {
+    const unsupported = Object.keys(entry).find((key) => !allowedFields.includes(key));
+    if (unsupported) {
+      throw new Error(`unsupported field: ${unsupported}`);
+    }
+  }
+
+  private describeError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+}
+
 /** Parses Codex's [mcp_servers.<name>] TOML tables. */
 export class CodexMcpAdapter implements McpAgentConfigAdapter {
   private readonly support = new McpAdapterSupport();
@@ -218,7 +300,13 @@ export class CodexMcpAdapter implements McpAgentConfigAdapter {
       return { servers: [], skipped: [] };
     }
     const root = parseToml(text) as unknown as Record<string, unknown>;
-    if (!this.support.isRecord(root) || !this.support.isRecord(root.mcp_servers)) {
+    if (!this.support.isRecord(root)) {
+      throw new Error('Codex configuration must be a table');
+    }
+    if (root.mcp_servers === undefined) {
+      return { servers: [], skipped: [] };
+    }
+    if (!this.support.isRecord(root.mcp_servers)) {
       throw new Error('top-level mcp_servers must be a table');
     }
     const servers: McpServerConfiguration[] = [];
@@ -227,12 +315,9 @@ export class CodexMcpAdapter implements McpAgentConfigAdapter {
       try {
         const rawEntry = root.mcp_servers[name];
         if (!this.support.isRecord(rawEntry)) throw new Error('entry must be a table');
-        const entry = { ...rawEntry };
-        const environment = entry.env;
-        delete entry.env;
+        const { env: environment, ...entry } = rawEntry;
         const configuration = this.parseEntry(entry, environment);
-        configuration.name = this.support.normalizeName(name);
-        servers.push(configuration);
+        servers.push({ ...configuration, name: this.support.normalizeName(name) });
       } catch (error) {
         skipped.push({ name, reason: this.describeError(error) });
       }
@@ -265,89 +350,11 @@ export interface DiscoveredMcp {
   configuration: McpServerConfiguration;
 }
 
-/** Encodes normalized definitions into the stable one-server MCP JSON envelope. */
-export class CanonicalMcpCodec {
-  encode(configuration: McpServerConfiguration): string {
-    this.validate(configuration);
-    return JSON.stringify(this.sortValue({
-      mcpServers: {
-        [configuration.name]: this.serverValue(configuration)
-      }
-    }), null, 2);
-  }
-
-  fingerprint(configuration: McpServerConfiguration): string {
-    return createHash('sha256').update(this.encode(configuration)).digest('hex');
-  }
-
-  private validate(configuration: McpServerConfiguration): void {
-    if (configuration.name.trim().length === 0 || /[\u0000-\u001f\u007f]/.test(configuration.name)) {
-      throw new Error('server name is invalid');
-    }
-    if (configuration.connectionType === 'stdio') {
-      if (typeof configuration.command !== 'string' || configuration.command.trim().length === 0) {
-        throw new Error('stdio command is invalid');
-      }
-      if (configuration.url !== null || configuration.arguments.some((argument) => typeof argument !== 'string')) {
-        throw new Error('stdio definition is invalid');
-      }
-    } else {
-      if (configuration.connectionType !== 'sse' && configuration.connectionType !== 'streamable_http') {
-        throw new Error('transport is invalid');
-      }
-      if (typeof configuration.url !== 'string') {
-        throw new Error('remote URL is invalid');
-      }
-      const parsedUrl = new URL(configuration.url);
-      if ((parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') || parsedUrl.hostname.length === 0) {
-        throw new Error('remote URL is invalid');
-      }
-      if (configuration.command !== null || configuration.arguments.length > 0 || Object.keys(configuration.environment).length > 0) {
-        throw new Error('remote definition is invalid');
-      }
-    }
-    for (const key of Object.keys(configuration.environment)) {
-      if (!/^[A-Za-z0-9_]+$/.test(key) || typeof configuration.environment[key] !== 'string') {
-        throw new Error(`environment entry is invalid: ${key}`);
-      }
-    }
-  }
-
-  private serverValue(configuration: McpServerConfiguration): Record<string, unknown> {
-    if (configuration.connectionType === 'stdio') {
-      return {
-        args: configuration.arguments,
-        command: configuration.command,
-        env: configuration.environment,
-        type: 'stdio'
-      };
-    }
-    return {
-      type: configuration.connectionType,
-      url: configuration.url
-    };
-  }
-
-  private sortValue(value: unknown): unknown {
-    if (Array.isArray(value)) {
-      return value.map((entry) => this.sortValue(entry));
-    }
-    if (!value || typeof value !== 'object') {
-      return value;
-    }
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-        .map(([key, entry]) => [key, this.sortValue(entry)])
-    );
-  }
-}
-
 /** Produces canonical JSON fingerprints and merges equivalent definitions. */
 export class McpCatalogDeduplicator {
-  private readonly codec: CanonicalMcpCodec;
+  private readonly codec: McpConfigurationCodec;
 
-  constructor(codec: CanonicalMcpCodec = new CanonicalMcpCodec()) {
+  constructor(codec: McpConfigurationCodec = new McpConfigurationCodec()) {
     this.codec = codec;
   }
 
@@ -364,7 +371,7 @@ export class McpCatalogDeduplicator {
       for (const entry of entries) {
         let fingerprint: string;
         try {
-          fingerprint = this.codec.fingerprint(entry.configuration);
+          fingerprint = createHash('sha256').update(this.codec.encode(entry.configuration)).digest('hex');
         } catch {
           continue;
         }
@@ -388,7 +395,12 @@ export class McpCatalogDeduplicator {
     agents: McpAgent[]
   ): InstalledMcp {
     const primaryAgent = agents[0] ?? 'claudeCode';
-    const shortName = primaryAgent === 'claudeCode' ? 'Claude' : 'Codex';
+    const shortNames: Record<McpAgent, string> = {
+      claudeCode: 'Claude',
+      hermes: 'Hermes',
+      codex: 'Codex'
+    };
+    const shortName = shortNames[primaryAgent];
     const title = hasNameCollision ? `${configuration.name} (${shortName})` : configuration.name;
     const badges: McpAgentBadge[] = MCP_AGENT_ORDER.map((agent) => ({
       agent,
@@ -428,7 +440,11 @@ export class LocalMcpCatalogScanner {
   } = {}) {
     this.homeDirectory = options.homeDirectory ?? os.homedir();
     this.fileReader = options.fileReader ?? new McpConfigFileReader();
-    this.adapters = options.adapters ?? [new ClaudeCodeMcpAdapter(), new CodexMcpAdapter()];
+    this.adapters = options.adapters ?? [
+      new ClaudeCodeMcpAdapter(),
+      new HermesMcpAdapter(),
+      new CodexMcpAdapter()
+    ];
     this.deduplicator = options.deduplicator ?? new McpCatalogDeduplicator();
   }
 
@@ -461,6 +477,8 @@ export class LocalMcpCatalogScanner {
 }
 
 export { ClaudeCodeMcpAdapter as ClaudeCodeMCPAdapter };
+export { HermesMcpAdapter as HermesMCPAdapter };
 export { CodexMcpAdapter as CodexMCPAdapter };
 export { LocalMcpCatalogScanner as LocalMCPCatalogScanner };
+export { McpConfigurationCodec as CanonicalMcpCodec };
 export default LocalMcpCatalogScanner;

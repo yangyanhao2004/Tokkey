@@ -1,7 +1,10 @@
 import { app, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type {
   AppInfo,
+  ApplyMcpConfigurationRequest,
   CachedRepository,
+  McpConfigurationDraft,
+  McpConfigurationPreparation,
   SkillsShCardState,
   SkillsShInstallRequest,
   SkillsShInstallResult,
@@ -9,12 +12,14 @@ import type {
   SkillsShSkill,
   InstallRepositorySkillRequest,
   InstalledSkill,
+  McpAgent,
   RepositorySyncResult,
   SkillAgent,
   SkillAgentSelection,
   SkillInstallResult
 } from '../shared/types';
 import type { McpCatalogScan } from '../shared/types';
+import { McpConfigurationPreparer } from '../shared/McpConfiguration';
 import { LocalSkillCatalogScanner } from './mcpnskills/SkillCatalogScanner';
 import { SKILL_AGENT_ORDER, SkillDeployer } from './mcpnskills/SkillDeployer';
 import CachedRepositoryCatalog from './mcpnskills/CachedRepositoryCatalog';
@@ -24,7 +29,10 @@ import RepositorySkillScanner from './mcpnskills/RepositorySkillScanner';
 import SkillFolderImporter from './mcpnskills/SkillFolderImporter';
 import SkillInstaller from './mcpnskills/SkillInstaller';
 import DiscoverSkillsService from './mcpnskills/DiscoverSkillsService';
-import LocalMcpCatalogScanner from './mcp/McpCatalogScanner';
+import LocalMcpCatalogScanner, { MCP_AGENT_ORDER } from './mcp/McpCatalogScanner';
+import LocalMcpConfigurationApplier, {
+  type McpConfigurationApplying
+} from './mcp/McpConfigurationApplier';
 
 type IpcHandler = (...args: unknown[]) => unknown;
 
@@ -39,13 +47,16 @@ export default class IpcController {
   private readonly discoverRepositories: DiscoverRepositories;
   private readonly discoverSkills: DiscoverSkillsService;
   private readonly mcpCatalogScanner: LocalMcpCatalogScanner;
+  private readonly mcpConfigurationApplier: McpConfigurationApplying;
+  private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
   constructor(
     skillCatalogScanner: LocalSkillCatalogScanner = new LocalSkillCatalogScanner(),
     skillDeployer: SkillDeployer = new SkillDeployer({ scanner: skillCatalogScanner }),
     discoverRepositories: DiscoverRepositories | null = null,
     discoverSkills: DiscoverSkillsService | null = null,
-    mcpCatalogScanner: LocalMcpCatalogScanner | null = null
+    mcpCatalogScanner: LocalMcpCatalogScanner | null = null,
+    mcpConfigurationApplier: McpConfigurationApplying | null = null
   ) {
     this.skillCatalogScanner = skillCatalogScanner;
     this.skillDeployer = skillDeployer;
@@ -55,10 +66,13 @@ export default class IpcController {
       deployer: skillDeployer
     });
     this.mcpCatalogScanner = mcpCatalogScanner ?? new LocalMcpCatalogScanner();
+    this.mcpConfigurationApplier = mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
       'mcps:list-installed': () => this.scanInstalledMcps(),
+      'mcps:apply-configuration': (request: unknown) =>
+        this.applyMcpConfiguration(this.requireMcpApplyRequest(request)),
       'skills:list-installed': () => this.getInstalledSkills(),
       'skills:get-agent-selection': (skillId: unknown) =>
         this.getSkillAgentSelection(this.requireSkillId(skillId)),
@@ -90,6 +104,10 @@ export default class IpcController {
     Object.entries(this.handlers).forEach(([channel, handler]) => {
       ipcMain.handle(channel, (_event: IpcMainInvokeEvent, ...args: unknown[]) => handler(...args));
     });
+    // Live validation is synchronous and CPU-only so fields can update without UI races.
+    ipcMain.on('mcps:prepare-configuration', (event, draft: unknown) => {
+      event.returnValue = this.prepareMcpConfiguration(draft as McpConfigurationDraft);
+    });
   }
 
   /**
@@ -119,6 +137,17 @@ export default class IpcController {
 
   /** Alias used by the renderer-facing catalog API. */
   getInstalledMcps(): Promise<McpCatalogScan> {
+    return this.scanInstalledMcps();
+  }
+
+  /** Converts either editor draft through the same codec used during final apply. */
+  prepareMcpConfiguration(draft: McpConfigurationDraft): McpConfigurationPreparation {
+    return this.mcpConfigurationPreparer.prepare(draft);
+  }
+
+  /** Applies one canonical MCP document and returns a freshly scanned catalog. */
+  async applyMcpConfiguration(request: ApplyMcpConfigurationRequest): Promise<McpCatalogScan> {
+    await this.mcpConfigurationApplier.apply(request.configurationJson, request.selectedAgents);
     return this.scanInstalledMcps();
   }
 
@@ -200,6 +229,32 @@ export default class IpcController {
       throw new TypeError('Skill ID must be a non-empty string');
     }
     return value;
+  }
+
+  private requireMcpApplyRequest(value: unknown): ApplyMcpConfigurationRequest {
+    if (!value || typeof value !== 'object') {
+      throw new TypeError('MCP apply request must be an object.');
+    }
+    const request = value as Record<string, unknown>;
+    if (typeof request.configurationJson !== 'string' || request.configurationJson.trim().length === 0) {
+      throw new TypeError('MCP configuration JSON must be a non-empty string.');
+    }
+    return {
+      configurationJson: request.configurationJson,
+      selectedAgents: this.requireMcpAgents(request.selectedAgents)
+    };
+  }
+
+  private requireMcpAgents(value: unknown): McpAgent[] {
+    if (!Array.isArray(value)) {
+      throw new TypeError('Selected MCP agents must be an array.');
+    }
+    return [...new Set(value.map((agent) => {
+      if (typeof agent !== 'string' || !MCP_AGENT_ORDER.includes(agent as McpAgent)) {
+        throw new TypeError(`Unsupported MCP agent: ${String(agent)}.`);
+      }
+      return agent as McpAgent;
+    }))];
   }
 
   private requireSkillAgents(value: unknown): SkillAgent[] {

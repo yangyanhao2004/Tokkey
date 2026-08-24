@@ -18,6 +18,7 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@iarna/toml": "^2.2.5"
+    "@iarna/toml": "^2.2.5",
+    "yaml": "^2.9.0"
   }
 }

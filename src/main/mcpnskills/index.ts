@@ -78,6 +78,7 @@ export {
   CanonicalMcpCodec,
   ClaudeCodeMcpAdapter,
   CodexMcpAdapter,
+  HermesMcpAdapter,
   LocalMcpCatalogScanner,
   McpCatalogDeduplicator,
   McpConfigFileReader
