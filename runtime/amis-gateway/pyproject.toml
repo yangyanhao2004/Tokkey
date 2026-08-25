@@ -15,6 +15,10 @@ dependencies = [
     # local/private model endpoints are bypassed by UpstreamProxyPolicy.
     "httpx[socks]>=0.28.1,<1",
     "litellm==1.92.0+amis.2",
+    # Required, despite this runtime avoiding LiteLLM Proxy: the Anthropic
+    # passthrough streaming handler imports litellm.proxy.common_request_processing,
+    # which imports orjson. test_anthropic_streaming_handler_dependencies_are_installed
+    # guards that path. Its macOS wheel also sets the runtime's deployment floor.
     "orjson>=3.11.6,<4",
     "pyyaml>=6.0,<7",
     "starlette>=1.0.1,<2",
