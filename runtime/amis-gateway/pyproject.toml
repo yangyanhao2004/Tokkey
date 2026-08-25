@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "amis-gateway"
+version = "0.1.0"
+description = "Tokiie-owned local HTTP gateway backed by the LiteLLM Python SDK."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # Keep the SDK-only install while including its Anthropic streaming dependencies.
+    "backoff>=2.2.1,<3",
+    "fastapi>=0.139,<1",
+    # Public custom providers may rely on a user-configured SOCKS proxy, while
+    # local/private model endpoints are bypassed by UpstreamProxyPolicy.
+    "httpx[socks]>=0.28.1,<1",
+    "litellm==1.92.0+amis.2",
+    "orjson>=3.11.6,<4",
+    "pyyaml>=6.0,<7",
+    "starlette>=1.0.1,<2",
+    "uvicorn>=0.33,<1",
+]
+# The OpenSquilla router difficulty classifier was dropped during the migration
+# from Amis-Wifi, which removes joblib, lightgbm, numpy, onnxruntime,
+# scikit-learn and its scipy dependency from the packaged runtime. That is the
+# difference between a ~429MB and a ~100MB bundled interpreter tree, so any
+# future ML dependency added here should be weighed against the download size.
+
+[project.scripts]
+amis-gateway = "amis_gateway.main:main"
+
+[tool.uv.sources]
+# Build the runtime from the reviewed fork commit instead of a moving branch.
+litellm = { git = "https://github.com/cPilot-GUI/litellm.git", rev = "7cf5de494a4e5a0a1b7336067fbb8b6561ff87f0" }
+
+[dependency-groups]
+dev = [
+    "httpx==0.28.1",
+    "pytest==9.0.2",
+    "pytest-asyncio==1.3.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/amis_gateway"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

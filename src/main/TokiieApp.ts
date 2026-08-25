@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { app, BrowserWindow, shell } from 'electron';
 import IpcController from './IpcController';
+import GatewayProcessManager from './gateway/GatewayProcessManager';
 
 interface TokiieAppOptions {
   width?: number;
@@ -15,6 +16,7 @@ export default class TokiieApp {
   private readonly width: number;
   private readonly height: number;
   private readonly ipcController: IpcController;
+  private readonly gatewayProcessManager: GatewayProcessManager;
   private readonly isDev: boolean;
   private mainWindow: BrowserWindow | null;
 
@@ -28,6 +30,11 @@ export default class TokiieApp {
     this.mainWindow = null;
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController();
+    // The local inference gateway subprocess; started after the window so a slow
+    // Python boot never delays first paint.
+    this.gatewayProcessManager = new GatewayProcessManager({
+      resourcesPath: app.isPackaged ? process.resourcesPath : undefined
+    });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
     this.isDev = process.argv.includes('--dev') || !app.isPackaged;
   }
@@ -53,12 +60,25 @@ export default class TokiieApp {
     app.whenReady().then(() => this.onReady());
     app.on('activate', () => this.onActivate());
     app.on('window-all-closed', () => this.onWindowAllClosed());
+    app.on('will-quit', () => this.gatewayProcessManager.stop('application quit'));
   }
 
   /** Creates the first window once Electron has finished initialising. */
   onReady(): void {
     this.ipcController.attachModelDownloadSession();
     this.createMainWindow();
+    this.startGateway();
+  }
+
+  /**
+   * Boots the local gateway without blocking window creation. A failure here is
+   * reported and left recoverable: everything in the app that does not need
+   * model routing keeps working, and the gateway can be started again later.
+   */
+  startGateway(): void {
+    this.gatewayProcessManager.startIfNeeded().catch((error: unknown) => {
+      console.error('[AmisGateway] Gateway failed to start:', error);
+    });
   }
 
   /** On macOS, clicking the dock icon re-opens a window when none is left. */

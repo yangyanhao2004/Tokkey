@@ -14,6 +14,14 @@ npm-debug.log*
 .env
 .env.local
 
+# Python gateway runtime: the development virtualenv and the per-architecture
+# interpreter tree are both build products rebuilt from pyproject.toml/uv.lock.
+runtime/amis-gateway/.venv/
+runtime/amis-gateway/**/__pycache__/
+runtime/amis-gateway/.pytest_cache/
+runtime/amis-gateway/.ruff_cache/
+resources/GatewayRuntime/
+
 # OS files
 .DS_Store
 Thumbs.db

@@ -7,9 +7,11 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build": "tsc && mkdir -p dist/renderer && cp src/renderer/index.html dist/renderer/index.html && cp src/renderer/styles.css dist/renderer/styles.css",
+    "build": "tsc && mkdir -p dist/renderer && cp src/renderer/index.html dist/renderer/index.html",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
+    "gateway:sync": "uv sync --directory runtime/amis-gateway",
+    "gateway:test": "uv run --directory runtime/amis-gateway --frozen pytest -q",
     "start": "npm run build && electron .",
     "dev": "npm run build && electron . --dev"
   },

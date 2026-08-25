@@ -415,9 +415,14 @@ export default class IpcController {
     if (provider !== undefined && (typeof provider !== 'string' || provider.trim().length === 0)) {
       throw new TypeError(`Unsupported model provider: ${String(provider)}`);
     }
+    // An empty search box means "no filter", so it is absent rather than invalid.
+    const query = request.query;
+    if (query !== undefined && typeof query !== 'string') {
+      throw new TypeError('Model query must be a string');
+    }
     return {
       provider: provider as LocalModelCatalogRequest['provider'],
-      query: request.query === undefined ? undefined : this.requireString(request.query, 'Model query')
+      query: query === undefined || query.trim().length === 0 ? undefined : query
     };
   }
 

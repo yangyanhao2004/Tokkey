@@ -27,15 +27,74 @@ src/
 │   ├── main.ts           # entry point, boots TokiieApp
 │   ├── TokiieApp.ts      # app lifecycle + main window
 │   ├── IpcController.ts  # all IPC handlers exposed to the renderer
-│   └── preload.ts        # context bridge, exposes window.tokiie
+│   ├── preload.ts        # context bridge, exposes window.tokiie
+│   ├── gateway/          # local inference gateway subprocess supervisor
+│   ├── mcp/              # MCP catalog scanning and configuration
+│   ├── mcpnskills/       # skill discovery, install, and deployment
+│   └── models/           # local model catalog and download lifecycle
 ├── renderer/             # renderer process (UI side)
-    ├── index.html        # entry page
-    ├── RendererApp.ts    # UI logic
-    ├── window.d.ts        # type declaration for the preload bridge
-    └── styles.css        # styles
+│   ├── index.html        # entry page — currently an empty shell
+│   └── window.d.ts       # type declaration for the preload bridge
 └── shared/               # contracts shared by both processes
     └── types.ts          # IPC data and bridge contracts
 ```
+
+> The renderer has no UI right now. `index.html` is an empty shell so the app
+> still opens a window; every main-process capability below is still registered
+> and reachable over IPC, waiting for a new front end. When you add one, restore
+> the stylesheet copy step in the `build` script.
+
+## Local inference gateway
+
+The app runs a loopback-only HTTP gateway as a Python subprocess. It is backed
+by the LiteLLM **SDK** (not the LiteLLM proxy CLI) and exposes chat completions,
+Responses, and Anthropic Messages over `127.0.0.1`, plus a small management API
+for model routes. It was migrated from the Amis-Wifi repository; the OpenSquilla
+router difficulty classifier was dropped in the process, which removed
+scikit-learn, onnxruntime, lightgbm, scipy, and numpy from the runtime.
+
+```
+runtime/amis-gateway/       # Python package, pyproject.toml, uv.lock, tests
+src/main/gateway/            # main-process supervisor
+├── GatewayProcessManager.ts # spawn, readiness, crash restart, shutdown
+├── GatewayRuntimeLocator.ts # finds the interpreter to run
+├── GatewayPortResolver.ts   # picks the port, reclaims it from stale helpers
+└── GatewayHealthProbe.ts    # verifies a listener belongs to this app launch
+```
+
+### Development setup
+
+```bash
+brew install uv                # or https://docs.astral.sh/uv/
+npm run gateway:sync           # create runtime/amis-gateway/.venv
+npm run gateway:test           # run the Python test suite
+```
+
+`npm run dev` then starts the gateway automatically against that virtualenv.
+`AMIS_GATEWAY_PYTHON=/path/to/python3` overrides the interpreter for one run.
+
+### How the supervisor behaves
+
+- The gateway starts after the main window, so a slow Python boot never delays
+  first paint, and a startup failure leaves the rest of the app usable.
+- Each launch generates a master key and an instance id. A listener is adopted
+  only if `/health/liveness` reports that same instance id and a matching
+  `runtime_protocol_version`, so an orphan from a previous launch is never
+  mistaken for the current gateway.
+- Port 4000 is preferred. An orphan left by a previous launch of *this* app is
+  terminated and the port reclaimed; a port held by any other process is left
+  alone and a free port is used instead. Ownership is matched on the interpreter
+  path, because the Amis-Wifi desktop app runs the same `amis_gateway.main`
+  module on the same default port and must never be killed by this app.
+- An unexpected exit is relaunched with exponential backoff, capped at five
+  consecutive attempts. Quitting the app stops the gateway.
+
+### Packaging (not wired up yet)
+
+Production expects a relocatable CPython tree at
+`resources/GatewayRuntime/<arch>/python/bin/python3`. Building and signing that
+tree still needs to be ported from Amis-Wifi's `Scripts/build-litellm-runtime.py`
+— see the note in `TODO.md`.
 
 ## Adding a renderer API
 
