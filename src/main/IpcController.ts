@@ -3,6 +3,8 @@ import type {
   AppInfo,
   ApplyMcpConfigurationRequest,
   CachedRepository,
+  CloudModelCard,
+  CloudModelConnection,
   McpConfigurationDraft,
   McpConfigurationPreparation,
   SkillsShCardState,
@@ -35,8 +37,22 @@ import LocalMcpConfigurationApplier, {
   type McpConfigurationApplying
 } from './mcp/McpConfigurationApplier';
 import LocalModelManager from './models/LocalModelManager';
+import CloudModelConnector from './models/CloudModelConnector';
 
 type IpcHandler = (...args: unknown[]) => unknown;
+
+/** Collaborators the controller builds itself unless a caller supplies one. */
+export interface IpcControllerOptions {
+  skillCatalogScanner?: LocalSkillCatalogScanner;
+  skillDeployer?: SkillDeployer;
+  discoverRepositories?: DiscoverRepositories;
+  discoverSkills?: DiscoverSkillsService;
+  mcpCatalogScanner?: LocalMcpCatalogScanner;
+  mcpConfigurationApplier?: McpConfigurationApplying;
+  localModelManager?: LocalModelManager;
+  /** Owns the gateway subprocess, so only the app that supervises it can supply this. */
+  cloudModelConnector?: CloudModelConnector;
+}
 
 /**
  * Central place for every main-process IPC handler exposed to the renderer.
@@ -51,27 +67,25 @@ export default class IpcController {
   private readonly mcpCatalogScanner: LocalMcpCatalogScanner;
   private readonly mcpConfigurationApplier: McpConfigurationApplying;
   private readonly localModelManager: LocalModelManager;
+  private readonly cloudModelConnector: CloudModelConnector | null;
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
-  constructor(
-    skillCatalogScanner: LocalSkillCatalogScanner = new LocalSkillCatalogScanner(),
-    skillDeployer: SkillDeployer = new SkillDeployer({ scanner: skillCatalogScanner }),
-    discoverRepositories: DiscoverRepositories | null = null,
-    discoverSkills: DiscoverSkillsService | null = null,
-    mcpCatalogScanner: LocalMcpCatalogScanner | null = null,
-    mcpConfigurationApplier: McpConfigurationApplying | null = null,
-    localModelManager: LocalModelManager | null = null
-  ) {
+  constructor(options: IpcControllerOptions = {}) {
+    const skillCatalogScanner = options.skillCatalogScanner ?? new LocalSkillCatalogScanner();
+    const skillDeployer =
+      options.skillDeployer ?? new SkillDeployer({ scanner: skillCatalogScanner });
     this.skillCatalogScanner = skillCatalogScanner;
     this.skillDeployer = skillDeployer;
-    this.discoverRepositories = discoverRepositories ?? this.createDiscoverRepositories();
-    this.discoverSkills = discoverSkills ?? new DiscoverSkillsService({
+    this.discoverRepositories = options.discoverRepositories ?? this.createDiscoverRepositories();
+    this.discoverSkills = options.discoverSkills ?? new DiscoverSkillsService({
       installedCatalog: skillCatalogScanner,
       deployer: skillDeployer
     });
-    this.mcpCatalogScanner = mcpCatalogScanner ?? new LocalMcpCatalogScanner();
-    this.mcpConfigurationApplier = mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
-    this.localModelManager = localModelManager ?? new LocalModelManager();
+    this.mcpCatalogScanner = options.mcpCatalogScanner ?? new LocalMcpCatalogScanner();
+    this.mcpConfigurationApplier =
+      options.mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
+    this.localModelManager = options.localModelManager ?? new LocalModelManager();
+    this.cloudModelConnector = options.cloudModelConnector ?? null;
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
@@ -106,7 +120,10 @@ export default class IpcController {
       'models:start-download': (modelId: unknown) => this.startLocalModelDownload(this.requireModelId(modelId)),
       'models:cancel-download': (modelId: unknown) => this.cancelLocalModelDownload(this.requireModelId(modelId)),
       'models:delete': (modelId: unknown) => this.deleteLocalModel(this.requireModelId(modelId)),
-      'models:deploy': (modelId: unknown) => this.deployLocalModel(this.requireModelId(modelId))
+      'models:deploy': (modelId: unknown) => this.deployLocalModel(this.requireModelId(modelId)),
+      'models:cloud-cards': () => this.listCloudModelCards(),
+      'models:connect-cloud': (cardId: unknown) =>
+        this.connectCloudModel(this.requireString(cardId, 'Cloud model card ID'))
     };
   }
 
@@ -195,6 +212,28 @@ export default class IpcController {
   /** Marks a downloaded model as deployed for the local target. */
   deployLocalModel(modelId: string) {
     return this.localModelManager.deployModel(modelId);
+  }
+
+  /** Lists the hardcoded cloud model cards the renderer can connect to. */
+  async listCloudModelCards(): Promise<CloudModelCard[]> {
+    return this.requireCloudModelConnector().listCards();
+  }
+
+  /** Creates the gateway route for one card and persists its model profile. */
+  connectCloudModel(cardId: string): Promise<CloudModelConnection> {
+    return this.requireCloudModelConnector().connect(cardId);
+  }
+
+  /**
+   * The connector needs the gateway supervisor, which only the application
+   * owns; a controller built without one reports that instead of silently
+   * failing to reach a gateway.
+   */
+  private requireCloudModelConnector(): CloudModelConnector {
+    if (!this.cloudModelConnector) {
+      throw new Error('Cloud models are unavailable: no gateway was attached to this controller.');
+    }
+    return this.cloudModelConnector;
   }
 
   /** Returns the current selection derived from the skill's filesystem locations. */

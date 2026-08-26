@@ -33,7 +33,9 @@ class PreloadBridge {
       startLocalModelDownload: (modelId) => ipcRenderer.invoke('models:start-download', modelId),
       cancelLocalModelDownload: (modelId) => ipcRenderer.invoke('models:cancel-download', modelId),
       deleteLocalModel: (modelId) => ipcRenderer.invoke('models:delete', modelId),
-      deployLocalModel: (modelId) => ipcRenderer.invoke('models:deploy', modelId)
+      deployLocalModel: (modelId) => ipcRenderer.invoke('models:deploy', modelId),
+      listCloudModelCards: () => ipcRenderer.invoke('models:cloud-cards'),
+      connectCloudModel: (cardId) => ipcRenderer.invoke('models:connect-cloud', cardId)
     };
     contextBridge.exposeInMainWorld('tokiie', api);
   }

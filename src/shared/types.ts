@@ -128,6 +128,75 @@ export interface TokiieApi {
   cancelLocalModelDownload(modelId: string): Promise<LocalModelCatalogScan>;
   deleteLocalModel(modelId: string): Promise<LocalModelCatalogScan>;
   deployLocalModel(modelId: string): Promise<LocalModelCatalogScan>;
+  listCloudModelCards(): Promise<CloudModelCard[]>;
+  connectCloudModel(cardId: string): Promise<CloudModelConnection>;
+}
+
+/**
+ * Upstream routing mode persisted in `model_profiles.supported_api_formats`.
+ * `AMIS_GATEWAY_MANAGED` means the gateway owns protocol translation, so no
+ * upstream wire format is selected by the user.
+ */
+export type CloudApiFormat =
+  | 'AMIS_GATEWAY_MANAGED'
+  | 'openai_chat'
+  | 'openai_responses'
+  | 'anthropic';
+
+/** What kind of endpoint one model profile fronts. */
+export type ModelProfileType = 'cloud' | 'local' | 'hub' | 'tokenbox';
+
+/**
+ * One gateway route materialized for a (profile, API format) pair.
+ *
+ * The field names are the JSON keys already stored in `model_profiles.litellm_links`
+ * by the Swift app that shares this database, so `modelID` keeps its spelling
+ * instead of following the local `modelId` convention.
+ */
+export interface LiteLlmModelLink {
+  apiFormat: CloudApiFormat;
+  modelName: string;
+  modelID: string;
+}
+
+/** One saved model connection; mirrors a row of the `model_profiles` table. */
+export interface ModelProfile {
+  id: string;
+  name: string;
+  provider: string;
+  apiUrl: string;
+  apiKey: string | null;
+  modelName: string;
+  type: ModelProfileType;
+  supportedApiFormats: CloudApiFormat[];
+  litellmLinks: LiteLlmModelLink[];
+  /** Unix timestamp in seconds, stored as SQLite REAL for exact roundtrips. */
+  createdAt: number;
+}
+
+/** A hardcoded cloud offering the user can connect to with one click. */
+export interface CloudModelCard {
+  /** Fixed UUID; also the id of the model profile this card connects to. */
+  id: string;
+  provider: string;
+  modelName: string;
+  url: string;
+  /** LiteLLM provider prefix applied to `modelName`, e.g. `openai`. */
+  prefix: string;
+  apiKey: string;
+}
+
+/**
+ * What one connect attempt did. `alreadyConnected` means the profile and its
+ * gateway route both survived, so nothing was created or written.
+ */
+export type CloudModelConnectionStatus = 'connected' | 'reconnected' | 'alreadyConnected';
+
+/** Result of connecting one cloud model card. */
+export interface CloudModelConnection {
+  card: CloudModelCard;
+  profile: ModelProfile;
+  status: CloudModelConnectionStatus;
 }
 
 /** Supported catalog providers exposed by the remote catalog service. */

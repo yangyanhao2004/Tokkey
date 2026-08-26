@@ -2,6 +2,7 @@ import path from 'node:path';
 import { app, BrowserWindow, shell } from 'electron';
 import IpcController from './IpcController';
 import GatewayProcessManager from './gateway/GatewayProcessManager';
+import CloudModelConnector from './models/CloudModelConnector';
 
 interface TokiieAppOptions {
   width?: number;
@@ -28,12 +29,15 @@ export default class TokiieApp {
     this.height = options.height ?? 800;
     // The single main window; null whenever no window is open (normal on macOS).
     this.mainWindow = null;
-    // Renderer-facing IPC handlers are registered once, before any window exists.
-    this.ipcController = new IpcController();
     // The local inference gateway subprocess; started after the window so a slow
-    // Python boot never delays first paint.
+    // Python boot never delays first paint. It is built first because the IPC
+    // layer routes cloud model connections through it.
     this.gatewayProcessManager = new GatewayProcessManager({
       resourcesPath: app.isPackaged ? process.resourcesPath : undefined
+    });
+    // Renderer-facing IPC handlers are registered once, before any window exists.
+    this.ipcController = new IpcController({
+      cloudModelConnector: CloudModelConnector.forGateway(this.gatewayProcessManager)
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
     this.isDev = process.argv.includes('--dev') || !app.isPackaged;

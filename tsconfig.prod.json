@@ -1,0 +1,11 @@
+{
+  // Distribution build. An .asar is an archive, not encryption, so everything
+  // tsc emits is readable by anyone who opens the shipped app. Source maps and
+  // comments are dropped here because they ship implementation notes to users
+  // for no runtime benefit; `tsconfig.json` keeps both for development.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "sourceMap": false,
+    "removeComments": true
+  }
+}
