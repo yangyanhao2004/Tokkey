@@ -51,6 +51,17 @@
   /* Label on a push button that carries no fill, e.g. "Remove". */
   --color-label-tertiary: #8e8e93;
 
+  /* Add Model page. The catalog card sits on white rather than on the
+     translucent surface above it, so it carries its own opaque hairlines. */
+  --color-surface-panel-border: #e7e7e4;
+  --color-separator-hairline: #ececea;
+  /* Capacity meters for memory and disk. */
+  --color-meter-track: rgba(120, 120, 128, 0.2);
+  --color-meter-fill: #8d8d95;
+  /* Neutral counterpart to the "Connected" badge, e.g. "No local model running". */
+  --color-status-idle-bg: rgba(0, 0, 0, 0.11);
+  --color-status-idle-text: #717171;
+
   /* SF Pro is the system UI face on macOS; no web font is bundled or fetched. */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "Helvetica Neue", sans-serif;

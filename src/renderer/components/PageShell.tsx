@@ -2,11 +2,16 @@ import type { ReactNode } from 'react';
 import { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
 import { TitleBlock } from './TitleBlock';
 
+interface PageHeaderProps {
+  /** Supplied only by pages opened from another page; elsewhere Back is inert. */
+  onBack?: () => void;
+}
+
 /**
  * Back/forward pair plus the connection pill. Chrome that every page carries,
  * so it lives with the shell rather than with one page's content.
  */
-function PageHeader() {
+function PageHeader({ onBack }: PageHeaderProps) {
   return (
     <header
       className="flex shrink-0 items-center justify-between px-6 py-3 backdrop-blur-[11.634px]"
@@ -16,6 +21,8 @@ function PageHeader() {
         <button
           type="button"
           className="flex h-[28px] w-[30px] items-center justify-center focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary"
+          onClick={onBack}
+          disabled={!onBack}
           aria-label="Go back"
           title="Back"
           data-testid="nav-back"
@@ -59,6 +66,8 @@ interface PageShellProps {
   subtitle: string;
   /** Identifies the page in tests, e.g. `tokiie` renders `page-tokiie`. */
   testId: string;
+  /** Passed through to the header's Back button; omit on top-level pages. */
+  onBack?: () => void;
   children: ReactNode;
 }
 
@@ -66,7 +75,7 @@ interface PageShellProps {
  * The right-hand content page: header, heading block, then the page's own
  * sections. Every page renders through this so they share one frame.
  */
-export function PageShell({ title, subtitle, testId, children }: PageShellProps) {
+export function PageShell({ title, subtitle, testId, onBack, children }: PageShellProps) {
   return (
     <main
       // `overflow-hidden` is load-bearing: the header's backdrop-filter is
@@ -75,7 +84,7 @@ export function PageShell({ title, subtitle, testId, children }: PageShellProps)
       className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-white"
       data-testid={`page-${testId}`}
     >
-      <PageHeader />
+      <PageHeader onBack={onBack} />
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
         <TitleBlock title={title} subtitle={subtitle} size="page" as="h1" />
         {children}

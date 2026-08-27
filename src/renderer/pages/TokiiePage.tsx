@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   CONNECTED_DEVICE,
   ICON_BASE_PATH,
@@ -6,32 +7,11 @@ import {
   formatModelCount,
   type InstalledModel
 } from './tokiieContent';
+import { AddModelPage } from './AddModelPage';
+import { IconTile } from '../components/IconTile';
 import { PageShell } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
 import { TitleBlock } from '../components/TitleBlock';
-
-/**
- * The 32px recessed tile that fronts both the device row and each model row
- * (Figma "Overlay", nodes 192:2797 and 192:2828). Figma sizes the tile and its
- * glyph independently, so both dimensions stay explicit.
- */
-interface IconTileProps {
-  src: string;
-  /** Luminosity blending is what greys the colour device photo in the design. */
-  desaturate?: boolean;
-}
-
-function IconTile({ src, desaturate = false }: IconTileProps) {
-  return (
-    <span className="flex size-8 shrink-0 items-center justify-center rounded-[8.421px] bg-fill-tile">
-      <img
-        className={`block size-[16.842px] max-w-none object-contain ${desaturate ? 'mix-blend-luminosity' : ''}`}
-        src={src}
-        alt=""
-      />
-    </span>
-  );
-}
 
 /** "Tokii CDEF is connected" summary card. */
 function DeviceCard() {
@@ -85,8 +65,13 @@ function ModelRow({ model }: ModelRowProps) {
   );
 }
 
+interface LocalModelsCardProps {
+  /** Opens the Add Model panel. */
+  onAddModel: () => void;
+}
+
 /** "Local Models" card: heading, installed list, and the single-runtime note. */
-function LocalModelsCard() {
+function LocalModelsCard({ onAddModel }: LocalModelsCardProps) {
   return (
     <section
       className="flex w-full flex-col items-center overflow-hidden rounded-[12px] border border-surface-card-border bg-surface-card pb-3"
@@ -98,7 +83,9 @@ function LocalModelsCard() {
           subtitle="Download, start, and manage models stored on this Mac."
           as="h2"
         />
-        <PushButton testId="add-model">Add model</PushButton>
+        <PushButton onClick={onAddModel} testId="add-model">
+          Add model
+        </PushButton>
       </div>
 
       <div className="flex w-full flex-col">
@@ -129,12 +116,22 @@ function LocalModelsCard() {
   );
 }
 
-/** The page behind the "Tokiie" nav row: device status and local models. */
+/**
+ * The page behind the "Tokiie" nav row: device status and local models.
+ * "Add model" swaps the whole page for the Add Model panel, which returns here
+ * through the header's Back button.
+ */
 export function TokiiePage() {
+  const [isAddingModel, setIsAddingModel] = useState(false);
+
+  if (isAddingModel) {
+    return <AddModelPage onBack={() => setIsAddingModel(false)} />;
+  }
+
   return (
     <PageShell title="Tokiie" subtitle="Connect Tokii and manage your local models." testId="tokiie">
       <DeviceCard />
-      <LocalModelsCard />
+      <LocalModelsCard onAddModel={() => setIsAddingModel(true)} />
     </PageShell>
   );
 }
