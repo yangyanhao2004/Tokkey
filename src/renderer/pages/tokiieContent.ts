@@ -3,10 +3,14 @@
  * (192:2507). Kept apart from the components so copy and rows can change
  * without touching markup.
  *
- * These are the design's reference values. Nothing here reads from the main
- * process yet, so the page renders the state Figma specifies; wiring it to
- * `window.tokiie` is a separate change.
+ * The device card is still the design's reference value. The installed list is
+ * live: it comes from `useInstalledModels`, and this module owns the
+ * translation from those main-process records into the strings the card draws,
+ * so the components never see bytes or timestamps.
  */
+
+import type { InstalledLocalModel } from '../../shared/types';
+import { formatFileSize } from '../../shared/byteFormatting';
 
 /** Shared with the sidebar so both pages resolve assets from one place. */
 export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
@@ -32,13 +36,22 @@ export interface InstalledModel {
   readonly detail: string;
 }
 
-export const INSTALLED_MODELS: readonly InstalledModel[] = [
-  {
-    id: 'qwen-3-5-9b',
-    name: 'Qwen 3.5 9B',
-    detail: '5.8 GB · Downloaded · balanced local assistant'
-  }
-];
+/** Stands in for the list while it is empty, loading, or unreadable. */
+export const INSTALLED_LOADING_MESSAGE = 'Reading downloaded models…';
+export const INSTALLED_EMPTY_MESSAGE = 'No models downloaded yet. Use "Add model" to download one.';
+
+/**
+ * Turns one model on disk into the card's view of it. The size is the file's
+ * real length rather than the figure the catalog published for it, and prints
+ * in the same decimal unit as the Add Model page's free-space line.
+ */
+export function describeInstalledModel(model: InstalledLocalModel): InstalledModel {
+  const detail = [formatFileSize(model.sizeBytes), 'Downloaded', model.provider]
+    .filter((part) => part.length > 0)
+    .join(' · ');
+
+  return { id: model.id, name: model.name, detail };
+}
 
 export const LOCAL_MODELS_FOOTNOTE =
   'Only one local model can run at a time. Tokii makes the running model available to installed clients automatically.';

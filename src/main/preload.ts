@@ -35,6 +35,8 @@ class PreloadBridge {
       cancelLocalModelDownload: (modelId, request) => ipcRenderer.invoke('models:cancel-download', modelId, request),
       deleteLocalModel: (modelId, request) => ipcRenderer.invoke('models:delete', modelId, request),
       deployLocalModel: (modelId, request) => ipcRenderer.invoke('models:deploy', modelId, request),
+      listInstalledLocalModels: () => ipcRenderer.invoke('models:list-installed'),
+      removeInstalledLocalModel: (modelId) => ipcRenderer.invoke('models:remove-installed', modelId),
       listCloudModelCards: () => ipcRenderer.invoke('models:cloud-cards'),
       connectCloudModel: (cardId) => ipcRenderer.invoke('models:connect-cloud', cardId)
     };

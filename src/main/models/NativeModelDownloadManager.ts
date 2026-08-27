@@ -1,14 +1,16 @@
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { session, type DownloadItem, type Session } from 'electron';
 import type {
+  InstalledLocalModel,
   LocalModelCapability,
   LocalModelDescriptor,
   LocalModelLifecycle,
   LocalModelRow
 } from '../../shared/types';
 import HostDiskProbe from '../host/HostDiskProbe';
+import DownloadedModelStore from './DownloadedModelStore';
 
 interface PersistedDownload {
   modelId: string;
@@ -36,7 +38,7 @@ type ModelStateListener = () => void;
 
 /** Owns Electron DownloadItems and projects them into model lifecycle rows. */
 export class NativeModelDownloadManager {
-  private readonly modelsRoot: string;
+  private readonly store: DownloadedModelStore;
   private readonly persistencePath: string;
   private readonly entries = new Map<string, RuntimeEntry>();
   private readonly pendingUrls = new Map<string, string>();
@@ -50,13 +52,35 @@ export class NativeModelDownloadManager {
     homeDirectory?: string;
     stateListener?: ModelStateListener;
     diskProbe?: HostDiskProbe;
+    store?: DownloadedModelStore;
   } = {}) {
     const homeDirectory = options.homeDirectory ?? os.homedir();
-    this.modelsRoot = path.join(homeDirectory, '.amiswifi', 'models');
+    this.store = options.store ?? new DownloadedModelStore({ homeDirectory });
     this.persistencePath = path.join(homeDirectory, '.amiswifi', 'model_downloads.json');
     this.stateListener = options.stateListener ?? null;
     this.diskProbe = options.diskProbe ?? new HostDiskProbe();
     this.persistenceReady = this.readPersistedDownloads();
+  }
+
+  /**
+   * Everything already on disk, for the Tokiie page's installed list.
+   *
+   * A resumed transfer grows the artifact in place — `createInterruptedDownload`
+   * is handed the final path — so a partial file can look exactly like a
+   * finished one. A saved resume point is what tells the two apart, and a model
+   * that still has one is left out.
+   */
+  async listInstalled(): Promise<InstalledLocalModel[]> {
+    await this.persistenceReady;
+    const unfinished = new Set([...this.persisted.keys()].map((modelId) => this.safeId(modelId)));
+    const installed = await this.store.listInstalled();
+    return installed.filter((model) => !unfinished.has(this.safeId(model.id)));
+  }
+
+  /** Deletes a downloaded model and answers with the list that survived it. */
+  async removeInstalled(modelId: string): Promise<InstalledLocalModel[]> {
+    await this.deleteModel(modelId);
+    return this.listInstalled();
   }
 
   /** Attaches the app session once Electron is ready. */
@@ -111,7 +135,7 @@ export class NativeModelDownloadManager {
     await this.persistenceReady;
     const entry = this.entries.get(modelId);
     entry?.item?.cancel();
-    await rm(path.join(this.modelsRoot, this.safeId(modelId)), { recursive: true, force: true });
+    await this.store.remove(modelId);
     this.persisted.delete(modelId);
     await this.writePersistedDownloads();
     if (entry) {
@@ -128,7 +152,7 @@ export class NativeModelDownloadManager {
     await this.persistenceReady;
     const entry = this.entries.get(modelId);
     entry?.item?.cancel();
-    await rm(path.join(this.modelsRoot, this.safeId(modelId)), { recursive: true, force: true });
+    await this.store.remove(modelId);
     this.entries.delete(modelId);
     this.persisted.delete(modelId);
     await this.writePersistedDownloads();
@@ -214,7 +238,7 @@ export class NativeModelDownloadManager {
     let freeDiskBytes: number | null = null;
     try {
       // The models directory is on the boot data volume the probe reads.
-      await mkdir(this.modelsRoot, { recursive: true });
+      await this.store.ensureRoot();
       freeDiskBytes = (await this.diskProbe.read()).free;
     } catch (error) {
       console.error('[NativeModelDownloadManager] Free space read failed:', error);
@@ -224,20 +248,16 @@ export class NativeModelDownloadManager {
 
   /**
    * Claims a session download for the model that requested it: pins the save
-   * path under `modelsRoot`, mirrors progress into the entry, and on an
+   * path under the models store, mirrors progress into the entry, and on an
    * interrupted transfer retries the next mirror in `sourceUrls`.
-   * The prefix match covers mirrors that redirect before the item exists.
    */
   private handleWillDownload(item: DownloadItem): void {
-    const sourceUrl = item.getURL();
-    const modelId = this.pendingUrls.get(sourceUrl) ?? [...this.pendingUrls.entries()].find(([url]) => sourceUrl.startsWith(url))?.[1];
-    if (!modelId) return;
-    this.pendingUrls.delete(sourceUrl);
+    const claimed = this.claimPendingDownload(item);
+    if (!claimed) return;
+    const { modelId } = claimed;
     const entry = this.entries.get(modelId);
     if (!entry) return;
-    const modelDirectory = path.join(this.modelsRoot, this.safeId(modelId));
-    const destination = path.join(modelDirectory, this.safeRelativePath(entry.descriptor.fileName));
-    item.setSavePath(destination);
+    item.setSavePath(this.store.fileFor(entry.descriptor));
     entry.item = item;
     item.on('updated', (_event, state) => {
       const total = item.getTotalBytes();
@@ -254,6 +274,8 @@ export class NativeModelDownloadManager {
         entry.progress = 1;
         entry.error = null;
         this.persisted.delete(modelId);
+        // The manifest is what lets the Tokiie page name this model offline.
+        void this.store.writeManifest(entry.descriptor);
       } else if (state === 'cancelled') {
         entry.state = 'downloadable';
         entry.progress = null;
@@ -279,6 +301,28 @@ export class NativeModelDownloadManager {
   }
 
   /**
+   * Matches a session download back to the model that asked for it.
+   *
+   * The whole redirect chain has to be searched, not `getURL()`: Hugging Face
+   * and ModelScope both hand a GGUF off to a signed CDN URL on another host, and
+   * by the time the item exists `getURL()` is that final URL, which shares
+   * nothing with the catalog address the download was started from. The chain
+   * still begins with the requested URL.
+   *
+   * A prefix match is accepted too, for a mirror that appends query parameters
+   * of its own to the address it was given.
+   */
+  private claimPendingDownload(item: DownloadItem): { modelId: string } | null {
+    const urlChain = [...item.getURLChain(), item.getURL()];
+    const match = [...this.pendingUrls.entries()].find(([pendingUrl]) =>
+      urlChain.some((url) => url === pendingUrl || url.startsWith(pendingUrl)));
+    if (!match) return null;
+    const [pendingUrl, modelId] = match;
+    this.pendingUrls.delete(pendingUrl);
+    return { modelId };
+  }
+
+  /**
    * A file on disk counts as downloaded unless a resume point is still saved
    * for it, which is exactly the state an unfinished transfer leaves behind.
    *
@@ -288,12 +332,7 @@ export class NativeModelDownloadManager {
    */
   private async isDownloaded(descriptor: LocalModelDescriptor): Promise<boolean> {
     if (this.persisted.has(descriptor.id)) return false;
-    try {
-      const metadata = await stat(path.join(this.modelsRoot, this.safeId(descriptor.id), this.safeRelativePath(descriptor.fileName)));
-      return metadata.isFile() && metadata.size > 0;
-    } catch {
-      return false;
-    }
+    return this.store.hasArtifact(descriptor);
   }
 
   private async persistItem(modelId: string, item: DownloadItem): Promise<void> {
@@ -335,11 +374,6 @@ export class NativeModelDownloadManager {
 
   private safeId(value: string): string {
     return value.replace(/[^a-zA-Z0-9._-]+/g, '_');
-  }
-
-  private safeRelativePath(value: string): string {
-    const parts = value.split(/[\\/]+/).filter((part) => part.length > 0 && part !== '.' && part !== '..');
-    return parts.map((part) => part.replace(/[^a-zA-Z0-9._-]+/g, '_')).join(path.sep) || 'model.bin';
   }
 
   private notify(): void {

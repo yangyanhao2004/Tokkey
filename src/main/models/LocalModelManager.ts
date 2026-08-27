@@ -1,4 +1,5 @@
 import type {
+  InstalledLocalModel,
   LocalModelCatalogRequest,
   LocalModelCatalogScan,
   LocalModelDescriptor,
@@ -61,6 +62,19 @@ export class LocalModelManager {
     await this.ensureCatalog(request);
     await this.downloader.deployModel(this.requireDescriptor(modelId));
     return this.scan(request);
+  }
+
+  /**
+   * What is on disk right now. Deliberately never touches the remote catalog:
+   * the Tokiie page opens on launch and must list installed models offline.
+   */
+  listInstalled(): Promise<InstalledLocalModel[]> {
+    return this.downloader.listInstalled();
+  }
+
+  /** Removes a downloaded model and answers with the remaining installed list. */
+  removeInstalled(modelId: string): Promise<InstalledLocalModel[]> {
+    return this.downloader.removeInstalled(modelId);
   }
 
   private async ensureCatalog(request: LocalModelCatalogRequest): Promise<void> {

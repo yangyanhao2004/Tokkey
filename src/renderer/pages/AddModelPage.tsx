@@ -13,6 +13,7 @@ import {
 } from './addModelContent';
 import { useHostSnapshot } from '../hooks/useHostSnapshot';
 import { ALL_PROVIDERS, useLocalModelCatalog } from '../hooks/useLocalModelCatalog';
+import { DownloadProgressButton } from '../components/DownloadProgressButton';
 import { IconTile } from '../components/IconTile';
 import { PageShell } from '../components/PageShell';
 import { PopUpButton, type PopUpOption } from '../components/PopUpButton';
@@ -125,7 +126,18 @@ function CatalogModelRow({ model, isFirst, isLast, isBusy, onAction }: CatalogMo
         <span className="truncate text-text-secondary">{model.detail}</span>
       </div>
 
-      {action && (
+      {action?.variant === 'progress' && (
+        <DownloadProgressButton
+          progress={model.progress}
+          onClick={() => onAction(model.id, action.kind)}
+          disabled={isBusy}
+          testId={`catalog-${action.kind}-${model.id}`}
+        >
+          {action.label}
+        </DownloadProgressButton>
+      )}
+
+      {action && action.variant !== 'progress' && (
         <PushButton
           variant={action.variant}
           onClick={() => onAction(model.id, action.kind)}
@@ -134,6 +146,15 @@ function CatalogModelRow({ model, isFirst, isLast, isBusy, onAction }: CatalogMo
         >
           {action.label}
         </PushButton>
+      )}
+
+      {!action && model.status && (
+        <span
+          className="flex h-[24px] shrink-0 items-center rounded-[6px] bg-black/5 px-2 text-[10px] leading-[16px] font-medium text-text-secondary"
+          data-testid={`catalog-status-${model.id}`}
+        >
+          {model.status}
+        </span>
       )}
     </div>
   );

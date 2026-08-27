@@ -2,12 +2,15 @@ import { useState } from 'react';
 import {
   CONNECTED_DEVICE,
   ICON_BASE_PATH,
-  INSTALLED_MODELS,
+  INSTALLED_EMPTY_MESSAGE,
+  INSTALLED_LOADING_MESSAGE,
   LOCAL_MODELS_FOOTNOTE,
+  describeInstalledModel,
   formatModelCount,
   type InstalledModel
 } from './tokiieContent';
 import { AddModelPage } from './AddModelPage';
+import { useInstalledModels } from '../hooks/useInstalledModels';
 import { IconTile } from '../components/IconTile';
 import { PageShell } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
@@ -41,10 +44,13 @@ function DeviceCard() {
 
 interface ModelRowProps {
   model: InstalledModel;
+  /** True while this row's own removal is still running in the main process. */
+  isBusy: boolean;
+  onRemove: (modelId: string) => void;
 }
 
 /** One installed model with its start/remove actions. */
-function ModelRow({ model }: ModelRowProps) {
+function ModelRow({ model, isBusy, onRemove }: ModelRowProps) {
   return (
     <div
       className="flex w-full items-center justify-between border-t border-separator p-4"
@@ -56,12 +62,35 @@ function ModelRow({ model }: ModelRowProps) {
       </div>
 
       <div className="flex shrink-0 items-center justify-end gap-2">
-        <PushButton testId={`model-start-${model.id}`}>Start</PushButton>
-        <PushButton variant="plain" testId={`model-remove-${model.id}`}>
+        <PushButton disabled={isBusy} testId={`model-start-${model.id}`}>
+          Start
+        </PushButton>
+        <PushButton
+          variant="plain"
+          onClick={() => onRemove(model.id)}
+          disabled={isBusy}
+          testId={`model-remove-${model.id}`}
+        >
           Remove
         </PushButton>
       </div>
     </div>
+  );
+}
+
+interface InstalledNoticeProps {
+  message: string;
+}
+
+/** Stands in for the list while nothing is installed or the scan failed. */
+function InstalledNotice({ message }: InstalledNoticeProps) {
+  return (
+    <p
+      className="w-full border-t border-separator px-4 py-3 text-[10px] leading-[12px] text-text-secondary"
+      data-testid="installed-notice"
+    >
+      {message}
+    </p>
   );
 }
 
@@ -72,12 +101,18 @@ interface LocalModelsCardProps {
 
 /** "Local Models" card: heading, installed list, and the single-runtime note. */
 function LocalModelsCard({ onAddModel }: LocalModelsCardProps) {
+  const installed = useInstalledModels();
+  const models = installed.models ?? [];
+  const emptyMessage = installed.isLoading ? INSTALLED_LOADING_MESSAGE : INSTALLED_EMPTY_MESSAGE;
+
   return (
     <section
-      className="flex w-full flex-col items-center overflow-hidden rounded-[12px] border border-surface-card-border bg-surface-card pb-3"
+      // `min-h-0` with the scrolling list below keeps any number of installed
+      // models inside the page instead of pushing the footnote out of view.
+      className="flex min-h-0 w-full flex-col items-center overflow-hidden rounded-[12px] border border-surface-card-border bg-surface-card pb-3"
       data-testid="local-models-card"
     >
-      <div className="flex w-full items-center justify-between px-4 py-3">
+      <div className="flex w-full shrink-0 items-center justify-between px-4 py-3">
         <TitleBlock
           title="Local Models"
           subtitle="Download, start, and manage models stored on this Mac."
@@ -88,19 +123,30 @@ function LocalModelsCard({ onAddModel }: LocalModelsCardProps) {
         </PushButton>
       </div>
 
-      <div className="flex w-full flex-col">
-        <div className="flex w-full items-center justify-between px-4 py-2 text-[10px] leading-[12px]">
+      <div className="flex min-h-0 w-full flex-col overflow-y-auto">
+        <div className="flex w-full shrink-0 items-center justify-between px-4 py-2 text-[10px] leading-[12px]">
           <span className="font-bold text-text-primary">Installed</span>
           <span className="tracking-[0.0997px] text-text-secondary">
-            {formatModelCount(INSTALLED_MODELS.length)}
+            {formatModelCount(models.length)}
           </span>
         </div>
-        {INSTALLED_MODELS.map((model) => (
-          <ModelRow key={model.id} model={model} />
+
+        {/* A failed scan still shows whatever rows survived from the last one. */}
+        {installed.error && <InstalledNotice message={installed.error} />}
+
+        {models.length === 0 && !installed.error && <InstalledNotice message={emptyMessage} />}
+
+        {models.map((model) => (
+          <ModelRow
+            key={model.id}
+            model={describeInstalledModel(model)}
+            isBusy={installed.busyModelId === model.id}
+            onRemove={installed.remove}
+          />
         ))}
       </div>
 
-      <div className="flex w-full flex-col px-4">
+      <div className="flex w-full shrink-0 flex-col px-4">
         <p className="flex w-full items-start gap-1.5 rounded-[8px] bg-fill-tile p-2">
           <img
             className="block size-[12px] shrink-0 max-w-none"

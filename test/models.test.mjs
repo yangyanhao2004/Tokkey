@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { DownloadedModelStore } from '../dist/main/models/DownloadedModelStore.js';
 import { LocalModelCatalogService } from '../dist/main/models/LocalModelCatalogService.js';
 import { LocalModelManager } from '../dist/main/models/LocalModelManager.js';
 import { NativeModelDownloadManager } from '../dist/main/models/NativeModelDownloadManager.js';
@@ -288,6 +289,194 @@ test('models this Mac has the memory for are listed before the ones it does not'
 
   // Alphabetically "A 700B" leads; what this Mac can run has to win over that.
   assert.deepEqual(rows.map((row) => row.name), ['Z 8B', 'A 700B']);
+});
+
+test('a completed download leaves a manifest the installed list can read offline', async () => {
+  const home = createHomeDirectory();
+  const store = new DownloadedModelStore({ homeDirectory: home });
+  writeModelFile(home, 4096);
+
+  await store.writeManifest(ARTIFACT);
+  const installed = await store.listInstalled();
+
+  assert.equal(installed.length, 1);
+  assert.equal(installed[0].id, ARTIFACT.id);
+  assert.equal(installed[0].name, 'Qwen3 8B Q4_K_M');
+  assert.equal(installed[0].provider, 'Qwen');
+  // The file's real length, not the two-decimal GB figure the catalog quotes.
+  assert.equal(installed[0].sizeBytes, 4096);
+});
+
+test('a model folder with no manifest is still listed, named after its artifact', async () => {
+  const home = createHomeDirectory();
+  // What a download from before manifests existed, or a hand-placed file, looks like.
+  writeModelFile(home, 4096);
+
+  const [installed] = await new DownloadedModelStore({ homeDirectory: home }).listInstalled();
+
+  assert.equal(installed.name, ARTIFACT.fileName);
+  assert.equal(installed.sizeBytes, 4096);
+});
+
+test('an emptied model folder drops out of the installed list', async () => {
+  const home = createHomeDirectory();
+  const store = new DownloadedModelStore({ homeDirectory: home });
+  writeModelFile(home, 4096);
+  await store.writeManifest(ARTIFACT);
+  // The artifact deleted from Finder; only the manifest is left behind.
+  rmSync(path.join(home, '.amiswifi', 'models', ARTIFACT.id.replaceAll(':', '_'), ARTIFACT.fileName));
+
+  assert.deepEqual(await store.listInstalled(), []);
+});
+
+test('a half-transferred file is not offered as an installed model', async () => {
+  const home = createHomeDirectory();
+  const store = new DownloadedModelStore({ homeDirectory: home });
+  writeModelFile(home, 4096);
+  await store.writeManifest(ARTIFACT);
+  // Chromium writes straight to the final path, so only the saved resume point
+  // tells a partial file apart from a finished one.
+  mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
+  writeFileSync(
+    path.join(home, '.amiswifi', 'model_downloads.json'),
+    JSON.stringify([{ modelId: ARTIFACT.id, path: 'x', urlChain: ['https://huggingface.co/example.gguf'], offset: 4096, length: 9999 }]),
+    'utf8'
+  );
+
+  const installed = await new NativeModelDownloadManager({ homeDirectory: home }).listInstalled();
+
+  assert.deepEqual(installed, []);
+});
+
+/**
+ * Stands in for one Electron DownloadItem. `getURL()` answers with the final
+ * CDN address rather than the requested one, which is what the real item does
+ * after Hugging Face redirects, and what the manager has to survive.
+ */
+class StubDownloadItem {
+  constructor(urlChain) {
+    this.urlChain = urlChain;
+    this.savePath = '';
+    this.listeners = new Map();
+    this.receivedBytes = 0;
+    this.totalBytes = 4096;
+  }
+
+  getURL() {
+    return this.urlChain[this.urlChain.length - 1];
+  }
+
+  getURLChain() {
+    return [...this.urlChain];
+  }
+
+  setSavePath(value) {
+    this.savePath = value;
+  }
+
+  getSavePath() {
+    return this.savePath;
+  }
+
+  getState() {
+    return 'progressing';
+  }
+
+  getTotalBytes() {
+    return this.totalBytes;
+  }
+
+  getReceivedBytes() {
+    return this.receivedBytes;
+  }
+
+  getLastModifiedTime() {
+    return '';
+  }
+
+  getETag() {
+    return '';
+  }
+
+  getStartTime() {
+    return 0;
+  }
+
+  cancel() {}
+
+  on(event, listener) {
+    this.listeners.set(event, listener);
+  }
+
+  once(event, listener) {
+    this.listeners.set(event, listener);
+  }
+
+  emit(event, state) {
+    this.listeners.get(event)?.({}, state);
+  }
+}
+
+/** Captures the manager's `will-download` handler so a stub item can be fed to it. */
+class StubDownloadSession {
+  constructor() {
+    this.handler = null;
+    this.requestedUrls = [];
+  }
+
+  on(event, handler) {
+    if (event === 'will-download') this.handler = handler;
+  }
+
+  downloadURL(url) {
+    this.requestedUrls.push(url);
+  }
+
+  createInterruptedDownload() {}
+}
+
+test('a download redirected to another host is still claimed by the model that started it', async () => {
+  const home = createHomeDirectory();
+  const downloadSession = new StubDownloadSession();
+  const manager = new NativeModelDownloadManager({ homeDirectory: home });
+  manager.attachDownloadSession(downloadSession);
+
+  await manager.startDownload(ARTIFACT, NO_LIMITS);
+  // What Hugging Face really does: 302 the GGUF to a signed URL on a CDN host
+  // that shares no prefix with the catalog address.
+  const item = new StubDownloadItem([
+    ARTIFACT.huggingFaceUrl,
+    'https://us.aws.cdn.hf.co/xet-bridge-us/abc123?Signature=xyz'
+  ]);
+  downloadSession.handler({}, item);
+
+  assert.equal(item.getSavePath(), path.join(home, '.amiswifi', 'models', ARTIFACT.id.replaceAll(':', '_'), ARTIFACT.fileName));
+});
+
+test('a finished transfer records the manifest and reports the model as downloaded', async () => {
+  const home = createHomeDirectory();
+  const downloadSession = new StubDownloadSession();
+  const manager = new NativeModelDownloadManager({ homeDirectory: home });
+  manager.attachDownloadSession(downloadSession);
+  await manager.startDownload(ARTIFACT, NO_LIMITS);
+  const item = new StubDownloadItem([ARTIFACT.huggingFaceUrl]);
+  downloadSession.handler({}, item);
+
+  // Chromium only publishes the file at the end, so write it before "done".
+  writeModelFile(home, 4096);
+  item.receivedBytes = 4096;
+  item.emit('done', 'completed');
+  // The manifest is written without blocking the event; let it land.
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const [row] = await manager.projectRows([ARTIFACT], NO_LIMITS);
+  assert.equal(row.lifecycle, 'downloaded');
+  assert.equal(row.progress, 1);
+
+  const [installed] = await manager.listInstalled();
+  assert.equal(installed.id, ARTIFACT.id);
+  assert.equal(installed.name, ARTIFACT.name);
+  assert.equal(installed.provider, 'Qwen');
 });
 
 test('a model larger than the free disk is shown but not offered', async () => {

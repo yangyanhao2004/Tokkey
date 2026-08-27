@@ -169,6 +169,8 @@ export interface TokiieApi {
   cancelLocalModelDownload(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
   deleteLocalModel(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
   deployLocalModel(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
+  listInstalledLocalModels(): Promise<InstalledLocalModel[]>;
+  removeInstalledLocalModel(modelId: string): Promise<InstalledLocalModel[]>;
   listCloudModelCards(): Promise<CloudModelCard[]>;
   connectCloudModel(cardId: string): Promise<CloudModelConnection>;
 }
@@ -278,6 +280,24 @@ export interface LocalModelRow extends LocalModelDescriptor {
   error: string | null;
   endpoint: string | null;
   isTargetSupported: boolean;
+}
+
+/**
+ * A model whose bytes are on this Mac, read from its manifest in
+ * `~/.amiswifi/models`. Independent of the remote catalog, so the Tokiie page
+ * can list what is installed while offline.
+ */
+export interface InstalledLocalModel {
+  id: string;
+  name: string;
+  provider: string;
+  series: string;
+  fileName: string;
+  /** Actual bytes on disk, not the rounded figure the catalog publishes. */
+  sizeBytes: number;
+  /** Unix milliseconds at which the download completed. */
+  downloadedAt: number;
+  filePath: string;
 }
 
 /** Local machine capability used for download gates and runtime display. */

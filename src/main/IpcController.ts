@@ -22,7 +22,7 @@ import type {
   SkillInstallResult
 } from '../shared/types';
 import type { McpCatalogScan } from '../shared/types';
-import type { LocalModelCatalogRequest } from '../shared/types';
+import type { InstalledLocalModel, LocalModelCatalogRequest } from '../shared/types';
 import { McpConfigurationPreparer } from '../shared/McpConfiguration';
 import { LocalSkillCatalogScanner } from './mcpnskills/SkillCatalogScanner';
 import { SKILL_AGENT_ORDER, SkillDeployer } from './mcpnskills/SkillDeployer';
@@ -131,6 +131,9 @@ export default class IpcController {
         this.deleteLocalModel(this.requireModelId(modelId), this.requireModelRequest(request)),
       'models:deploy': (modelId: unknown, request: unknown) =>
         this.deployLocalModel(this.requireModelId(modelId), this.requireModelRequest(request)),
+      'models:list-installed': () => this.listInstalledLocalModels(),
+      'models:remove-installed': (modelId: unknown) =>
+        this.removeInstalledLocalModel(this.requireModelId(modelId)),
       'models:cloud-cards': () => this.listCloudModelCards(),
       'models:connect-cloud': (cardId: unknown) =>
         this.connectCloudModel(this.requireString(cardId, 'Cloud model card ID'))
@@ -234,6 +237,16 @@ export default class IpcController {
   /** Marks a downloaded model as deployed for the local target. */
   deployLocalModel(modelId: string, request: LocalModelCatalogRequest = {}) {
     return this.localModelManager.deployModel(modelId, request);
+  }
+
+  /** Lists the models already stored under ~/.amiswifi/models. */
+  listInstalledLocalModels(): Promise<InstalledLocalModel[]> {
+    return this.localModelManager.listInstalled();
+  }
+
+  /** Deletes one downloaded model and returns the installed list that remains. */
+  removeInstalledLocalModel(modelId: string): Promise<InstalledLocalModel[]> {
+    return this.localModelManager.removeInstalled(modelId);
   }
 
   /** Lists the hardcoded cloud model cards the renderer can connect to. */

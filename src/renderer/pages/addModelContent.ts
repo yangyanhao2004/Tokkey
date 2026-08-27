@@ -41,11 +41,14 @@ export const HOST_MACHINE: HostMachine = {
 /** What the row's single button does when pressed. */
 export type CatalogActionKind = 'download' | 'cancel' | 'remove';
 
-/** The one action a row offers, or `null` when the row is not actionable. */
+/**
+ * The one action a row offers, or `null` when the row is not actionable.
+ * `progress` draws the button as the transfer's own progress track.
+ */
 export interface CatalogModelAction {
   readonly kind: CatalogActionKind;
   readonly label: string;
-  readonly variant: 'filled' | 'tinted';
+  readonly variant: 'filled' | 'tinted' | 'progress';
 }
 
 /** A catalog row as the card draws it: two lines of text and one button. */
@@ -55,6 +58,13 @@ export interface CatalogModel {
   /** Meta line, already joined with the middot the design uses. */
   readonly detail: string;
   readonly action: CatalogModelAction | null;
+  /**
+   * Read-only chip shown where the button would be, for a row that has arrived
+   * somewhere rather than offering a next step, e.g. "Downloaded".
+   */
+  readonly status: string | null;
+  /** Transfer progress for a `progress` action; `null` for every other row. */
+  readonly progress: number | null;
 }
 
 export const CATALOG_HEADING = 'Recommended for this Mac';
@@ -65,7 +75,7 @@ export const CATALOG_LOADING_MESSAGE = 'Loading the model catalog…';
 export const CATALOG_EMPTY_MESSAGE = 'No models match this filter.';
 
 const DOWNLOAD_ACTION: CatalogModelAction = { kind: 'download', label: 'Download', variant: 'filled' };
-const CANCEL_ACTION: CatalogModelAction = { kind: 'cancel', label: 'Cancel', variant: 'tinted' };
+const CANCEL_ACTION: CatalogModelAction = { kind: 'cancel', label: 'Cancel', variant: 'progress' };
 const REMOVE_ACTION: CatalogModelAction = { kind: 'remove', label: 'Remove', variant: 'tinted' };
 const RETRY_ACTION: CatalogModelAction = { kind: 'download', label: 'Retry', variant: 'filled' };
 
@@ -73,18 +83,28 @@ const RETRY_ACTION: CatalogModelAction = { kind: 'download', label: 'Retry', var
  * A row with no source, or one this Mac cannot hold, offers no button at all:
  * its meta line already carries the reason, and an inert button would only
  * invite a press that has to fail.
+ *
+ * A finished download offers none either — this page's job ends once the bytes
+ * are on disk, and deleting them belongs to the Tokiie page's installed list,
+ * so the row reports "Downloaded" instead.
  */
 const LIFECYCLE_ACTIONS: Record<LocalModelLifecycle, CatalogModelAction | null> = {
   downloadable: DOWNLOAD_ACTION,
   pendingArtifact: null,
   downloading: CANCEL_ACTION,
-  downloaded: REMOVE_ACTION,
+  downloaded: null,
   downloadFailed: RETRY_ACTION,
   deployPreparing: null,
-  deployed: REMOVE_ACTION,
+  deployed: null,
   deployStopping: null,
   deployFailed: REMOVE_ACTION,
   unsupported: null
+};
+
+/** Read-only chips for rows that report a state rather than offer an action. */
+const LIFECYCLE_STATUS: Partial<Record<LocalModelLifecycle, string>> = {
+  downloaded: 'Downloaded',
+  deployed: 'Running'
 };
 
 /** Status half of the meta line. A reported error always wins over the state. */
@@ -139,7 +159,9 @@ export function describeCatalogModel(model: LocalModelRow): CatalogModel {
     id: model.id,
     name: model.name,
     detail,
-    action: LIFECYCLE_ACTIONS[model.lifecycle]
+    action: LIFECYCLE_ACTIONS[model.lifecycle],
+    status: LIFECYCLE_STATUS[model.lifecycle] ?? null,
+    progress: model.lifecycle === 'downloading' ? model.progress : null
   };
 }
 
