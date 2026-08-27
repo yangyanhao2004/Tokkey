@@ -73,6 +73,39 @@ export const CATALOG_SUBHEADING = 'Sizing the catalog against this Mac…';
 export const PROVIDER_FILTER_LABEL = 'All providers';
 export const CATALOG_LOADING_MESSAGE = 'Loading the model catalog…';
 export const CATALOG_EMPTY_MESSAGE = 'No models match this filter.';
+export const CATALOG_SEARCH_LABEL = 'Search models';
+export const CATALOG_SEARCH_PLACEHOLDER = 'Search models by name, e.g. "qwen3 4b"';
+
+/**
+ * The catalog runs to thousands of rows, so a search has to narrow a name the
+ * user only half remembers. Every whitespace-separated word must appear
+ * somewhere in the row, in any order — "qwen 4b" finds "Qwen3 4B Q4_K_M" — and
+ * the file name is searched too, so a quantization like "q4_k_m" matches even
+ * when the display name spells it differently.
+ */
+export function matchesModelQuery(model: LocalModelRow, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter((word) => word.length > 0);
+  if (words.length === 0) return true;
+
+  const haystack = [model.name, model.series, model.provider, model.fileName]
+    .join(' ')
+    .toLowerCase();
+  return words.every((word) => haystack.includes(word));
+}
+
+/** The rows a search leaves standing, in the order the scan reported them. */
+export function filterCatalogModels(models: readonly LocalModelRow[], query: string): LocalModelRow[] {
+  return models.filter((model) => matchesModelQuery(model, query));
+}
+
+/**
+ * What stands in for an empty list: a search that found nothing names the term
+ * it failed on, so the reason is never mistaken for an empty catalog.
+ */
+export function describeEmptyCatalog(isLoading: boolean, query: string): string {
+  if (isLoading) return CATALOG_LOADING_MESSAGE;
+  return query.trim().length > 0 ? `No models match “${query.trim()}”.` : CATALOG_EMPTY_MESSAGE;
+}
 
 const DOWNLOAD_ACTION: CatalogModelAction = { kind: 'download', label: 'Download', variant: 'filled' };
 const CANCEL_ACTION: CatalogModelAction = { kind: 'cancel', label: 'Cancel', variant: 'progress' };

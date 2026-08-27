@@ -1,13 +1,14 @@
 import type { HostResourceGauge } from '../../shared/types';
 import {
-  CATALOG_EMPTY_MESSAGE,
   CATALOG_HEADING,
-  CATALOG_LOADING_MESSAGE,
+  CATALOG_SEARCH_LABEL,
+  CATALOG_SEARCH_PLACEHOLDER,
   HOST_MACHINE,
   ICON_BASE_PATH,
   PROVIDER_FILTER_LABEL,
   describeCatalogCapability,
   describeCatalogModel,
+  describeEmptyCatalog,
   type CatalogActionKind,
   type CatalogModel
 } from './addModelContent';
@@ -18,6 +19,7 @@ import { IconTile } from '../components/IconTile';
 import { PageShell } from '../components/PageShell';
 import { PopUpButton, type PopUpOption } from '../components/PopUpButton';
 import { PushButton } from '../components/PushButton';
+import { SearchField } from '../components/SearchField';
 import { TitleBlock } from '../components/TitleBlock';
 
 interface CapacityMeterCellProps {
@@ -183,10 +185,10 @@ function CatalogNotice({ message, onRetry }: CatalogNoticeProps) {
   );
 }
 
-/** "Recommended for this Mac": provider filter and the downloadable models. */
+/** "Recommended for this Mac": provider filter, name search, and the models. */
 function CatalogCard() {
   const catalog = useLocalModelCatalog();
-  const models = catalog.scan?.models ?? [];
+  const models = catalog.models;
   // The "all" entry is the filter's own, so it leads the providers the scan found.
   const providerOptions: PopUpOption[] = [
     { value: ALL_PROVIDERS, label: PROVIDER_FILTER_LABEL },
@@ -202,18 +204,28 @@ function CatalogCard() {
       className="flex min-h-0 w-full flex-1 flex-col gap-4 overflow-hidden rounded-[12px] border border-surface-panel-border bg-white p-4"
       data-testid="catalog-card"
     >
-      <div className="flex w-full items-center justify-between">
-        <TitleBlock
-          title={CATALOG_HEADING}
-          subtitle={describeCatalogCapability(catalog.scan?.capability ?? null)}
-          as="h2"
-        />
-        <PopUpButton
-          label={selectedLabel}
-          options={providerOptions}
-          value={catalog.provider}
-          onChange={catalog.selectProvider}
-          testId="provider-filter"
+      <div className="flex w-full shrink-0 flex-col gap-2">
+        <div className="flex w-full items-center justify-between">
+          <TitleBlock
+            title={CATALOG_HEADING}
+            subtitle={describeCatalogCapability(catalog.scan?.capability ?? null)}
+            as="h2"
+          />
+          <PopUpButton
+            label={selectedLabel}
+            options={providerOptions}
+            value={catalog.provider}
+            onChange={catalog.selectProvider}
+            testId="provider-filter"
+          />
+        </div>
+
+        <SearchField
+          value={catalog.query}
+          onChange={catalog.search}
+          placeholder={CATALOG_SEARCH_PLACEHOLDER}
+          label={CATALOG_SEARCH_LABEL}
+          testId="catalog-search"
         />
       </div>
 
@@ -222,9 +234,7 @@ function CatalogCard() {
         {catalog.error && <CatalogNotice message={catalog.error} onRetry={catalog.refresh} />}
 
         {models.length === 0 && !catalog.error && (
-          <CatalogNotice
-            message={catalog.isLoading ? CATALOG_LOADING_MESSAGE : CATALOG_EMPTY_MESSAGE}
-          />
+          <CatalogNotice message={describeEmptyCatalog(catalog.isLoading, catalog.query)} />
         )}
 
         {models.map((model, index) => (

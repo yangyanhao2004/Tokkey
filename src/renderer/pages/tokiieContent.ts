@@ -54,7 +54,7 @@ export function describeInstalledModel(model: InstalledLocalModel): InstalledMod
 }
 
 export const LOCAL_MODELS_FOOTNOTE =
-  'Only one local model can run at a time. Tokii makes the running model available to installed clients automatically.';
+  'Only one local model can run at a time.';
 
 /**
  * Renders the count beside the "Installed" heading, e.g. "1 model".
