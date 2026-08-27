@@ -1,0 +1,440 @@
+{
+  "capturedAt": "2026-08-27T02:58:55.974Z",
+  "target": {
+    "contentWidth": 900,
+    "contentHeight": 690
+  },
+  "windowBounds": {
+    "x": 285,
+    "y": 69,
+    "width": 900,
+    "height": 690
+  },
+  "contentBounds": {
+    "x": 285,
+    "y": 69,
+    "width": 900,
+    "height": 690
+  },
+  "screenshot": {
+    "width": 1800,
+    "height": 1380
+  },
+  "renderer": {
+    "viewport": {
+      "width": 900,
+      "height": 690,
+      "devicePixelRatio": 1,
+      "documentWidth": 900,
+      "documentHeight": 690
+    },
+    "elements": [
+      {
+        "testId": "sidebar",
+        "tagName": "aside",
+        "role": null,
+        "accessibleName": "Tokiie navigation",
+        "text": "TokiiCoreTokiieReadyRouterAgent HubMemoryPetWorkspaceChatSystemDashboardSettingsINTokiie AccountSign In",
+        "bounds": {
+          "x": 11,
+          "y": 11,
+          "width": 216,
+          "height": 668
+        },
+        "visible": true
+      },
+      {
+        "testId": "window-controls",
+        "tagName": "div",
+        "role": null,
+        "accessibleName": "",
+        "text": "",
+        "bounds": {
+          "x": 23,
+          "y": 23,
+          "width": 192,
+          "height": 31.19
+        },
+        "visible": true
+      },
+      {
+        "testId": "sidebar-brand",
+        "tagName": "div",
+        "role": null,
+        "accessibleName": "Tokiie",
+        "text": "Tokiie",
+        "bounds": {
+          "x": 23,
+          "y": 78.19,
+          "width": 192,
+          "height": 48
+        },
+        "visible": true
+      },
+      {
+        "testId": null,
+        "tagName": "nav",
+        "role": null,
+        "accessibleName": "CoreTokiieReadyRouterAgent HubMemoryPetWorkspaceChatSystemDashboardSettings",
+        "text": "CoreTokiieReadyRouterAgent HubMemoryPetWorkspaceChatSystemDashboardSettings",
+        "bounds": {
+          "x": 23,
+          "y": 126.19,
+          "width": 192,
+          "height": 354
+        },
+        "visible": true
+      },
+      {
+        "testId": null,
+        "tagName": "h2",
+        "role": null,
+        "accessibleName": "Core",
+        "text": "Core",
+        "bounds": {
+          "x": 23,
+          "y": 126.19,
+          "width": 192,
+          "height": 14
+        },
+        "visible": true
+      },
+      {
+        "testId": "nav-item-tokiie",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "TokiieReady",
+        "text": "TokiieReady",
+        "bounds": {
+          "x": 23,
+          "y": 146.19,
+          "width": 192,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": "nav-item-router",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Router",
+        "text": "Router",
+        "bounds": {
+          "x": 23,
+          "y": 180.19,
+          "width": 192,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": "nav-item-agent-hub",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Agent Hub",
+        "text": "Agent Hub",
+        "bounds": {
+          "x": 23,
+          "y": 214.19,
+          "width": 192,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": "nav-item-memory",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Memory",
+        "text": "Memory",
+        "bounds": {
+          "x": 23,
+          "y": 248.19,
+          "width": 192,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": "nav-item-pet",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Pet",
+        "text": "Pet",
+        "bounds": {
+          "x": 23,
+          "y": 282.19,
+          "width": 192,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": null,
+        "tagName": "h2",
+        "role": null,
+        "accessibleName": "Workspace",
+        "text": "Workspace",
+        "bounds": {
+          "x": 23,
+          "y": 316.19,
+          "width": 192,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": "nav-item-chat",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Chat",
+        "text": "Chat",
+        "bounds": {
+          "x": 23,
+          "y": 350.19,
+          "width": 192,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": null,
+        "tagName": "h2",
+        "role": null,
+        "accessibleName": "System",
+        "text": "System",
+        "bounds": {
+          "x": 23,
+          "y": 384.19,
+          "width": 192,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": "nav-item-dashboard",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Dashboard",
+        "text": "Dashboard",
+        "bounds": {
+          "x": 23,
+          "y": 418.19,
+          "width": 192,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": "nav-item-settings",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Settings",
+        "text": "Settings",
+        "bounds": {
+          "x": 23,
+          "y": 452.19,
+          "width": 192,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": "account-button",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "INTokiie AccountSign In",
+        "text": "INTokiie AccountSign In",
+        "bounds": {
+          "x": 23,
+          "y": 624.17,
+          "width": 192,
+          "height": 42.83
+        },
+        "visible": true
+      },
+      {
+        "testId": "main-pane",
+        "tagName": "main",
+        "role": null,
+        "accessibleName": "Tokiie connectedTokiieConnect Tokii and manage your local models.Tokii CDEF is connectedConnected via USB-C · local runtime available to supported clientsConnectedLocal ModelsDownload, start, and manage models stored on this Mac.Add modelInstalled1 modelQwen 3.5 9B5.8 GB · Downloaded · balanced local assistantStartRemoveOnly one local model can run at a time. Tokii makes the running model available to installed clients automatically.",
+        "text": "Tokiie connectedTokiieConnect Tokii and manage your local models.Tokii CDEF is connectedConnected via USB-C · local runtime available to supported clientsConnectedLocal ModelsDownload, start, and manage models stored on this Mac.Add modelInstalled1 modelQwen 3.5 9B5.8 GB · Downloaded · balanced local assistantStartRemoveOnly one local model can run at a time. Tokii makes the running model available to installed clients automatically.",
+        "bounds": {
+          "x": 237,
+          "y": 11,
+          "width": 652,
+          "height": 668
+        },
+        "visible": true
+      },
+      {
+        "testId": "main-header",
+        "tagName": "header",
+        "role": null,
+        "accessibleName": "Tokiie connected",
+        "text": "Tokiie connected",
+        "bounds": {
+          "x": 237,
+          "y": 11,
+          "width": 652,
+          "height": 52
+        },
+        "visible": true
+      },
+      {
+        "testId": "nav-back",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Go back",
+        "text": "",
+        "bounds": {
+          "x": 262,
+          "y": 23,
+          "width": 30,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": "nav-forward",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Go forward",
+        "text": "",
+        "bounds": {
+          "x": 292,
+          "y": 23,
+          "width": 30,
+          "height": 28
+        },
+        "visible": true
+      },
+      {
+        "testId": "connection-pill",
+        "tagName": "span",
+        "role": null,
+        "accessibleName": "Tokiie connected",
+        "text": "Tokiie connected",
+        "bounds": {
+          "x": 740.05,
+          "y": 25.5,
+          "width": 124.95,
+          "height": 23
+        },
+        "visible": true
+      },
+      {
+        "testId": null,
+        "tagName": "h1",
+        "role": null,
+        "accessibleName": "Tokiie",
+        "text": "Tokiie",
+        "bounds": {
+          "x": 261,
+          "y": 87,
+          "width": 604,
+          "height": 24
+        },
+        "visible": true
+      },
+      {
+        "testId": "device-card",
+        "tagName": "section",
+        "role": null,
+        "accessibleName": "Tokii CDEF is connectedConnected via USB-C · local runtime available to supported clientsConnected",
+        "text": "Tokii CDEF is connectedConnected via USB-C · local runtime available to supported clientsConnected",
+        "bounds": {
+          "x": 261,
+          "y": 145,
+          "width": 604,
+          "height": 66
+        },
+        "visible": true
+      },
+      {
+        "testId": "local-models-card",
+        "tagName": "section",
+        "role": null,
+        "accessibleName": "Local ModelsDownload, start, and manage models stored on this Mac.Add modelInstalled1 modelQwen 3.5 9B5.8 GB · Downloaded · balanced local assistantStartRemoveOnly one local model can run at a time. Tokii makes the running model available to installed clients automatically.",
+        "text": "Local ModelsDownload, start, and manage models stored on this Mac.Add modelInstalled1 modelQwen 3.5 9B5.8 GB · Downloaded · balanced local assistantStartRemoveOnly one local model can run at a time. Tokii makes the running model available to installed clients automatically.",
+        "bounds": {
+          "x": 261,
+          "y": 227,
+          "width": 604,
+          "height": 189
+        },
+        "visible": true
+      },
+      {
+        "testId": null,
+        "tagName": "h2",
+        "role": null,
+        "accessibleName": "Local Models",
+        "text": "Local Models",
+        "bounds": {
+          "x": 278,
+          "y": 240,
+          "width": 274.36,
+          "height": 14
+        },
+        "visible": true
+      },
+      {
+        "testId": "add-model",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Add model",
+        "text": "Add model",
+        "bounds": {
+          "x": 779.38,
+          "y": 243,
+          "width": 68.63,
+          "height": 24
+        },
+        "visible": true
+      },
+      {
+        "testId": "model-row-qwen-3-5-9b",
+        "tagName": "div",
+        "role": null,
+        "accessibleName": "Qwen 3.5 9B5.8 GB · Downloaded · balanced local assistantStartRemove",
+        "text": "Qwen 3.5 9B5.8 GB · Downloaded · balanced local assistantStartRemove",
+        "bounds": {
+          "x": 262,
+          "y": 310,
+          "width": 602,
+          "height": 65
+        },
+        "visible": true
+      },
+      {
+        "testId": "model-start-qwen-3-5-9b",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Start",
+        "text": "Start",
+        "bounds": {
+          "x": 744.66,
+          "y": 331,
+          "width": 40.44,
+          "height": 24
+        },
+        "visible": true
+      },
+      {
+        "testId": "model-remove-qwen-3-5-9b",
+        "tagName": "button",
+        "role": null,
+        "accessibleName": "Remove",
+        "text": "Remove",
+        "bounds": {
+          "x": 793.09,
+          "y": 331,
+          "width": 54.91,
+          "height": 24
+        },
+        "visible": true
+      }
+    ]
+  }
+}

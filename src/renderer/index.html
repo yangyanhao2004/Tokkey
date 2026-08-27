@@ -8,13 +8,11 @@
       content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:"
     />
     <title>Tokiie</title>
+    <link rel="stylesheet" href="./index.css" />
+    <script src="./renderer.js" defer></script>
   </head>
-  <body>
-    <!--
-      The UI was removed; this is an empty shell kept so the app still opens a
-      window. A new renderer entry point goes here, alongside its stylesheet and
-      the matching copy steps in the package.json build script.
-    -->
-    <div id="app"></div>
+  <body class="bg-[#ececec] font-sans">
+    <!-- 10px is the gap Figma leaves between the aside and the main pane. -->
+    <div id="app" class="flex h-full gap-[10px] p-[11px]"></div>
   </body>
 </html>

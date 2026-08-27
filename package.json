@@ -7,22 +7,31 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build": "tsc && npm run build:assets",
-    "build:prod": "rm -rf dist && tsc -p tsconfig.prod.json && npm run build:assets",
-    "build:assets": "mkdir -p dist/renderer && cp src/renderer/index.html dist/renderer/index.html",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc && npm run build:renderer && npm run build:assets",
+    "build:prod": "rm -rf dist && tsc -p tsconfig.prod.json && npm run build:renderer -- --minify && npm run build:assets",
+    "build:renderer": "esbuild src/renderer/main.tsx --bundle --jsx=automatic --format=iife --target=chrome140 --define:process.env.NODE_ENV=\\\"production\\\" --outfile=dist/renderer/renderer.js",
+    "build:assets": "mkdir -p dist/renderer && cp src/renderer/index.html dist/renderer/index.html && rm -rf dist/renderer/assets && cp -R src/renderer/assets dist/renderer/assets && npm run build:css",
+    "build:css": "tailwindcss -i src/renderer/styles/index.css -o dist/renderer/index.css",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.renderer.json",
     "test": "npm run build && node --test test/*.test.mjs",
     "gateway:sync": "uv sync --directory runtime/amis-gateway",
     "gateway:test": "uv run --directory runtime/amis-gateway --frozen pytest -q",
     "start": "npm run build && electron .",
-    "dev": "npm run build && electron . --dev"
+    "dev": "npm run build && electron . --dev",
+    "evidence": "npm run build && electron . --evidence"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
     "electron": "^43.4.1",
+    "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "yaml": "^2.9.0"
   }
 }

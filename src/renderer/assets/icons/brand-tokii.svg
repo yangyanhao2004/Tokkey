@@ -1,0 +1,25 @@
+<svg preserveAspectRatio="none" overflow="visible" style="display: block;" width="49" height="49" viewBox="0 0 49 49" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Background">
+<rect x="10.5" y="7" width="28" height="28" rx="8" fill="url(#paint0_linear_0_38)"/>
+<g id="Overlay+Shadow" filter="url(#filter0_di_0_38)">
+<rect x="10.5" y="7" width="28" height="28" rx="8.75" fill="white" fill-opacity="0.01" shape-rendering="crispEdges"/>
+</g>
+<circle id="Ellipse 1" cx="20.6689" cy="17.5" r="5.90333" fill="white" stroke="white" stroke-width="2.19333"/>
+<circle id="Ellipse 2" cx="32.3358" cy="29.1663" r="1.23667" fill="white" stroke="white" stroke-width="2.19333"/>
+</g>
+<defs>
+<filter id="filter0_di_0_38" x="0" y="0" width="49" height="49" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+<feFlood flood-opacity="0" result="BackgroundImageFix"/>
+<feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+<feOffset dy="3.5"/>
+<feGaussianBlur stdDeviation="5.25"/>
+<feComposite in2="hardAlpha" operator="out"/>
+<feColorMatrix type="matrix" values="0 0 0 0 0.0941176 0 0 0 0 0.101961 0 0 0 0 0.121569 0 0 0 0.18 0"/>
+<feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_0_38"/>
+<feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_0_38" result="shape"/></filter>
+<linearGradient id="paint0_linear_0_38" x1="13.3163" y1="5.02801" x2="35.6837" y2="36.972" gradientUnits="userSpaceOnUse">
+<stop stop-color="#1C1D20"/>
+<stop offset="1" stop-color="#4B4D54"/>
+</linearGradient>
+</defs>
+</svg>

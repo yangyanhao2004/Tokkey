@@ -14,10 +14,17 @@ npm install   # install dependencies
 npm run build # compile TypeScript and copy renderer assets
 npm start     # run the app
 npm run dev   # run with DevTools open
+npm run evidence -- --width 1200 --height 800 --output .artifacts/renderer
 ```
 
 `npm start` and `npm run dev` build the app automatically. TypeScript source is
 compiled from `src/` into `dist/`, which is the directory Electron runs.
+
+`npm run evidence` builds a hidden, deterministic renderer window at the
+specified Figma content size, captures `renderer.png`, and retains
+`renderer-evidence.json` plus `manifest.json` with viewport and semantic element
+geometry. Failed captures retain `manifest.json` and `error.txt`. The PNG is
+diagnostic evidence; it is not an automatic Figma pixel-diff assertion.
 
 ## Project structure
 

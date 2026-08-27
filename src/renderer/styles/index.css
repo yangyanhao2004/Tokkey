@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+/* Scan each renderer source explicitly because Tailwind does not expand the
+   previous brace-glob source and silently omitted every component utility. */
+@source "../index.html";
+@source "../main.tsx";
+@source "../navigation.ts";
+@source "../mainContent.ts";
+@source "../components";
+
+/*
+  Design tokens from the Tokiie Figma library. Names mirror the Figma variable
+  they come from so a value can be traced back to the design.
+*/
+@theme {
+  /* Fills - Vibrant (Use Plus Lighter | Darker) */
+  --color-vibrant-tertiary: #f2f2f2;
+  --color-vibrant-quinary: #fbfbfb;
+
+  /* Text */
+  --color-text-primary: #1d1d1f;
+  --color-text-secondary: rgba(29, 29, 31, 0.63);
+
+  /* Icons */
+  --color-icon-primary: #343432;
+
+  /*
+    The Main pane's values are raw fills in Figma rather than published
+    variables, so they are named here instead of being repeated per element.
+  */
+
+  /* Translucent card surface shared by both Main sections. */
+  --color-surface-card: rgba(255, 255, 255, 0.72);
+  --color-surface-card-border: rgba(0, 0, 0, 0.12);
+  /* Recessed tile behind list icons and the footnote strip. */
+  --color-fill-tile: rgba(120, 120, 128, 0.11);
+  /* macOS hairline separator, used for row dividers and the forward-button rule. */
+  --color-separator: rgba(60, 60, 67, 0.16);
+
+  /* "Connected" success badge. */
+  --color-status-ok-bg: rgba(40, 166, 106, 0.11);
+  --color-status-ok-text: #187e4c;
+
+  /* Header connection pill and its live dot. */
+  --color-pill-bg: #f5f5f3;
+  --color-pill-border: #e4e4e1;
+  --color-pill-text: #4d4d49;
+  --color-status-live: #34c759;
+
+  /* Label on a push button that carries no fill, e.g. "Remove". */
+  --color-label-tertiary: #8e8e93;
+
+  /* SF Pro is the system UI face on macOS; no web font is bundled or fetched. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Helvetica Neue", sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  /* Desktop chrome, not a document: no rubber-band scroll or text selection. */
+  margin: 0;
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}

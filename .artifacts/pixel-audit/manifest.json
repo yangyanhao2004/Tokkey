@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "kind": "renderer-evidence",
+  "target": {
+    "contentWidth": 1200,
+    "contentHeight": 800
+  },
+  "artifacts": {
+    "screenshot": "renderer.png",
+    "snapshot": "renderer-evidence.json"
+  }
+}

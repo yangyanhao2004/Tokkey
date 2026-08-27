@@ -3,30 +3,41 @@ import { app, BrowserWindow, shell } from 'electron';
 import IpcController from './IpcController';
 import GatewayProcessManager from './gateway/GatewayProcessManager';
 import CloudModelConnector from './models/CloudModelConnector';
+import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
 
 interface TokiieAppOptions {
   width?: number;
   height?: number;
+  outputDirectory?: string;
+  evidenceMode?: boolean;
 }
 
 /**
  * Owns the Electron application lifecycle and the main browser window.
  * All main-process wiring goes through this class so the entry point stays trivial.
  */
-export default class TokiieApp {
+export class TokiieApp {
   private readonly width: number;
   private readonly height: number;
   private readonly ipcController: IpcController;
   private readonly gatewayProcessManager: GatewayProcessManager;
   private readonly isDev: boolean;
+  private readonly evidenceMode: boolean;
+  private readonly evidenceCapture: RendererEvidenceCapture | null;
   private mainWindow: BrowserWindow | null;
 
   /**
    * @param options initial window dimensions
    */
   constructor(options: TokiieAppOptions = {}) {
-    this.width = options.width ?? 1200;
-    this.height = options.height ?? 800;
+    // Defaults match the Figma frame "Tokiie" (192:2413) so a plain launch
+    // reproduces the design's content size.
+    this.width = options.width ?? 900;
+    this.height = options.height ?? 690;
+    this.evidenceMode = options.evidenceMode ?? false;
+    this.evidenceCapture = this.evidenceMode
+      ? new RendererEvidenceCapture(options.outputDirectory ?? '.artifacts/renderer', this.width, this.height)
+      : null;
     // The single main window; null whenever no window is open (normal on macOS).
     this.mainWindow = null;
     // The local inference gateway subprocess; started after the window so a slow
@@ -40,7 +51,12 @@ export default class TokiieApp {
       cloudModelConnector: CloudModelConnector.forGateway(this.gatewayProcessManager)
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
-    this.isDev = process.argv.includes('--dev') || !app.isPackaged;
+    this.isDev = TokiieApp.shouldOpenDevTools(this.evidenceMode, process.argv);
+  }
+
+  /** Returns whether this launch explicitly requested the detached DevTools window. */
+  static shouldOpenDevTools(evidenceMode: boolean, commandLineArguments: readonly string[]): boolean {
+    return !evidenceMode && commandLineArguments.includes('--dev');
   }
 
   /**
@@ -71,7 +87,9 @@ export default class TokiieApp {
   onReady(): void {
     this.ipcController.attachModelDownloadSession();
     this.createMainWindow();
-    this.startGateway();
+    if (!this.evidenceMode) {
+      this.startGateway();
+    }
   }
 
   /**
@@ -108,9 +126,14 @@ export default class TokiieApp {
     const mainWindow = new BrowserWindow({
       width: this.width,
       height: this.height,
-      minWidth: 640,
-      minHeight: 480,
+      frame: !this.evidenceMode,
+      useContentSize: this.evidenceMode,
+      minWidth: this.evidenceMode ? 1 : 640,
+      minHeight: this.evidenceMode ? 1 : 480,
       // Avoid a white flash: show the window only once the page has painted.
+      // This relies on `ready-to-show`, so `paintWhenInitiallyHidden` must stay at
+      // its default of true — setting it to false suppresses that event and the
+      // window would never be shown.
       show: false,
       backgroundColor: '#f5f6f8',
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
@@ -118,12 +141,19 @@ export default class TokiieApp {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: true
+        sandbox: true,
+        offscreen: this.evidenceMode
       }
     });
 
     this.mainWindow = mainWindow;
-    mainWindow.once('ready-to-show', () => mainWindow.show());
+    mainWindow.once('ready-to-show', () => {
+      if (this.evidenceCapture) {
+        void this.captureEvidence(mainWindow);
+        return;
+      }
+      mainWindow.show();
+    });
     mainWindow.on('closed', () => {
       this.mainWindow = null;
     });
@@ -136,6 +166,20 @@ export default class TokiieApp {
     }
 
     return mainWindow;
+  }
+
+  /** Captures evidence and terminates so CI cannot hang on an interactive window. */
+  async captureEvidence(window: BrowserWindow): Promise<void> {
+    if (!this.evidenceCapture) return;
+    try {
+      const evidence = await this.evidenceCapture.capture(window);
+      console.log('[RendererEvidence] Captured:', JSON.stringify(evidence));
+      app.exit(0);
+    } catch (error) {
+      console.error('[RendererEvidence] Capture failed:', error);
+      await this.evidenceCapture.recordFailure(error);
+      app.exit(1);
+    }
   }
 
   /**
@@ -168,3 +212,5 @@ export default class TokiieApp {
     this.mainWindow.focus();
   }
 }
+
+export default TokiieApp;

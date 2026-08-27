@@ -1,0 +1,4 @@
+interface:
+  display_name: "Amis Pixel Implementation"
+  short_description: "Match Amis Figma designs in Electron Tailwind."
+  default_prompt: "Use $amis-pixel-implementation to implement this Figma node in the Amis Electron renderer with current Tailwind theme tokens, desktop interaction states, and inspected verification evidence."
