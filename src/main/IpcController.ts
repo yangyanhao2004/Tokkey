@@ -1,5 +1,6 @@
 import { app, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type {
+  AgentInstallation,
   AppInfo,
   ApplyMcpConfigurationRequest,
   CachedRepository,
@@ -37,6 +38,7 @@ import LocalMcpCatalogScanner, { MCP_AGENT_ORDER } from './mcp/McpCatalogScanner
 import LocalMcpConfigurationApplier, {
   type McpConfigurationApplying
 } from './mcp/McpConfigurationApplier';
+import AgentManager, { type AgentState } from './agents/AgentManager';
 import LocalModelManager from './models/LocalModelManager';
 import CloudModelConnector from './models/CloudModelConnector';
 import HostSnapshotService from './host/HostSnapshotService';
@@ -53,6 +55,7 @@ export interface IpcControllerOptions {
   mcpConfigurationApplier?: McpConfigurationApplying;
   localModelManager?: LocalModelManager;
   hostSnapshotService?: HostSnapshotService;
+  agentManager?: AgentManager;
   /** Owns the gateway subprocess, so only the app that supervises it can supply this. */
   cloudModelConnector?: CloudModelConnector;
 }
@@ -71,6 +74,7 @@ export default class IpcController {
   private readonly mcpConfigurationApplier: McpConfigurationApplying;
   private readonly localModelManager: LocalModelManager;
   private readonly hostSnapshotService: HostSnapshotService;
+  private readonly agentManager: AgentManager;
   private readonly cloudModelConnector: CloudModelConnector | null;
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
@@ -90,11 +94,13 @@ export default class IpcController {
       options.mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
     this.localModelManager = options.localModelManager ?? new LocalModelManager();
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
+    this.agentManager = options.agentManager ?? new AgentManager();
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
       'host:snapshot': () => this.getHostSnapshot(),
+      'agents:detect': () => this.detectAgents(),
       'mcps:list-installed': () => this.scanInstalledMcps(),
       'mcps:apply-configuration': (request: unknown) =>
         this.applyMcpConfiguration(this.requireMcpApplyRequest(request)),
@@ -177,6 +183,31 @@ export default class IpcController {
    */
   getHostSnapshot(): Promise<HostSnapshot> {
     return this.hostSnapshotService.snapshot();
+  }
+
+  /**
+   * Whether each supported coding agent is on PATH right now.
+   *
+   * The cached detection is dropped first: an agent can be installed or removed
+   * from a terminal while the app is open, and the Agent Hub greys out whatever
+   * is missing, so a stale "installed" would be worse than the extra probe.
+   */
+  async detectAgents(): Promise<AgentInstallation[]> {
+    this.agentManager.invalidate();
+    await this.agentManager.refresh();
+    return Object.values(this.agentManager.statesSnapshot()).map((state) =>
+      this.toAgentInstallation(state)
+    );
+  }
+
+  /** Narrows the manager's lifecycle state to the renderer's install contract. */
+  private toAgentInstallation(state: AgentState): AgentInstallation {
+    return {
+      agent: state.agent,
+      installed: state.state === 'installed',
+      executablePath: state.executablePath,
+      error: state.error
+    };
   }
 
   /** Lists local skills for the future skills page without exposing filesystem APIs to it. */

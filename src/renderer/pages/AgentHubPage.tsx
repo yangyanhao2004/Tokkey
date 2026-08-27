@@ -17,7 +17,11 @@ import {
   describeEmptyCatalog,
   describeUploadAction,
   findAgent,
+  isAgentInstalled,
+  readAgentAvailability,
+  resolveCompatibilityState,
   selectCatalogEntries,
+  type AgentAvailability,
   type AgentId,
   type CatalogEntry,
   type CatalogTab,
@@ -25,6 +29,7 @@ import {
   type CompatibilityState,
   type HubAgent
 } from './agentHubContent';
+import { useAgentDetection } from '../hooks/useAgentDetection';
 import { PageShell } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
 import { SearchField } from '../components/SearchField';
@@ -103,10 +108,13 @@ function AgentMarkTile({ agentId }: AgentMarkTileProps) {
 
 interface AgentCardProps {
   agent: HubAgent;
+  availability: AgentAvailability;
 }
 
 /** One installable coding agent: its glyph, name, vendor, and single action. */
-function AgentCard({ agent }: AgentCardProps) {
+function AgentCard({ agent, availability }: AgentCardProps) {
+  const isInstalled = isAgentInstalled(availability, agent.id);
+
   return (
     <article
       className="flex min-w-0 flex-1 flex-col gap-4 rounded-[12px] border border-vibrant-tertiary bg-surface-card p-3"
@@ -119,22 +127,28 @@ function AgentCard({ agent }: AgentCardProps) {
 
       <div className="flex w-full items-center justify-end">
         <PushButton
-          variant={agent.isInstalled ? 'plain' : 'filled'}
+          variant={isInstalled ? 'plain' : 'filled'}
+          // Nothing to offer until detection says which action this even is.
+          disabled={availability === null}
           testId={`agent-action-${agent.id}`}
         >
-          {describeAgentAction(agent)}
+          {describeAgentAction(availability, agent.id)}
         </PushButton>
       </div>
     </article>
   );
 }
 
+interface AgentRowProps {
+  availability: AgentAvailability;
+}
+
 /** The agents the hub manages, side by side across the top of the page. */
-function AgentRow() {
+function AgentRow({ availability }: AgentRowProps) {
   return (
     <section className="flex w-full shrink-0 items-start gap-2" data-testid="agent-row">
       {HUB_AGENTS.map((agent) => (
-        <AgentCard key={agent.id} agent={agent} />
+        <AgentCard key={agent.id} agent={agent} availability={availability} />
       ))}
     </section>
   );
@@ -154,6 +168,7 @@ const CHIP_STATE_CLASSES: Record<CompatibilityState, string> = {
 
 interface CompatibilityChipProps {
   chip: CompatibilityChip;
+  availability: AgentAvailability;
 }
 
 /**
@@ -161,22 +176,25 @@ interface CompatibilityChipProps {
  * An enabled entry adds the green check that overhangs the mark's bottom-right
  * corner, so neither this box nor the row it sits in may clip.
  */
-function CompatibilityChipMark({ chip }: CompatibilityChipProps) {
+function CompatibilityChipMark({ chip, availability }: CompatibilityChipProps) {
   const agent = findAgent(chip.agentId);
   if (!agent) {
     return null;
   }
 
   const artwork = AGENT_ARTWORK[chip.agentId];
+  // Detection has the last word: an agent that is not on this machine greys out
+  // however the entry describes itself.
+  const state = resolveCompatibilityState(chip, availability);
 
   return (
     <span
       className="relative flex size-[20px] shrink-0"
-      title={describeCompatibility(chip)}
+      title={describeCompatibility(chip.agentId, state)}
       data-testid={`compat-chip-${chip.agentId}`}
     >
       <span
-        className={`flex size-full items-center justify-center overflow-hidden rounded-full ${artwork.avatarClass} ${CHIP_STATE_CLASSES[chip.state]}`}
+        className={`flex size-full items-center justify-center overflow-hidden rounded-full ${artwork.avatarClass} ${CHIP_STATE_CLASSES[state]}`}
       >
         <img
           className={`block max-w-none ${artwork.avatarMarkClass}`}
@@ -185,7 +203,7 @@ function CompatibilityChipMark({ chip }: CompatibilityChipProps) {
         />
       </span>
 
-      {chip.state === 'enabled' && (
+      {state === 'enabled' && (
         <span
           className="absolute right-[-4px] bottom-[-3px] flex size-[12px] items-center justify-center rounded-full bg-status-live text-[8px] leading-[10px] font-black text-white"
           aria-hidden
@@ -199,6 +217,7 @@ function CompatibilityChipMark({ chip }: CompatibilityChipProps) {
 
 interface CatalogCardProps {
   entry: CatalogEntry;
+  availability: AgentAvailability;
 }
 
 /**
@@ -206,7 +225,7 @@ interface CatalogCardProps {
  * The card is at least as tall as the design's fixed 148px but grows rather
  * than clipping, since a longer description would otherwise spill out.
  */
-function CatalogCard({ entry }: CatalogCardProps) {
+function CatalogCard({ entry, availability }: CatalogCardProps) {
   return (
     <article
       className="flex min-h-[148px] flex-col justify-between gap-4 rounded-[12px] border border-vibrant-tertiary p-4"
@@ -234,7 +253,7 @@ function CatalogCard({ entry }: CatalogCardProps) {
               so a tighter gap would sit it on top of the next one. */}
           <div className="flex items-center gap-2">
             {entry.compatibility.map((chip) => (
-              <CompatibilityChipMark key={chip.agentId} chip={chip} />
+              <CompatibilityChipMark key={chip.agentId} chip={chip} availability={availability} />
             ))}
           </div>
 
@@ -247,12 +266,16 @@ function CatalogCard({ entry }: CatalogCardProps) {
   );
 }
 
+interface CatalogSectionProps {
+  availability: AgentAvailability;
+}
+
 /**
  * "Skills & MCPs": the tab picker, the search and add actions, then the grid
  * of whatever the open tab holds. The tab and query are the section's own
- * state — nothing here reaches the main process yet.
+ * state; agent availability is the page's, since the agent row reads it too.
  */
-function CatalogSection() {
+function CatalogSection({ availability }: CatalogSectionProps) {
   const [tab, setTab] = useState<CatalogTab>('skills');
   const [query, setQuery] = useState('');
   const entries = selectCatalogEntries(tab, query);
@@ -304,7 +327,7 @@ function CatalogSection() {
 
         <div className="grid w-full grid-cols-2 gap-3">
           {entries.map((entry) => (
-            <CatalogCard key={entry.id} entry={entry} />
+            <CatalogCard key={entry.id} entry={entry} availability={availability} />
           ))}
         </div>
       </div>
@@ -312,18 +335,25 @@ function CatalogSection() {
   );
 }
 
-/** The page behind the "Agent Hub" nav row: coding agents, then their extras. */
+/**
+ * The page behind the "Agent Hub" nav row: coding agents, then their extras.
+ * One detection serves the whole page, so the agent row and every catalog chip
+ * agree on which agents this machine actually has.
+ */
 export function AgentHubPage() {
+  const installations = useAgentDetection();
+  const availability = readAgentAvailability(installations);
+
   return (
     <PageShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} testId="agent-hub">
-      <AgentRow />
+      <AgentRow availability={availability} />
 
       {/* Figma pads the rule beyond the section gap rather than boxing it. */}
       <div className="flex w-full shrink-0 flex-col py-3">
         <span className="h-px w-full bg-separator" />
       </div>
 
-      <CatalogSection />
+      <CatalogSection availability={availability} />
     </PageShell>
   );
 }

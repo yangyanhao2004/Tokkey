@@ -12,6 +12,7 @@ class PreloadBridge {
     const api: TokiieApi = {
       getAppInfo: () => ipcRenderer.invoke('app:get-info'),
       getHostSnapshot: () => ipcRenderer.invoke('host:snapshot'),
+      detectAgents: () => ipcRenderer.invoke('agents:detect'),
       getInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),
       scanInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),
       prepareMcpConfiguration: (draft) => ipcRenderer.sendSync('mcps:prepare-configuration', draft),

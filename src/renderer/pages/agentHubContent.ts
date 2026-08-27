@@ -3,17 +3,20 @@
  * (192:1921). Kept apart from the components so copy and catalog entries can
  * change without touching markup.
  *
- * Nothing on this page is live yet: the agent row and the skill/MCP catalog
- * render against the fixed content below while the install plumbing is built.
- * OpenCode is deliberately absent — Tokiie only manages Codex and Claude Code.
+ * The skill and MCP catalogs below are still fixed content, but which agents
+ * exist is not: detection decides that, and every function here that takes an
+ * `AgentAvailability` reads it. OpenCode is deliberately absent — Tokiie only
+ * manages Codex and Claude Code.
  */
+
+import type { AgentInstallation, CodingAgent } from '../../shared/types';
 
 /** Shared with the sidebar so every page resolves assets from one place. */
 export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
 
 export const PAGE_TITLE = 'Agent Hub';
 export const PAGE_SUBTITLE =
-  'Install the coding agents you use while Tokii keeps local and cloud models available in the background.';
+  'Install the coding agents you use while Tokiie keeps local and cloud models available in the background.';
 
 /** Every coding agent the hub can install. */
 export type AgentId = 'codex' | 'claude-code';
@@ -23,34 +26,81 @@ export interface HubAgent {
   readonly name: string;
   /** The line under the name, e.g. "OpenAI". */
   readonly vendor: string;
-  /** Decides the card's action: an installed agent offers "Uninstall". */
-  readonly isInstalled: boolean;
+  /** The executable detection looks for, which is not always the agent's id. */
+  readonly cli: CodingAgent;
 }
 
 export const HUB_AGENTS: readonly HubAgent[] = [
-  { id: 'codex', name: 'Codex', vendor: 'OpenAI', isInstalled: true },
-  { id: 'claude-code', name: 'Claude Code', vendor: 'Anthropic', isInstalled: false }
+  { id: 'codex', name: 'Codex', vendor: 'OpenAI', cli: 'codex' },
+  { id: 'claude-code', name: 'Claude Code', vendor: 'Anthropic', cli: 'claude' }
 ];
 
 export function findAgent(id: AgentId): HubAgent | undefined {
   return HUB_AGENTS.find((agent) => agent.id === id);
 }
 
-export function describeAgentAction(agent: HubAgent): string {
-  return agent.isInstalled ? 'Uninstall' : 'Install';
+/**
+ * Which agents are installed, or `null` while detection is still running.
+ * Nothing is greyed out until an answer arrives, so the page never flashes a
+ * state it is about to contradict.
+ */
+export type AgentAvailability = Readonly<Record<AgentId, boolean>> | null;
+
+/** Turns one detection into the per-agent lookup the page draws from. */
+export function readAgentAvailability(
+  installations: readonly AgentInstallation[] | null
+): AgentAvailability {
+  if (!installations) {
+    return null;
+  }
+
+  const installed = new Set(
+    installations.filter((installation) => installation.installed).map((installation) => installation.agent)
+  );
+  return Object.fromEntries(
+    HUB_AGENTS.map((agent) => [agent.id, installed.has(agent.cli)])
+  ) as Record<AgentId, boolean>;
+}
+
+/** Whether one agent is known to be installed; unknown counts as not installed. */
+export function isAgentInstalled(availability: AgentAvailability, agentId: AgentId): boolean {
+  return availability?.[agentId] === true;
+}
+
+export function describeAgentAction(availability: AgentAvailability, agentId: AgentId): string {
+  if (!availability) {
+    return 'Checking…';
+  }
+  return availability[agentId] ? 'Uninstall' : 'Install';
 }
 
 /**
- * How a catalog entry stands with one agent:
+ * What a catalog entry declares for one agent, independent of this machine:
  * `enabled` — turned on for that agent, so the chip carries the green check;
- * `available` — the agent is installed but the entry is not turned on;
- * `unavailable` — the agent itself is not installed, so the chip greys out.
+ * `available` — supported by that agent but not turned on.
  */
-export type CompatibilityState = 'enabled' | 'available' | 'unavailable';
+export type CatalogEnablement = 'enabled' | 'available';
+
+/**
+ * How the chip is actually drawn. `unavailable` is never declared by an entry;
+ * detection adds it when the agent itself is missing from this machine.
+ */
+export type CompatibilityState = CatalogEnablement | 'unavailable';
 
 export interface CompatibilityChip {
   readonly agentId: AgentId;
-  readonly state: CompatibilityState;
+  readonly enablement: CatalogEnablement;
+}
+
+/** A missing agent overrides whatever the entry declares for it. */
+export function resolveCompatibilityState(
+  chip: CompatibilityChip,
+  availability: AgentAvailability
+): CompatibilityState {
+  if (!availability) {
+    return chip.enablement;
+  }
+  return availability[chip.agentId] ? chip.enablement : 'unavailable';
 }
 
 const COMPATIBILITY_DESCRIPTIONS: Record<CompatibilityState, string> = {
@@ -59,10 +109,10 @@ const COMPATIBILITY_DESCRIPTIONS: Record<CompatibilityState, string> = {
   unavailable: 'agent not installed'
 };
 
-/** Titles a chip, since the two-letter glyph alone says nothing out loud. */
-export function describeCompatibility(chip: CompatibilityChip): string {
-  const name = findAgent(chip.agentId)?.name ?? chip.agentId;
-  return `${name}: ${COMPATIBILITY_DESCRIPTIONS[chip.state]}`;
+/** Titles a chip, since the mark alone says nothing out loud. */
+export function describeCompatibility(agentId: AgentId, state: CompatibilityState): string {
+  const name = findAgent(agentId)?.name ?? agentId;
+  return `${name}: ${COMPATIBILITY_DESCRIPTIONS[state]}`;
 }
 
 /** The two halves of the "Skills & MCPs" section. */
@@ -94,8 +144,8 @@ const SKILL_CATALOG: readonly CatalogEntry[] = [
     source: 'GitHub',
     description: 'Create short videos from prompts and supplied assets.',
     compatibility: [
-      { agentId: 'claude-code', state: 'unavailable' },
-      { agentId: 'codex', state: 'available' }
+      { agentId: 'claude-code', enablement: 'available' },
+      { agentId: 'codex', enablement: 'available' }
     ]
   },
   {
@@ -104,8 +154,8 @@ const SKILL_CATALOG: readonly CatalogEntry[] = [
     source: 'GitHub',
     description: 'Create and refine presentation decks from a brief.',
     compatibility: [
-      { agentId: 'claude-code', state: 'enabled' },
-      { agentId: 'codex', state: 'enabled' }
+      { agentId: 'claude-code', enablement: 'enabled' },
+      { agentId: 'codex', enablement: 'enabled' }
     ]
   },
   {
@@ -114,8 +164,8 @@ const SKILL_CATALOG: readonly CatalogEntry[] = [
     source: 'GitHub',
     description: 'Generate or edit images through an image provider.',
     compatibility: [
-      { agentId: 'claude-code', state: 'available' },
-      { agentId: 'codex', state: 'enabled' }
+      { agentId: 'claude-code', enablement: 'available' },
+      { agentId: 'codex', enablement: 'enabled' }
     ]
   },
   {
@@ -124,8 +174,8 @@ const SKILL_CATALOG: readonly CatalogEntry[] = [
     source: 'skills.sh',
     description: 'Research websites and summarize useful sources.',
     compatibility: [
-      { agentId: 'claude-code', state: 'enabled' },
-      { agentId: 'codex', state: 'enabled' }
+      { agentId: 'claude-code', enablement: 'enabled' },
+      { agentId: 'codex', enablement: 'enabled' }
     ]
   }
 ];
@@ -137,8 +187,8 @@ const MCP_CATALOG: readonly CatalogEntry[] = [
     source: 'GitHub',
     description: 'Read and write files inside an allowed workspace folder.',
     compatibility: [
-      { agentId: 'claude-code', state: 'enabled' },
-      { agentId: 'codex', state: 'available' }
+      { agentId: 'claude-code', enablement: 'enabled' },
+      { agentId: 'codex', enablement: 'available' }
     ]
   },
   {
@@ -147,8 +197,8 @@ const MCP_CATALOG: readonly CatalogEntry[] = [
     source: 'GitHub',
     description: 'Drive a real browser to test pages and read the result.',
     compatibility: [
-      { agentId: 'claude-code', state: 'available' },
-      { agentId: 'codex', state: 'unavailable' }
+      { agentId: 'claude-code', enablement: 'available' },
+      { agentId: 'codex', enablement: 'available' }
     ]
   }
 ];

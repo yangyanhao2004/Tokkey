@@ -4,7 +4,6 @@ import test from 'node:test';
 
 import { AgentDetector } from '../dist/main/agents/AgentDetector.js';
 import { AgentManager } from '../dist/main/agents/AgentManager.js';
-import { ShellAgentInstaller } from '../dist/main/agents/ShellAgentInstaller.js';
 import { StreamingShellRunner } from '../dist/main/agents/StreamingShellRunner.js';
 
 /** Keeps shell-runner doubles readable without duplicating result shape literals. */
@@ -14,22 +13,7 @@ class TestShellResult {
   }
 }
 
-test('Codex and Claude commands preserve the official installer contract', () => {
-  const codex = ShellAgentInstaller.installCommand('codex');
-  assert.match(codex, /set -eo pipefail/);
-  assert.match(codex, /curl -fsS --max-time 8 -o \/dev\/null https:\/\/chatgpt\.com\/codex\/install\.sh/);
-  assert.match(codex, /CODEX_NON_INTERACTIVE=1 sh/);
-  assert.match(codex, /https:\/\/v4\.gh-proxy\.com\/https:\/\/raw\.githubusercontent\.com/);
-  assert.match(codex, /sed .*https:\/\/github\.com.*v4\.gh-proxy\.com/);
-  assert.match(codex, /echo "Codex installation complete"/);
-
-  const claude = ShellAgentInstaller.installCommand('claude');
-  assert.match(claude, /curl -fsS --max-time 8 -o \/dev\/null https:\/\/claude\.ai\/install\.sh/);
-  assert.match(claude, /curl -fsSL https:\/\/claude\.ai\/install\.sh \| bash/);
-  assert.match(claude, /Claude installer unavailable/);
-});
-
-test('detector runs which, caches results, and invalidates after installation', async () => {
+test('detector runs which, caches results, and re-probes after invalidation', async () => {
   const commands = [];
   const runner = {
     run: async (command) => {
@@ -95,31 +79,31 @@ test('streaming runner invokes a login shell and forwards complete lines', async
   assert.equal(result.exitCode, 0);
 });
 
-test('manager publishes progress and applies success/failure lifecycle transitions', async () => {
+test('manager publishes detected state and reports availability only when it flips', async () => {
   const detections = {
     codex: { agent: 'codex', installed: false, executablePath: null, error: 'codex is not installed.' },
-    claude: { agent: 'claude', installed: false, executablePath: null, error: 'claude is not installed.' }
+    claude: { agent: 'claude', installed: true, executablePath: '/usr/local/bin/claude', error: null }
   };
+  const invalidated = [];
   const detector = {
     detect: async (agent) => detections[agent],
-    invalidate: () => {}
-  };
-  const installer = {
-    install: async (_agent, onLine) => {
-      onLine('installer output');
-      return { ...TestShellResult.create(0, ['installer output']), kind: 'success', agent: 'codex', error: null };
-    },
-    uninstall: async () => ({ ...TestShellResult.create(0, []), kind: 'success', agent: 'codex', error: null })
+    invalidate: (agent) => invalidated.push(agent)
   };
   const events = [];
-  const manager = new AgentManager({ detector, installer, onEvent: (event) => events.push(event) });
+  const manager = new AgentManager({ detector, onEvent: (event) => events.push(event) });
 
-  await manager.refresh('codex');
-  const result = await manager.install('codex');
-  assert.equal(result.kind, 'success');
-  assert.equal(manager.state('codex').state, 'installed');
-  assert.ok(events.some((event) => event.kind === 'progress' && event.line === 'installer output'));
-  assert.ok(events.some((event) => event.kind === 'availability-changed' && event.installed));
-  await manager.uninstall('codex');
-  assert.equal(manager.state('codex').state, 'notInstalled');
+  const refreshed = await manager.refresh();
+  assert.equal(refreshed.codex.state, 'notInstalled');
+  assert.equal(refreshed.claude.executablePath, '/usr/local/bin/claude');
+  assert.equal(manager.state('codex').error, 'codex is not installed.');
+
+  const availability = events.filter((event) => event.kind === 'availability-changed');
+  assert.deepEqual(availability, [{ kind: 'availability-changed', agent: 'claude', installed: true }]);
+
+  // A second refresh finds the same truth, so no further availability event fires.
+  await manager.refresh();
+  assert.equal(events.filter((event) => event.kind === 'availability-changed').length, 1);
+
+  manager.invalidate('codex');
+  assert.deepEqual(invalidated, ['codex']);
 });

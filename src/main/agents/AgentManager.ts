@@ -1,14 +1,11 @@
 import AgentDetector from './AgentDetector';
-import ShellAgentInstaller from './ShellAgentInstaller';
 import StreamingShellRunner from './StreamingShellRunner';
 import type {
   AgentDetection,
   AgentManagerEvent,
-  AgentOperationResult,
   AgentState,
   ShellAgent
 } from './AgentTypes';
-import type { AgentInstaller } from './AgentInstaller';
 
 export interface AgentDetectorLike {
   detect(agent: ShellAgent): Promise<AgentDetection>;
@@ -17,35 +14,24 @@ export interface AgentDetectorLike {
 
 export interface AgentManagerOptions {
   detector?: AgentDetectorLike;
-  installer?: AgentInstaller;
   supportedAgents?: readonly ShellAgent[];
   onEvent?: (event: AgentManagerEvent) => void;
 }
 
 type AgentStateListener = (event: AgentManagerEvent) => void;
 
-/** Owns detection cache, lifecycle transitions, concurrency, and progress events. */
+/** Owns the detection cache and publishes installed/notInstalled state for each agent. */
 export class AgentManager {
   private static readonly DEFAULT_AGENTS: readonly ShellAgent[] = ['codex', 'claude'];
   private readonly detector: AgentDetectorLike;
-  private readonly installer: AgentInstaller;
   private readonly supportedAgents: readonly ShellAgent[];
   private readonly listeners = new Set<AgentStateListener>();
   private readonly states = new Map<ShellAgent, AgentState>();
 
-  constructor(options?: AgentManagerOptions);
-  constructor(detector: AgentDetectorLike, installer: AgentInstaller);
-  constructor(optionsOrDetector: AgentManagerOptions | AgentDetectorLike = {}, installer?: AgentInstaller) {
-    if (AgentManager.isDetector(optionsOrDetector)) {
-      this.detector = optionsOrDetector;
-      this.installer = installer ?? new ShellAgentInstaller(new StreamingShellRunner());
-      this.supportedAgents = [...AgentManager.DEFAULT_AGENTS];
-    } else {
-      this.detector = optionsOrDetector.detector ?? new AgentDetector(new StreamingShellRunner());
-      this.installer = optionsOrDetector.installer ?? new ShellAgentInstaller(new StreamingShellRunner());
-      this.supportedAgents = [...(optionsOrDetector.supportedAgents ?? AgentManager.DEFAULT_AGENTS)];
-      if (optionsOrDetector.onEvent) this.listeners.add(optionsOrDetector.onEvent);
-    }
+  constructor(options: AgentManagerOptions = {}) {
+    this.detector = options.detector ?? new AgentDetector(new StreamingShellRunner());
+    this.supportedAgents = [...(options.supportedAgents ?? AgentManager.DEFAULT_AGENTS)];
+    if (options.onEvent) this.listeners.add(options.onEvent);
     this.supportedAgents.forEach((agent) => this.states.set(agent, this.defaultState(agent)));
   }
 
@@ -60,6 +46,11 @@ export class AgentManager {
     return refreshed;
   }
 
+  /** Drops cached detections so the next refresh re-probes PATH. */
+  invalidate(agent?: ShellAgent): void {
+    this.detector.invalidate(agent);
+  }
+
   /** Returns a defensive copy of the current state for one agent. */
   state(agent: ShellAgent): AgentState {
     this.assertSupported(agent);
@@ -71,60 +62,10 @@ export class AgentManager {
     return Object.fromEntries(this.supportedAgents.map((agent) => [agent, this.state(agent)])) as Record<ShellAgent, AgentState>;
   }
 
-  /** Subscribes a controller/service to state and progress events. */
+  /** Subscribes a controller/service to state events. */
   subscribe(listener: AgentStateListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
-  }
-
-  /** Installs only from notInstalled, then marks success based on process outcome. */
-  async install(agent: ShellAgent, onLine?: (line: string) => void): Promise<AgentOperationResult> {
-    this.assertSupported(agent);
-    const current = this.states.get(agent)!;
-    if (current.state !== 'notInstalled') {
-      throw new Error(`${agent} installation is only allowed from notInstalled; current state is ${current.state}.`);
-    }
-    this.publishState({ ...current, state: 'installing', error: null });
-    const result = await this.runOperation(() => this.installer.install(agent, (line) => {
-      onLine?.(line);
-      this.publish({ kind: 'progress', agent, line });
-    }), agent);
-    if (result.kind === 'success') {
-      this.detector.invalidate(agent);
-      this.publishState({
-        ...current,
-        state: 'installed',
-        // Installation success is the immediate operation result; the next
-        // explicit detector refresh remains the durable PATH truth.
-        executablePath: current.executablePath,
-        error: null
-      });
-      this.publish({ kind: 'availability-changed', agent, installed: true });
-      return result;
-    }
-    this.publishState({ ...current, state: 'notInstalled', error: result.error });
-    return result;
-  }
-
-  /** Removes only the executable and returns to notInstalled on success. */
-  async uninstall(agent: ShellAgent, onLine?: (line: string) => void): Promise<AgentOperationResult> {
-    this.assertSupported(agent);
-    const current = this.states.get(agent)!;
-    if (current.state === 'installing') {
-      throw new Error(`Cannot uninstall ${agent} while installation is in progress.`);
-    }
-    const result = await this.runOperation(() => this.installer.uninstall(agent, (line) => {
-      onLine?.(line);
-      this.publish({ kind: 'progress', agent, line });
-    }), agent);
-    if (result.kind === 'success') {
-      this.detector.invalidate(agent);
-      this.publishState({ ...current, state: 'notInstalled', executablePath: null, error: null });
-      this.publish({ kind: 'availability-changed', agent, installed: false });
-    } else {
-      this.publishState({ ...current, error: result.error });
-    }
-    return result;
   }
 
   private async refreshOne(agent: ShellAgent): Promise<AgentState> {
@@ -140,7 +81,11 @@ export class AgentManager {
       executablePath: detection.executablePath,
       error: detection.installed ? null : detection.error
     };
+    const availabilityChanged = current.state !== next.state;
     this.publishState(next);
+    if (availabilityChanged) {
+      this.publish({ kind: 'availability-changed', agent: next.agent, installed: detection.installed });
+    }
     return { ...next };
   }
 
@@ -160,38 +105,11 @@ export class AgentManager {
   private publish(event: AgentManagerEvent): void {
     this.listeners.forEach((listener) => listener(event));
   }
-
-  /** Distinguishes the two supported constructor forms without unsafe casts. */
-  private static isDetector(value: AgentManagerOptions | AgentDetectorLike): value is AgentDetectorLike {
-    return 'detect' in value && typeof value.detect === 'function';
-  }
-
-  /** Normalizes unexpected process-boundary throws into the failure contract. */
-  private async runOperation(
-    operation: () => Promise<AgentOperationResult>,
-    agent: ShellAgent
-  ): Promise<AgentOperationResult> {
-    try {
-      return await operation();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return {
-        kind: 'failure',
-        agent,
-        error: message,
-        exitCode: null,
-        timedOut: false,
-        output: [],
-        diagnosticTail: [message]
-      };
-    }
-  }
 }
 
 export type {
   AgentDetection,
   AgentManagerEvent,
-  AgentOperationResult,
   AgentState,
   AgentLifecycleState,
   ShellAgent,

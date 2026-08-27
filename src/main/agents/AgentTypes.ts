@@ -20,16 +20,9 @@ export interface ShellRunOptions {
   signal?: AbortSignal;
 }
 
-/** Process abstraction used by installers and detection so they remain testable. */
+/** Process abstraction used by detection so it remains testable. */
 export interface ShellRunner {
   run(command: string, options: ShellRunOptions): Promise<ShellRunResult>;
-}
-
-/** Result of one installation or uninstall operation. */
-export interface AgentOperationResult extends ShellRunResult {
-  kind: 'success' | 'failure';
-  agent: ShellAgent;
-  error: string | null;
 }
 
 /** Durable detector output used by AgentManager. */
@@ -40,8 +33,8 @@ export interface AgentDetection {
   error: string | null;
 }
 
-/** Lifecycle states exposed by AgentManager. */
-export type AgentLifecycleState = 'notInstalled' | 'installing' | 'installed';
+/** Lifecycle states exposed by AgentManager; the app only observes, never installs. */
+export type AgentLifecycleState = 'notInstalled' | 'installed';
 
 /** Current state for one managed agent. */
 export interface AgentState {
@@ -55,5 +48,4 @@ export interface AgentState {
 /** Events delivered to non-UI consumers of AgentManager. */
 export type AgentManagerEvent =
   | { kind: 'state'; state: AgentState }
-  | { kind: 'progress'; agent: ShellAgent; line: string }
   | { kind: 'availability-changed'; agent: ShellAgent; installed: boolean };

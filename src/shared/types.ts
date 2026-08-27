@@ -8,6 +8,18 @@ export interface AppInfo {
   platform: string;
 }
 
+/** The coding agents Tokiie detects, each named after its executable. */
+export type CodingAgent = 'codex' | 'claude';
+
+/** One agent's presence on this machine, as a PATH lookup found it. */
+export interface AgentInstallation {
+  agent: CodingAgent;
+  installed: boolean;
+  executablePath: string | null;
+  /** Why detection found nothing; null whenever the agent is installed. */
+  error: string | null;
+}
+
 /** Supported local configuration sources for installed MCP servers. */
 export type McpAgent = 'claudeCode' | 'hermes' | 'codex';
 
@@ -147,6 +159,7 @@ export interface HostSnapshot {
 export interface TokiieApi {
   getAppInfo(): Promise<AppInfo>;
   getHostSnapshot(): Promise<HostSnapshot>;
+  detectAgents(): Promise<AgentInstallation[]>;
   getInstalledMcps(): Promise<McpCatalogScan>;
   scanInstalledMcps(): Promise<McpCatalogScan>;
   prepareMcpConfiguration(draft: McpConfigurationDraft): McpConfigurationPreparation;

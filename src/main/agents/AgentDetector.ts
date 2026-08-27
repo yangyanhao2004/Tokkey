@@ -6,7 +6,7 @@ export interface AgentDetectorOptions {
   timeoutMs?: number;
 }
 
-/** Finds Codex and Claude executables through the same shell boundary as installs. */
+/** Finds Codex and Claude executables on PATH through the shared shell boundary. */
 export class AgentDetector {
   private readonly shellRunner: ShellRunner;
   private readonly timeoutMs: number;
@@ -45,7 +45,7 @@ export class AgentDetector {
     return { codex, claude };
   }
 
-  /** Clears one cached result or all cached results after installation/removal. */
+  /** Clears one cached result or all of them so the next detect re-probes PATH. */
   invalidate(agent?: ShellAgent): void {
     if (agent) this.cache.delete(agent);
     else this.cache.clear();
