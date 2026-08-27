@@ -4,9 +4,10 @@
    previous brace-glob source and silently omitted every component utility. */
 @source "../index.html";
 @source "../main.tsx";
+@source "../App.tsx";
 @source "../navigation.ts";
-@source "../tokiieContent.ts";
 @source "../components";
+@source "../pages";
 
 /*
   Design tokens from the Tokiie Figma library. Names mirror the Figma variable
@@ -25,11 +26,11 @@
   --color-icon-primary: #343432;
 
   /*
-    The Tokiie pane's values are raw fills in Figma rather than published
+    The Tokiie page's values are raw fills in Figma rather than published
     variables, so they are named here instead of being repeated per element.
   */
 
-  /* Translucent card surface shared by both Tokiie pane sections. */
+  /* Translucent card surface shared by both Tokiie page sections. */
   --color-surface-card: rgba(255, 255, 255, 0.72);
   --color-surface-card-border: rgba(0, 0, 0, 0.12);
   /* Recessed tile behind list icons and the footnote strip. */

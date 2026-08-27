@@ -6,7 +6,7 @@
 
 /**
  * Every destination the sidebar can select. Spelling the ids out keeps the
- * pane lookup honest: a pane can only be registered for a row that exists.
+ * page lookup honest: a page can only be registered for a row that exists.
  */
 export type NavItemId =
   | 'tokiie'
@@ -114,7 +114,7 @@ export const NAV_SECTIONS: readonly SidebarNavSection[] = [
   }
 ];
 
-/** Looks a row up across sections, e.g. to title the pane it opens. */
+/** Looks a row up across sections, e.g. to title the page it opens. */
 export function findNavItem(id: NavItemId): SidebarNavItem | undefined {
   return NAV_SECTIONS.flatMap((section) => section.items).find((item) => item.id === id);
 }

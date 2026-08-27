@@ -16,9 +16,10 @@
     "test": "npm run build && node --test test/*.test.mjs",
     "gateway:sync": "uv sync --directory runtime/amis-gateway",
     "gateway:test": "uv run --directory runtime/amis-gateway --frozen pytest -q",
-    "start": "npm run build && electron .",
-    "dev": "npm run build && electron . --dev",
-    "evidence": "npm run build && electron . --evidence"
+    "kill:app": "pkill -f \"$PWD/node_modules/[e]lectron/dist\" ; true",
+    "start": "npm run build && npm run kill:app && electron .",
+    "dev": "npm run build && npm run kill:app && electron . --dev",
+    "evidence": "npm run build && npm run kill:app && electron . --evidence"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

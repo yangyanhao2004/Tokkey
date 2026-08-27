@@ -8,7 +8,7 @@ interface NavItemProps {
 
 /**
  * One sidebar row: a 16px icon box followed by its label. Selecting it is what
- * swaps the pane on the right, so the row is a real button.
+ * swaps the page on the right, so the row is a real button.
  */
 export function NavItem({ item, isActive, onSelect }: NavItemProps) {
   // Figma specifies only the default and active fills; hover is added here so

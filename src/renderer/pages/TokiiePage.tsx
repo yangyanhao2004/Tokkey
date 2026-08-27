@@ -5,9 +5,10 @@ import {
   LOCAL_MODELS_FOOTNOTE,
   formatModelCount,
   type InstalledModel
-} from '../tokiieContent';
-import { PaneShell } from './PaneShell';
-import { PushButton } from './PushButton';
+} from './tokiieContent';
+import { PageShell } from '../components/PageShell';
+import { PushButton } from '../components/PushButton';
+import { TitleBlock } from '../components/TitleBlock';
 
 /**
  * The 32px recessed tile that fronts both the device row and each model row
@@ -41,14 +42,7 @@ function DeviceCard() {
     >
       <div className="flex min-w-0 items-center gap-2">
         <IconTile src={`${ICON_BASE_PATH}/main-device-thumb.png`} desaturate />
-        <div className="flex min-w-0 flex-col gap-1">
-          <span className="truncate text-[12px] leading-[14px] font-bold text-text-primary">
-            {CONNECTED_DEVICE.name}
-          </span>
-          <span className="truncate text-[10px] leading-[12px] tracking-[0.0548px] text-text-secondary">
-            {CONNECTED_DEVICE.detail}
-          </span>
-        </div>
+        <TitleBlock title={CONNECTED_DEVICE.name} subtitle={CONNECTED_DEVICE.detail} />
       </div>
 
       <span className="flex min-h-[19.114px] shrink-0 items-center gap-1 rounded-full bg-status-ok-bg px-2 py-1">
@@ -78,16 +72,7 @@ function ModelRow({ model }: ModelRowProps) {
     >
       <div className="flex min-w-0 items-center gap-2">
         <IconTile src={`${ICON_BASE_PATH}/main-model-cube.svg`} />
-        <div className="flex min-w-0 flex-col gap-1">
-          <span className="truncate text-[12px] leading-[14px] font-bold text-text-primary">
-            {model.name}
-          </span>
-          {/* Figma states an 11.219px line-height but reports a 12px text box;
-              12px is used so the row measures as designed. */}
-          <span className="truncate text-[10px] leading-[12px] tracking-[0.0997px] text-text-secondary">
-            {model.detail}
-          </span>
-        </div>
+        <TitleBlock title={model.name} subtitle={model.detail} />
       </div>
 
       <div className="flex shrink-0 items-center justify-end gap-2">
@@ -108,12 +93,11 @@ function LocalModelsCard() {
       data-testid="local-models-card"
     >
       <div className="flex w-full items-center justify-between px-4 py-3">
-        <div className="flex min-w-0 flex-col gap-1">
-          <h2 className="text-[12px] leading-[14px] font-bold text-text-primary">Local Models</h2>
-          <span className="truncate text-[10px] leading-[12px] text-text-secondary">
-            Download, start, and manage models stored on this Mac.
-          </span>
-        </div>
+        <TitleBlock
+          title="Local Models"
+          subtitle="Download, start, and manage models stored on this Mac."
+          as="h2"
+        />
         <PushButton testId="add-model">Add model</PushButton>
       </div>
 
@@ -145,12 +129,12 @@ function LocalModelsCard() {
   );
 }
 
-/** The pane behind the "Tokiie" nav row: device status and local models. */
-export function TokiiePane() {
+/** The page behind the "Tokiie" nav row: device status and local models. */
+export function TokiiePage() {
   return (
-    <PaneShell title="Tokiie" subtitle="Connect Tokii and manage your local models." testId="tokiie">
+    <PageShell title="Tokiie" subtitle="Connect Tokii and manage your local models." testId="tokiie">
       <DeviceCard />
       <LocalModelsCard />
-    </PaneShell>
+    </PageShell>
   );
 }

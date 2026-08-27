@@ -1,15 +1,15 @@
 /**
- * Content model for the Tokiie pane, taken from the Figma node "Main"
+ * Content model for the Tokiie page, taken from the Figma node "Main"
  * (192:2507). Kept apart from the components so copy and rows can change
  * without touching markup.
  *
  * These are the design's reference values. Nothing here reads from the main
- * process yet, so the pane renders the state Figma specifies; wiring it to
+ * process yet, so the page renders the state Figma specifies; wiring it to
  * `window.tokiie` is a separate change.
  */
 
-/** Shared with the sidebar so both panes resolve assets from one place. */
-export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from './navigation';
+/** Shared with the sidebar so both pages resolve assets from one place. */
+export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
 
 /** The connected Tokii device shown above the model list. */
 export interface ConnectedDevice {

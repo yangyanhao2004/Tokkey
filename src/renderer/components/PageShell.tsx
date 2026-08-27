@@ -1,15 +1,16 @@
 import type { ReactNode } from 'react';
 import { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
+import { TitleBlock } from './TitleBlock';
 
 /**
- * Back/forward pair plus the connection pill. Chrome that every pane carries,
- * so it lives with the shell rather than with one pane's content.
+ * Back/forward pair plus the connection pill. Chrome that every page carries,
+ * so it lives with the shell rather than with one page's content.
  */
-function PaneHeader() {
+function PageHeader() {
   return (
     <header
       className="flex shrink-0 items-center justify-between px-6 py-3 backdrop-blur-[11.634px]"
-      data-testid="pane-header"
+      data-testid="page-header"
     >
       <div className="flex h-[28px] items-center overflow-hidden rounded-full border border-black/8 bg-white/50 shadow-[0px_2.493px_9.972px_0px_rgba(0,0,0,0.05)]">
         <button
@@ -51,35 +52,32 @@ function PaneHeader() {
   );
 }
 
-interface PaneShellProps {
-  /** Pane heading, e.g. "Tokiie". */
+interface PageShellProps {
+  /** Page heading, e.g. "Tokiie". */
   title: string;
   /** Sentence under the heading. */
   subtitle: string;
-  /** Identifies the pane in tests, e.g. `tokiie` renders `pane-tokiie`. */
+  /** Identifies the page in tests, e.g. `tokiie` renders `page-tokiie`. */
   testId: string;
   children: ReactNode;
 }
 
 /**
- * The right-hand content pane: header, heading block, then the pane's own
- * sections. Every pane renders through this so they share one frame.
+ * The right-hand content page: header, heading block, then the page's own
+ * sections. Every page renders through this so they share one frame.
  */
-export function PaneShell({ title, subtitle, testId, children }: PaneShellProps) {
+export function PageShell({ title, subtitle, testId, children }: PageShellProps) {
   return (
     <main
       // `overflow-hidden` is load-bearing: the header's backdrop-filter is
       // promoted to its own layer, which a bare border-radius does not clip, so
-      // without it the blur paints square over the pane's rounded top corners.
+      // without it the blur paints square over the page's rounded top corners.
       className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-white"
-      data-testid={`pane-${testId}`}
+      data-testid={`page-${testId}`}
     >
-      <PaneHeader />
+      <PageHeader />
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-[20px] leading-[24px] font-bold text-text-primary">{title}</h1>
-          <span className="text-[12px] leading-[14px] text-text-secondary">{subtitle}</span>
-        </div>
+        <TitleBlock title={title} subtitle={subtitle} size="page" as="h1" />
         {children}
       </div>
     </main>
@@ -87,14 +85,14 @@ export function PaneShell({ title, subtitle, testId, children }: PaneShellProps)
 }
 
 /**
- * Body for panes that are navigable but not designed yet, so selecting their
+ * Body for pages that are navigable but not designed yet, so selecting their
  * nav row lands somewhere honest instead of on an empty frame.
  */
-export function PanePlaceholder({ children }: { children: ReactNode }) {
+export function PagePlaceholder({ children }: { children: ReactNode }) {
   return (
     <p
       className="flex w-full items-center justify-center rounded-[12px] border border-surface-card-border bg-surface-card p-6 text-[12px] leading-[14px] text-text-secondary"
-      data-testid="pane-placeholder"
+      data-testid="page-placeholder"
     >
       {children}
     </p>

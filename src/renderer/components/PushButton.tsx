@@ -12,7 +12,7 @@ interface PushButtonProps {
 }
 
 /**
- * The small 24px push button used across the Main pane (Figma "Push Button",
+ * The small 24px push button used across the Main page (Figma "Push Button",
  * node 192:2819 and its instances).
  */
 export function PushButton({
