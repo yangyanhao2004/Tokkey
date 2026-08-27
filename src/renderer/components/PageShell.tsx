@@ -13,11 +13,13 @@ interface PageHeaderProps {
  */
 function PageHeader({ onBack }: PageHeaderProps) {
   return (
+    // This strip is the page's share of the title bar the window does not have,
+    // so it drags the window; the buttons inside it opt back out.
     <header
-      className="flex shrink-0 items-center justify-between px-6 py-3 backdrop-blur-[11.634px]"
+      className="app-drag flex shrink-0 items-center justify-between px-6 py-3 backdrop-blur-[11.634px]"
       data-testid="page-header"
     >
-      <div className="flex h-[28px] items-center overflow-hidden rounded-full border border-black/8 bg-white/50 shadow-[0px_2.493px_9.972px_0px_rgba(0,0,0,0.05)]">
+      <div className="app-no-drag flex h-[28px] items-center overflow-hidden rounded-full border border-black/8 bg-white/50 shadow-[0px_2.493px_9.972px_0px_rgba(0,0,0,0.05)]">
         <button
           type="button"
           className="flex h-[28px] w-[30px] items-center justify-center focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary"

@@ -16,6 +16,20 @@
 @source inline("w-[{0..100}%]");
 
 /*
+  The window runs with a hidden title bar, so it is web content edge to edge and
+  nothing can be dragged until a region opts in. `app-drag` marks a strip as the
+  title bar; `app-no-drag` hands clicks back to a control sitting inside one,
+  since a drag region otherwise swallows its descendants' mouse events.
+*/
+@utility app-drag {
+  -webkit-app-region: drag;
+}
+
+@utility app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/*
   Design tokens from the Tokiie Figma library. Names mirror the Figma variable
   they come from so a value can be traced back to the design.
 */
@@ -67,6 +81,18 @@
   /* Neutral counterpart to the "Connected" badge, e.g. "No local model running". */
   --color-status-idle-bg: rgba(0, 0, 0, 0.11);
   --color-status-idle-text: #717171;
+
+  /* Agent Hub page. */
+  /* Hairline around the recessed tile fronting an agent card. */
+  --color-tile-border: rgba(60, 60, 67, 0.08);
+  /* Small caps section label, e.g. the "Works with" over the agent chips. */
+  --color-label-section: rgba(60, 60, 67, 0.7);
+  /* Ring on a chip whose skill or MCP is enabled for that agent. */
+  --color-chip-enabled-ring: #eaf9eb;
+  /* Each agent's brand colour: the tile behind its mark in the agent row, and
+     at a tenth of its strength the disc behind its compatibility chip. */
+  --color-agent-claude: #d97757;
+  --color-agent-codex: #6155f5;
 
   /* SF Pro is the system UI face on macOS; no web font is bundled or fetched. */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",

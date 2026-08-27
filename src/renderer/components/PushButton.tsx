@@ -6,9 +6,11 @@ interface PushButtonProps {
    * `filled` is the black primary button ("Add model", "Start", "Download");
    * `tinted` is the 5% black chip with a dark label used for secondary actions
    * on an opaque card ("Remove" on the Add Model page); `plain` carries no fill
-   * and only a grey label ("Remove" on the Tokiie page).
+   * and only a grey label ("Remove" on the Tokiie page); `plain-dark` is the
+   * same unfilled button with a full-strength label, used where it has to hold
+   * its own against a card's content ("Manage" on the Agent Hub page).
    */
-  variant?: 'filled' | 'tinted' | 'plain';
+  variant?: 'filled' | 'tinted' | 'plain' | 'plain-dark';
   onClick?: () => void;
   /** Dims the button while its action is still running. */
   disabled?: boolean;
@@ -18,7 +20,8 @@ interface PushButtonProps {
 const VARIANT_CLASSES = {
   filled: 'bg-black text-white',
   tinted: 'bg-black/5 text-text-primary',
-  plain: 'text-label-tertiary'
+  plain: 'text-label-tertiary',
+  'plain-dark': 'text-text-primary'
 } as const;
 
 /**

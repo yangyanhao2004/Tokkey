@@ -10,16 +10,21 @@ import { NavItem } from './NavItem';
  * Figma draws the traffic lights, but the window runs with `hiddenInset`, so
  * macOS already paints real ones in this corner. Reserve the height the design
  * allots them (31.2px) and let the native controls show through.
+ *
+ * This strip stands in for the title bar the window does not have, so it is
+ * also where the window is dragged from.
  */
 function WindowControlsSpacer() {
-  return <div className="h-[31.2px] w-full shrink-0" data-testid="window-controls" />;
+  return <div className="app-drag h-[31.2px] w-full shrink-0" data-testid="window-controls" />;
 }
 
 function SidebarBrand() {
   // The logo asset is 49px square because it carries the drop shadow around the
   // 28px mark, so it is inset negatively rather than scaled down.
   return (
-    <div className="flex items-center gap-2 px-2 pb-5" data-testid="sidebar-brand">
+    // Nothing here is clickable, so the wordmark drags the window like the
+    // strip above it rather than being a dead patch between two drag handles.
+    <div className="app-drag flex items-center gap-2 px-2 pb-5" data-testid="sidebar-brand">
       <div className="relative size-7 shrink-0">
         <div className="absolute inset-[-25%_-37.5%_-50%_-37.5%]">
           <img
