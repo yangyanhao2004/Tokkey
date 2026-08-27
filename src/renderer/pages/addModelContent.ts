@@ -108,8 +108,10 @@ function describeLifecycle(model: LocalModelRow): string {
       return model.error ?? 'failed to start';
     case 'pendingArtifact':
       return model.error ?? 'waiting for a download source';
+    // Reached only when the artifact has a working source but outgrows the free
+    // space; a row with no source carries its own error instead.
     case 'unsupported':
-      return model.error ?? 'not available for this Mac';
+      return model.error ?? 'too big for this Mac';
     default:
       return 'ready to download';
   }
