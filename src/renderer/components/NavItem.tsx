@@ -1,25 +1,26 @@
-import { NAV_ICON_BASE_PATH, type SidebarNavItem } from '../navigation';
+import { NAV_ICON_BASE_PATH, type NavItemId, type SidebarNavItem } from '../navigation';
 
 interface NavItemProps {
   item: SidebarNavItem;
+  isActive: boolean;
+  onSelect: (id: NavItemId) => void;
 }
 
 /**
- * One sidebar row: a 16px icon box followed by its label. Presentation only —
- * the row is a real button so it is keyboard reachable once it does something.
+ * One sidebar row: a 16px icon box followed by its label. Selecting it is what
+ * swaps the pane on the right, so the row is a real button.
  */
-export function NavItem({ item }: NavItemProps) {
+export function NavItem({ item, isActive, onSelect }: NavItemProps) {
   // Figma specifies only the default and active fills; hover is added here so
   // the rows respond to the pointer, and sits below active in weight.
-  const stateClasses = item.isActive
-    ? 'bg-vibrant-tertiary'
-    : 'hover:bg-vibrant-tertiary/60';
+  const stateClasses = isActive ? 'bg-vibrant-tertiary' : 'hover:bg-vibrant-tertiary/60';
 
   return (
     <button
       type="button"
       className={`flex w-full items-center gap-1.5 rounded-[10px] px-2 py-1.5 ${stateClasses} focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-text-primary`}
-      aria-current={item.isActive ? 'page' : undefined}
+      aria-current={isActive ? 'page' : undefined}
+      onClick={() => onSelect(item.id)}
       data-testid={`nav-item-${item.id}`}
     >
       <span className="flex size-4 shrink-0 items-center justify-center">

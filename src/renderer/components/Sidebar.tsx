@@ -1,4 +1,9 @@
-import { NAV_ICON_BASE_PATH, NAV_SECTIONS, type SidebarNavSection } from '../navigation';
+import {
+  NAV_ICON_BASE_PATH,
+  NAV_SECTIONS,
+  type NavItemId,
+  type SidebarNavSection
+} from '../navigation';
 import { NavItem } from './NavItem';
 
 /**
@@ -37,9 +42,11 @@ interface SidebarSectionProps {
   section: SidebarNavSection;
   /** The first heading sits under the brand block, which already carries the space. */
   isFirst: boolean;
+  activeItemId: NavItemId;
+  onSelect: (id: NavItemId) => void;
 }
 
-function SidebarSection({ section, isFirst }: SidebarSectionProps) {
+function SidebarSection({ section, isFirst, activeItemId, onSelect }: SidebarSectionProps) {
   const spacing = isFirst ? 'pb-1' : 'pt-3 pb-1.5';
 
   return (
@@ -50,7 +57,12 @@ function SidebarSection({ section, isFirst }: SidebarSectionProps) {
         {section.title}
       </h2>
       {section.items.map((item) => (
-        <NavItem key={item.id} item={item} />
+        <NavItem
+          key={item.id}
+          item={item}
+          isActive={item.id === activeItemId}
+          onSelect={onSelect}
+        />
       ))}
     </>
   );
@@ -80,8 +92,13 @@ function SidebarAccount() {
   );
 }
 
-/** The left navigation panel. */
-export function Sidebar() {
+interface SidebarProps {
+  activeItemId: NavItemId;
+  onSelect: (id: NavItemId) => void;
+}
+
+/** The left navigation panel. Owns no state: the app decides what is selected. */
+export function Sidebar({ activeItemId, onSelect }: SidebarProps) {
   return (
     <aside
       className="flex h-full w-[216px] shrink-0 flex-col gap-6 rounded-[20px] bg-vibrant-quinary p-3 backdrop-blur-[16px]"
@@ -93,7 +110,13 @@ export function Sidebar() {
         <SidebarBrand />
         <nav className="flex flex-col gap-1.5 overflow-auto">
           {NAV_SECTIONS.map((section, index) => (
-            <SidebarSection key={section.title} section={section} isFirst={index === 0} />
+            <SidebarSection
+              key={section.title}
+              section={section}
+              isFirst={index === 0}
+              activeItemId={activeItemId}
+              onSelect={onSelect}
+            />
           ))}
         </nav>
         <SidebarAccount />

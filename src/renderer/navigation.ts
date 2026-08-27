@@ -4,9 +4,26 @@
  * reordered or extended without touching markup.
  */
 
+/**
+ * Every destination the sidebar can select. Spelling the ids out keeps the
+ * pane lookup honest: a pane can only be registered for a row that exists.
+ */
+export type NavItemId =
+  | 'tokiie'
+  | 'router'
+  | 'agent-hub'
+  | 'memory'
+  | 'pet'
+  | 'chat'
+  | 'dashboard'
+  | 'settings';
+
+/** The row selected when the window opens. */
+export const DEFAULT_NAV_ITEM_ID: NavItemId = 'tokiie';
+
 /** A single navigation row. */
 export interface SidebarNavItem {
-  readonly id: string;
+  readonly id: NavItemId;
   readonly label: string;
   readonly iconFile: string;
   /**
@@ -15,7 +32,6 @@ export interface SidebarNavItem {
    * class because the renderer's CSP forbids inline style attributes.
    */
   readonly iconSizeClass: string;
-  readonly isActive?: boolean;
   /** Trailing status word, e.g. the "Ready" on the Tokiie row (node 192:2727). */
   readonly badge?: string;
 }
@@ -39,7 +55,6 @@ export const NAV_SECTIONS: readonly SidebarNavSection[] = [
         label: 'Tokiie',
         iconFile: 'nav-tokiie.svg',
         iconSizeClass: DEFAULT_ICON_SIZE_CLASS,
-        isActive: true,
         badge: 'Ready'
       },
       {
@@ -98,3 +113,8 @@ export const NAV_SECTIONS: readonly SidebarNavSection[] = [
     ]
   }
 ];
+
+/** Looks a row up across sections, e.g. to title the pane it opens. */
+export function findNavItem(id: NavItemId): SidebarNavItem | undefined {
+  return NAV_SECTIONS.flatMap((section) => section.items).find((item) => item.id === id);
+}

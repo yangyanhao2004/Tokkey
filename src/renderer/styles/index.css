@@ -5,7 +5,7 @@
 @source "../index.html";
 @source "../main.tsx";
 @source "../navigation.ts";
-@source "../mainContent.ts";
+@source "../tokiieContent.ts";
 @source "../components";
 
 /*
@@ -25,11 +25,11 @@
   --color-icon-primary: #343432;
 
   /*
-    The Main pane's values are raw fills in Figma rather than published
+    The Tokiie pane's values are raw fills in Figma rather than published
     variables, so they are named here instead of being repeated per element.
   */
 
-  /* Translucent card surface shared by both Main sections. */
+  /* Translucent card surface shared by both Tokiie pane sections. */
   --color-surface-card: rgba(255, 255, 255, 0.72);
   --color-surface-card-border: rgba(0, 0, 0, 0.12);
   /* Recessed tile behind list icons and the footnote strip. */

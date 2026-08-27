@@ -5,7 +5,8 @@ import {
   LOCAL_MODELS_FOOTNOTE,
   formatModelCount,
   type InstalledModel
-} from '../mainContent';
+} from '../tokiieContent';
+import { PaneShell } from './PaneShell';
 import { PushButton } from './PushButton';
 
 /**
@@ -28,53 +29,6 @@ function IconTile({ src, desaturate = false }: IconTileProps) {
         alt=""
       />
     </span>
-  );
-}
-
-/** Back/forward pair plus the connection pill. */
-function MainHeader() {
-  return (
-    <header
-      className="flex shrink-0 items-center justify-between px-6 py-3 backdrop-blur-[11.634px]"
-      data-testid="main-header"
-    >
-      <div className="flex h-[28px] items-center overflow-hidden rounded-full border border-black/8 bg-white/50 shadow-[0px_2.493px_9.972px_0px_rgba(0,0,0,0.05)]">
-        <button
-          type="button"
-          className="flex h-[28px] w-[30px] items-center justify-center focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary"
-          aria-label="Go back"
-          title="Back"
-          data-testid="nav-back"
-        >
-          <img
-            className="block size-[14.958px] max-w-none"
-            src={`${ICON_BASE_PATH}/main-nav-back.svg`}
-            alt=""
-          />
-        </button>
-        <button
-          type="button"
-          className="flex h-[28px] w-[30px] items-center justify-center border-l-[0.831px] border-separator focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary"
-          aria-label="Go forward"
-          title="Forward"
-          data-testid="nav-forward"
-        >
-          <img
-            className="block size-[14.958px] max-w-none"
-            src={`${ICON_BASE_PATH}/main-nav-forward.svg`}
-            alt=""
-          />
-        </button>
-      </div>
-
-      <span
-        className="flex items-center justify-center gap-1.5 rounded-full border-[0.829px] border-pill-border bg-pill-bg px-2 py-1"
-        data-testid="connection-pill"
-      >
-        <span className="size-[6px] shrink-0 rounded-[3px] bg-status-live" />
-        <span className="text-[11px] leading-[13px] font-bold text-pill-text">Tokiie connected</span>
-      </span>
-    </header>
   );
 }
 
@@ -191,27 +145,12 @@ function LocalModelsCard() {
   );
 }
 
-/** The right-hand content pane. */
-export function MainPane() {
+/** The pane behind the "Tokiie" nav row: device status and local models. */
+export function TokiiePane() {
   return (
-    <main
-      // `overflow-hidden` is load-bearing: the header's backdrop-filter is
-      // promoted to its own layer, which a bare border-radius does not clip, so
-      // without it the blur paints square over the pane's rounded top corners.
-      className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-white"
-      data-testid="main-pane"
-    >
-      <MainHeader />
-      <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
-        <div className="flex flex-col gap-1">
-          <h1 className="text-[20px] leading-[24px] font-bold text-text-primary">Tokiie</h1>
-          <span className="text-[12px] leading-[14px] text-text-secondary">
-            Connect Tokii and manage your local models.
-          </span>
-        </div>
-        <DeviceCard />
-        <LocalModelsCard />
-      </div>
-    </main>
+    <PaneShell title="Tokiie" subtitle="Connect Tokii and manage your local models." testId="tokiie">
+      <DeviceCard />
+      <LocalModelsCard />
+    </PaneShell>
   );
 }

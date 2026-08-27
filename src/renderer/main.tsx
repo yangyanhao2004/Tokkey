@@ -1,7 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MainPane } from './components/MainPane';
-import { Sidebar } from './components/Sidebar';
+import { App } from './components/App';
 
 /**
  * Renderer entry point. esbuild bundles this into a single local script, which
@@ -12,8 +11,7 @@ const container = document.getElementById('app');
 if (container) {
   createRoot(container).render(
     <StrictMode>
-      <Sidebar />
-      <MainPane />
+      <App />
     </StrictMode>
   );
 }

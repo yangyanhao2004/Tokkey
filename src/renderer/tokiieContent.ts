@@ -1,5 +1,5 @@
 /**
- * Content model for the Main pane, taken from the Figma node "Main"
+ * Content model for the Tokiie pane, taken from the Figma node "Main"
  * (192:2507). Kept apart from the components so copy and rows can change
  * without touching markup.
  *
