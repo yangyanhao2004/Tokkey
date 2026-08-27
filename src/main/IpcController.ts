@@ -123,10 +123,14 @@ export default class IpcController {
         this.installSkill(this.requireSkillsShInstallRequest(request)),
       'models:list': (request: unknown) => this.listLocalModels(this.requireModelRequest(request)),
       'models:refresh': (request: unknown) => this.refreshLocalModels(this.requireModelRequest(request)),
-      'models:start-download': (modelId: unknown) => this.startLocalModelDownload(this.requireModelId(modelId)),
-      'models:cancel-download': (modelId: unknown) => this.cancelLocalModelDownload(this.requireModelId(modelId)),
-      'models:delete': (modelId: unknown) => this.deleteLocalModel(this.requireModelId(modelId)),
-      'models:deploy': (modelId: unknown) => this.deployLocalModel(this.requireModelId(modelId)),
+      'models:start-download': (modelId: unknown, request: unknown) =>
+        this.startLocalModelDownload(this.requireModelId(modelId), this.requireModelRequest(request)),
+      'models:cancel-download': (modelId: unknown, request: unknown) =>
+        this.cancelLocalModelDownload(this.requireModelId(modelId), this.requireModelRequest(request)),
+      'models:delete': (modelId: unknown, request: unknown) =>
+        this.deleteLocalModel(this.requireModelId(modelId), this.requireModelRequest(request)),
+      'models:deploy': (modelId: unknown, request: unknown) =>
+        this.deployLocalModel(this.requireModelId(modelId), this.requireModelRequest(request)),
       'models:cloud-cards': () => this.listCloudModelCards(),
       'models:connect-cloud': (cardId: unknown) =>
         this.connectCloudModel(this.requireString(cardId, 'Cloud model card ID'))
@@ -208,24 +212,28 @@ export default class IpcController {
     return this.localModelManager.refresh(request);
   }
 
-  /** Starts a model transfer through Electron's native DownloadItem pipeline. */
-  startLocalModelDownload(modelId: string) {
-    return this.localModelManager.startDownload(modelId);
+  /**
+   * Starts a model transfer through Electron's native DownloadItem pipeline.
+   * Every lifecycle action echoes back a scan built with the caller's own
+   * filters, so acting on a row never silently resets the visible list.
+   */
+  startLocalModelDownload(modelId: string, request: LocalModelCatalogRequest = {}) {
+    return this.localModelManager.startDownload(modelId, request);
   }
 
   /** Cancels the active native download and removes its local files. */
-  cancelLocalModelDownload(modelId: string) {
-    return this.localModelManager.cancelDownload(modelId);
+  cancelLocalModelDownload(modelId: string, request: LocalModelCatalogRequest = {}) {
+    return this.localModelManager.cancelDownload(modelId, request);
   }
 
   /** Removes the downloaded model and all local lifecycle state. */
-  deleteLocalModel(modelId: string) {
-    return this.localModelManager.deleteModel(modelId);
+  deleteLocalModel(modelId: string, request: LocalModelCatalogRequest = {}) {
+    return this.localModelManager.deleteModel(modelId, request);
   }
 
   /** Marks a downloaded model as deployed for the local target. */
-  deployLocalModel(modelId: string) {
-    return this.localModelManager.deployModel(modelId);
+  deployLocalModel(modelId: string, request: LocalModelCatalogRequest = {}) {
+    return this.localModelManager.deployModel(modelId, request);
   }
 
   /** Lists the hardcoded cloud model cards the renderer can connect to. */

@@ -1,16 +1,11 @@
 import type { HostMachineInfo, HostResourceGauge, HostResourceId, HostSnapshot } from '../../shared/types';
+import { formatBinaryGB, formatDecimalGB } from '../../shared/byteFormatting';
 import HostDiskProbe from './HostDiskProbe';
 import HostMachineIdentity from './HostMachineIdentity';
 import HostMemoryProbe from './HostMemoryProbe';
 
-/**
- * macOS is not consistent about what "GB" means, and the card has to match what
- * the user can check elsewhere: About This Mac calls 25769803776 bytes of RAM
- * "24 GB" (binary), while Finder and System Settings > Storage call 494383795648
- * bytes of disk "494 GB" (decimal). So each metric is formatted in its own unit.
- */
-const BYTES_PER_MEMORY_GB = 1_073_741_824;
-const BYTES_PER_DISK_GB = 1_000_000_000;
+/** Each metric prints in the unit macOS itself uses for it. */
+type ByteFormatter = (bytes: number) => string;
 
 /** Collaborators the service builds itself unless a caller supplies one. */
 export interface HostSnapshotServiceOptions {
@@ -61,14 +56,14 @@ export class HostSnapshotService {
   }
 
   private async readMemoryGauge(): Promise<HostResourceGauge | null> {
-    return this.buildGauge('memory', 'Memory used', BYTES_PER_MEMORY_GB, async () => {
+    return this.buildGauge('memory', 'Memory used', formatBinaryGB, async () => {
       const { total, available } = await this.memoryProbe.read();
       return { total, available };
     });
   }
 
   private async readDiskGauge(): Promise<HostResourceGauge | null> {
-    return this.buildGauge('disk', 'Disk used', BYTES_PER_DISK_GB, async () => {
+    return this.buildGauge('disk', 'Disk used', formatDecimalGB, async () => {
       const { total, free } = await this.diskProbe.read();
       return { total, available: free };
     });
@@ -82,14 +77,13 @@ export class HostSnapshotService {
   private async buildGauge(
     id: HostResourceId,
     label: string,
-    bytesPerGB: number,
+    format: ByteFormatter,
     probe: () => Promise<{ total: number; available: number }>
   ): Promise<HostResourceGauge | null> {
     try {
       const { total, available } = await probe();
       const used = Math.max(total - available, 0);
       const usedFraction = total > 0 ? Math.min(used / total, 1) : 0;
-      const format = (bytes: number) => HostSnapshotService.formatGB(bytes, bytesPerGB);
       const gauge: HostResourceGauge = {
         id,
         label,
@@ -103,12 +97,6 @@ export class HostSnapshotService {
       console.error(`[HostSnapshotService] ${id} probe failed:`, error);
       return this.lastGauges.get(id) ?? null;
     }
-  }
-
-  /** One decimal below 10 GB so small figures read naturally, none above. */
-  private static formatGB(bytes: number, bytesPerGB: number): string {
-    const gigabytes = bytes / bytesPerGB;
-    return `${gigabytes.toFixed(gigabytes >= 10 ? 0 : 1)} GB`;
   }
 }
 

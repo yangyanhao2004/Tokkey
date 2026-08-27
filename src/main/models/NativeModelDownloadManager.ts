@@ -1,5 +1,4 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { statfs } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { session, type DownloadItem, type Session } from 'electron';
@@ -9,6 +8,7 @@ import type {
   LocalModelLifecycle,
   LocalModelRow
 } from '../../shared/types';
+import HostDiskProbe from '../host/HostDiskProbe';
 
 interface PersistedDownload {
   modelId: string;
@@ -42,14 +42,20 @@ export class NativeModelDownloadManager {
   private readonly pendingUrls = new Map<string, string>();
   private readonly persisted = new Map<string, PersistedDownload>();
   private readonly persistenceReady: Promise<void>;
+  private readonly diskProbe: HostDiskProbe;
   private session: Session | null = null;
   private stateListener: ModelStateListener | null = null;
 
-  constructor(options: { homeDirectory?: string; stateListener?: ModelStateListener } = {}) {
+  constructor(options: {
+    homeDirectory?: string;
+    stateListener?: ModelStateListener;
+    diskProbe?: HostDiskProbe;
+  } = {}) {
     const homeDirectory = options.homeDirectory ?? os.homedir();
     this.modelsRoot = path.join(homeDirectory, '.amiswifi', 'models');
     this.persistencePath = path.join(homeDirectory, '.amiswifi', 'model_downloads.json');
     this.stateListener = options.stateListener ?? null;
+    this.diskProbe = options.diskProbe ?? new HostDiskProbe();
     this.persistenceReady = this.readPersistedDownloads();
   }
 
@@ -131,6 +137,9 @@ export class NativeModelDownloadManager {
 
   /** Projects all known descriptors into UI-ready lifecycle rows. */
   async projectRows(descriptors: LocalModelDescriptor[], capability: LocalModelCapability): Promise<LocalModelRow[]> {
+    // Saved resume points decide what counts as downloaded, so the first scan
+    // after launch has to wait for them rather than read an empty map.
+    await this.persistenceReady;
     const rows = await Promise.all(descriptors.map(async (descriptor) => {
       const entry = this.entries.get(descriptor.id);
       const downloaded = await this.isDownloaded(descriptor);
@@ -148,7 +157,24 @@ export class NativeModelDownloadManager {
         isTargetSupported
       };
     }));
-    return rows.sort((left, right) => Number(right.lifecycle !== 'unsupported') - Number(left.lifecycle !== 'unsupported') || left.name.localeCompare(right.name));
+    return rows.sort((left, right) =>
+      NativeModelDownloadManager.recommendationRank(left, capability) -
+        NativeModelDownloadManager.recommendationRank(right, capability) ||
+      left.name.localeCompare(right.name));
+  }
+
+  /**
+   * "Recommended for this Mac" has to be true of the order, not just the
+   * heading: models this machine has the memory to run come first, then the
+   * ones it would have to swap for, then the ones it cannot fetch at all.
+   */
+  private static recommendationRank(row: LocalModelRow, capability: LocalModelCapability): number {
+    if (row.lifecycle === 'unsupported') return 2;
+    const fitsMemory =
+      row.requiredRamBytes === null ||
+      capability.totalRamBytes === null ||
+      row.requiredRamBytes <= capability.totalRamBytes;
+    return fitsMemory ? 0 : 1;
   }
 
   /** Marks a downloaded model as running without pretending to start a server. */
@@ -177,18 +203,31 @@ export class NativeModelDownloadManager {
     this.stateListener = listener;
   }
 
+  /**
+   * What this Mac can take. Free space comes from the same probe as the "This
+   * Mac" card's disk gauge, so the page never quotes two different figures for
+   * one volume: a bare `statfs` omits purgeable data — local snapshots and
+   * evictable caches, tens of GB on a typical Mac — and gating a download on
+   * that would refuse models the volume can really hold.
+   */
   async capability(): Promise<LocalModelCapability> {
     let freeDiskBytes: number | null = null;
     try {
+      // The models directory is on the boot data volume the probe reads.
       await mkdir(this.modelsRoot, { recursive: true });
-      const filesystem = await statfs(this.modelsRoot);
-      freeDiskBytes = Number(filesystem.bavail) * Number(filesystem.bsize);
-    } catch {
-      freeDiskBytes = null;
+      freeDiskBytes = (await this.diskProbe.read()).free;
+    } catch (error) {
+      console.error('[NativeModelDownloadManager] Free space read failed:', error);
     }
     return { target: 'mac', freeDiskBytes, totalRamBytes: os.totalmem(), platform: process.platform };
   }
 
+  /**
+   * Claims a session download for the model that requested it: pins the save
+   * path under `modelsRoot`, mirrors progress into the entry, and on an
+   * interrupted transfer retries the next mirror in `sourceUrls`.
+   * The prefix match covers mirrors that redirect before the item exists.
+   */
   private handleWillDownload(item: DownloadItem): void {
     const sourceUrl = item.getURL();
     const modelId = this.pendingUrls.get(sourceUrl) ?? [...this.pendingUrls.entries()].find(([url]) => sourceUrl.startsWith(url))?.[1];
@@ -239,10 +278,19 @@ export class NativeModelDownloadManager {
     this.notify();
   }
 
+  /**
+   * A file on disk counts as downloaded unless a resume point is still saved
+   * for it, which is exactly the state an unfinished transfer leaves behind.
+   *
+   * The catalog's declared size cannot be used for this: it arrives as a `*Gb`
+   * figure rounded to two decimals, so a completed file almost never matches it
+   * byte for byte and every downloaded model would offer "Download" again.
+   */
   private async isDownloaded(descriptor: LocalModelDescriptor): Promise<boolean> {
+    if (this.persisted.has(descriptor.id)) return false;
     try {
       const metadata = await stat(path.join(this.modelsRoot, this.safeId(descriptor.id), this.safeRelativePath(descriptor.fileName)));
-      return metadata.isFile() && (descriptor.sizeBytes === null || metadata.size === descriptor.sizeBytes);
+      return metadata.isFile() && metadata.size > 0;
     } catch {
       return false;
     }

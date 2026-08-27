@@ -10,6 +10,8 @@ interface PushButtonProps {
    */
   variant?: 'filled' | 'tinted' | 'plain';
   onClick?: () => void;
+  /** Dims the button while its action is still running. */
+  disabled?: boolean;
   testId?: string;
 }
 
@@ -27,13 +29,15 @@ export function PushButton({
   children,
   variant = 'filled',
   onClick,
+  disabled = false,
   testId
 }: PushButtonProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`flex h-[24px] shrink-0 items-center justify-center rounded-[6px] px-2 text-[10px] leading-[16px] font-medium focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-text-primary ${VARIANT_CLASSES[variant]}`}
+      disabled={disabled}
+      className={`flex h-[24px] shrink-0 items-center justify-center rounded-[6px] px-2 text-[10px] leading-[16px] font-medium focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-text-primary disabled:opacity-40 ${VARIANT_CLASSES[variant]}`}
       data-testid={testId}
     >
       {children}

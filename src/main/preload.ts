@@ -31,10 +31,10 @@ class PreloadBridge {
       installSkill: (request) => ipcRenderer.invoke('discover-skills:install', request),
       listLocalModels: (request) => ipcRenderer.invoke('models:list', request),
       refreshLocalModels: (request) => ipcRenderer.invoke('models:refresh', request),
-      startLocalModelDownload: (modelId) => ipcRenderer.invoke('models:start-download', modelId),
-      cancelLocalModelDownload: (modelId) => ipcRenderer.invoke('models:cancel-download', modelId),
-      deleteLocalModel: (modelId) => ipcRenderer.invoke('models:delete', modelId),
-      deployLocalModel: (modelId) => ipcRenderer.invoke('models:deploy', modelId),
+      startLocalModelDownload: (modelId, request) => ipcRenderer.invoke('models:start-download', modelId, request),
+      cancelLocalModelDownload: (modelId, request) => ipcRenderer.invoke('models:cancel-download', modelId, request),
+      deleteLocalModel: (modelId, request) => ipcRenderer.invoke('models:delete', modelId, request),
+      deployLocalModel: (modelId, request) => ipcRenderer.invoke('models:deploy', modelId, request),
       listCloudModelCards: () => ipcRenderer.invoke('models:cloud-cards'),
       connectCloudModel: (cardId) => ipcRenderer.invoke('models:connect-cloud', cardId)
     };

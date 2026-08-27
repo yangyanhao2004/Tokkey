@@ -17,7 +17,7 @@ interface CatalogCache {
 }
 
 /** Fetches, normalizes, and atomically caches the remote local-model catalog. */
-export class ModelCatalogService {
+export class LocalModelCatalogService {
   private readonly cachePath: string;
   private readonly fetcher: ModelCatalogFetch;
   private cache: CatalogCache | null = null;
@@ -264,4 +264,4 @@ export class ModelCatalogService {
   }
 }
 
-export default ModelCatalogService;
+export default LocalModelCatalogService;

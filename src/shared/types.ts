@@ -165,10 +165,10 @@ export interface TokiieApi {
   installSkill(request: SkillsShInstallRequest): Promise<SkillsShInstallResult>;
   listLocalModels(request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
   refreshLocalModels(request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
-  startLocalModelDownload(modelId: string): Promise<LocalModelCatalogScan>;
-  cancelLocalModelDownload(modelId: string): Promise<LocalModelCatalogScan>;
-  deleteLocalModel(modelId: string): Promise<LocalModelCatalogScan>;
-  deployLocalModel(modelId: string): Promise<LocalModelCatalogScan>;
+  startLocalModelDownload(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
+  cancelLocalModelDownload(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
+  deleteLocalModel(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
+  deployLocalModel(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
   listCloudModelCards(): Promise<CloudModelCard[]>;
   connectCloudModel(cardId: string): Promise<CloudModelConnection>;
 }

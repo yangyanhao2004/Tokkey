@@ -4,21 +4,21 @@ import type {
   LocalModelDescriptor,
   LocalModelProvider
 } from '../../shared/types';
-import ModelCatalogService from './ModelCatalogService';
+import LocalModelCatalogService from './LocalModelCatalogService';
 import NativeModelDownloadManager from './NativeModelDownloadManager';
 
 /** Coordinates catalog freshness, target capability, and model lifecycle actions. */
 export class LocalModelManager {
-  private readonly catalog: ModelCatalogService;
+  private readonly catalog: LocalModelCatalogService;
   private readonly downloader: NativeModelDownloadManager;
   private descriptors: LocalModelDescriptor[] = [];
   private providers: string[] = [];
 
   constructor(options: {
-    catalog?: ModelCatalogService;
+    catalog?: LocalModelCatalogService;
     downloader?: NativeModelDownloadManager;
   } = {}) {
-    this.catalog = options.catalog ?? new ModelCatalogService();
+    this.catalog = options.catalog ?? new LocalModelCatalogService();
     this.downloader = options.downloader ?? new NativeModelDownloadManager();
   }
 
