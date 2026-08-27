@@ -7,7 +7,13 @@
 @source "../App.tsx";
 @source "../navigation.ts";
 @source "../components";
+@source "../hooks";
 @source "../pages";
+
+/* Capacity-bar widths. The percentage is only known at runtime, and the
+   renderer's CSP forbids inline style attributes, so every whole percent is
+   emitted up front and the bar picks one by class name. */
+@source inline("w-[{0..100}%]");
 
 /*
   Design tokens from the Tokiie Figma library. Names mirror the Figma variable

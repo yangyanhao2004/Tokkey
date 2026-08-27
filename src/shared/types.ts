@@ -103,9 +103,50 @@ export interface McpCatalogScan {
   failures: McpCatalogFailure[];
 }
 
+/** The live resources the "This Mac" card gauges. */
+export type HostResourceId = 'memory' | 'disk';
+
+/**
+ * One capacity bar on the "This Mac" card, fully computed by the main process.
+ * The renderer draws `usedFraction` and prints the two strings; it never sees
+ * bytes and never does arithmetic.
+ */
+export interface HostResourceGauge {
+  id: HostResourceId;
+  /** Caption beside the reading, e.g. "Memory used". */
+  label: string;
+  /** Share of the resource in use, clamped to 0..1. */
+  usedFraction: number;
+  /** Whole-percent reading, e.g. "42%". */
+  percentText: string;
+  /** Line under the bar, e.g. "7.3 GB free of 18 GB". */
+  detailText: string;
+}
+
+/** Static hardware and system description of the Mac the app runs on. */
+export interface HostMachineInfo {
+  /** Marketing model name, e.g. "MacBook Air (13-inch, M5)". */
+  deviceModel: string;
+  /** CPU brand string, e.g. "Apple M5". */
+  chip: string;
+  /** User-facing macOS version, e.g. "26.4" — not the Darwin kernel version. */
+  osVersion: string;
+  totalMemoryBytes: number;
+  /** The card's subtitle, already joined with the middot the design uses. */
+  detailText: string;
+}
+
+/** Everything the "This Mac" card renders in one reading. */
+export interface HostSnapshot {
+  machine: HostMachineInfo;
+  /** Empty only while every probe has failed with no earlier reading to keep. */
+  gauges: HostResourceGauge[];
+}
+
 /** Renderer-facing API exposed by the preload bridge. */
 export interface TokiieApi {
   getAppInfo(): Promise<AppInfo>;
+  getHostSnapshot(): Promise<HostSnapshot>;
   getInstalledMcps(): Promise<McpCatalogScan>;
   scanInstalledMcps(): Promise<McpCatalogScan>;
   prepareMcpConfiguration(draft: McpConfigurationDraft): McpConfigurationPreparation;

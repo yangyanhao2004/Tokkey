@@ -5,6 +5,7 @@ import type {
   CachedRepository,
   CloudModelCard,
   CloudModelConnection,
+  HostSnapshot,
   McpConfigurationDraft,
   McpConfigurationPreparation,
   SkillsShCardState,
@@ -38,6 +39,7 @@ import LocalMcpConfigurationApplier, {
 } from './mcp/McpConfigurationApplier';
 import LocalModelManager from './models/LocalModelManager';
 import CloudModelConnector from './models/CloudModelConnector';
+import HostSnapshotService from './host/HostSnapshotService';
 
 type IpcHandler = (...args: unknown[]) => unknown;
 
@@ -50,6 +52,7 @@ export interface IpcControllerOptions {
   mcpCatalogScanner?: LocalMcpCatalogScanner;
   mcpConfigurationApplier?: McpConfigurationApplying;
   localModelManager?: LocalModelManager;
+  hostSnapshotService?: HostSnapshotService;
   /** Owns the gateway subprocess, so only the app that supervises it can supply this. */
   cloudModelConnector?: CloudModelConnector;
 }
@@ -67,6 +70,7 @@ export default class IpcController {
   private readonly mcpCatalogScanner: LocalMcpCatalogScanner;
   private readonly mcpConfigurationApplier: McpConfigurationApplying;
   private readonly localModelManager: LocalModelManager;
+  private readonly hostSnapshotService: HostSnapshotService;
   private readonly cloudModelConnector: CloudModelConnector | null;
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
@@ -85,10 +89,12 @@ export default class IpcController {
     this.mcpConfigurationApplier =
       options.mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
     this.localModelManager = options.localModelManager ?? new LocalModelManager();
+    this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
+      'host:snapshot': () => this.getHostSnapshot(),
       'mcps:list-installed': () => this.scanInstalledMcps(),
       'mcps:apply-configuration': (request: unknown) =>
         this.applyMcpConfiguration(this.requireMcpApplyRequest(request)),
@@ -156,6 +162,14 @@ export default class IpcController {
       node: process.versions.node,
       platform: process.platform
     };
+  }
+
+  /**
+   * One reading of the "This Mac" card: static machine description plus the
+   * live memory and disk gauges. Polled by the Add Model page every few seconds.
+   */
+  getHostSnapshot(): Promise<HostSnapshot> {
+    return this.hostSnapshotService.snapshot();
   }
 
   /** Lists local skills for the future skills page without exposing filesystem APIs to it. */

@@ -1,14 +1,14 @@
+import type { HostResourceGauge } from '../../shared/types';
 import {
-  CAPACITY_METERS,
   CATALOG_HEADING,
   CATALOG_MODELS,
   CATALOG_SUBHEADING,
   HOST_MACHINE,
   ICON_BASE_PATH,
   PROVIDER_FILTER_LABEL,
-  type CapacityMeter,
   type CatalogModel
 } from './addModelContent';
+import { useHostSnapshot } from '../hooks/useHostSnapshot';
 import { IconTile } from '../components/IconTile';
 import { PageShell } from '../components/PageShell';
 import { PopUpButton } from '../components/PopUpButton';
@@ -16,44 +16,61 @@ import { PushButton } from '../components/PushButton';
 import { TitleBlock } from '../components/TitleBlock';
 
 interface CapacityMeterCellProps {
-  meter: CapacityMeter;
+  gauge: HostResourceGauge;
   /** Figma rules the two cells apart rather than boxing each one. */
   hasLeadingRule: boolean;
 }
 
 /** One capacity reading: label, bar, and the free-space line under it. */
-function CapacityMeterCell({ meter, hasLeadingRule }: CapacityMeterCellProps) {
+function CapacityMeterCell({ gauge, hasLeadingRule }: CapacityMeterCellProps) {
+  // The bar width is a class, not a style attribute: the renderer's CSP forbids
+  // inline styles, so index.css emits `w-[0%]`-`w-[100%]` for this to pick from.
+  const barWidthClass = `w-[${Math.round(gauge.usedFraction * 100)}%]`;
+
   return (
     <div
       className={`flex min-w-0 flex-1 flex-col gap-1.5 px-4 py-3 ${hasLeadingRule ? 'border-l border-separator-hairline' : ''}`}
-      data-testid={`capacity-meter-${meter.id}`}
+      data-testid={`capacity-meter-${gauge.id}`}
     >
       <div className="flex w-full items-start justify-between text-[10px] leading-[12px]">
-        <span className="text-text-secondary">{meter.label}</span>
-        <span className="font-bold text-text-primary">{meter.percentUsed}%</span>
+        <span className="text-text-secondary">{gauge.label}</span>
+        <span className="font-bold text-text-primary">{gauge.percentText}</span>
       </div>
 
       <div className="h-[4px] w-full overflow-hidden rounded-full bg-meter-track">
-        <div className={`h-full rounded-full bg-meter-fill ${meter.barWidthClass}`} />
+        <div className={`h-full rounded-full bg-meter-fill ${barWidthClass}`} />
       </div>
 
-      <span className="text-[8px] leading-[10px] text-text-secondary">{meter.footnote}</span>
+      <span className="text-[8px] leading-[10px] text-text-secondary">{gauge.detailText}</span>
     </div>
   );
 }
 
 /**
- * "This Mac" card: the machine on top, its capacity meters below. The two
+ * "This Mac" card: the machine on top, its live capacity meters below. The two
  * halves are separate boxes so only the outer corners round (Figma 225:2189
  * and 227:3168).
+ *
+ * The meters poll the main process while this page is mounted. Until the first
+ * reading lands — and if every probe fails — the machine row renders alone and
+ * closes its own corners, rather than showing empty bars.
  */
 function HostMachineCard() {
+  const snapshot = useHostSnapshot();
+  const gauges = snapshot?.gauges ?? [];
+  const hasGauges = gauges.length > 0;
+
   return (
     <section className="flex w-full flex-col" data-testid="host-machine-card">
-      <div className="flex h-[66px] w-full items-center justify-between overflow-hidden rounded-t-[12px] border border-surface-card-border bg-surface-card p-4">
+      <div
+        className={`flex h-[66px] w-full items-center justify-between overflow-hidden border border-surface-card-border bg-surface-card p-4 ${hasGauges ? 'rounded-t-[12px]' : 'rounded-[12px]'}`}
+      >
         <div className="flex min-w-0 items-center gap-2">
           <IconTile src={`${ICON_BASE_PATH}/main-mac-laptop.svg`} />
-          <TitleBlock title={HOST_MACHINE.name} subtitle={HOST_MACHINE.detail} />
+          <TitleBlock
+            title={HOST_MACHINE.name}
+            subtitle={snapshot?.machine.detailText ?? HOST_MACHINE.placeholderDetail}
+          />
         </div>
 
         <span className="flex min-h-[19.114px] shrink-0 items-center rounded-full bg-status-idle-bg px-2 py-1">
@@ -63,11 +80,13 @@ function HostMachineCard() {
         </span>
       </div>
 
-      <div className="flex w-full items-start justify-center rounded-b-[12px] border-r border-b border-l border-surface-card-border">
-        {CAPACITY_METERS.map((meter, index) => (
-          <CapacityMeterCell key={meter.id} meter={meter} hasLeadingRule={index > 0} />
-        ))}
-      </div>
+      {hasGauges && (
+        <div className="flex w-full items-start justify-center rounded-b-[12px] border-r border-b border-l border-surface-card-border">
+          {gauges.map((gauge, index) => (
+            <CapacityMeterCell key={gauge.id} gauge={gauge} hasLeadingRule={index > 0} />
+          ))}
+        </div>
+      )}
     </section>
   );
 }
