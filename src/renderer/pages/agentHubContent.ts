@@ -3,17 +3,21 @@
  * (192:1921). Kept apart from the components so copy and catalog entries can
  * change without touching markup.
  *
- * The MCP catalog below is still fixed content; the skill catalog is not — it
- * is whatever the main process scanner finds installed. Nor is the agent list:
- * detection decides that, and every function here that takes an
- * `AgentAvailability` reads it. OpenCode is deliberately absent — Tokiie only
- * manages Codex and Claude Code.
+ * Neither catalog is fixed content: both are whatever the main process scanners
+ * find installed. Nor is the agent list — detection decides that, and every
+ * function here that takes an `AgentAvailability` reads it. OpenCode is
+ * deliberately absent — Tokiie only manages Codex and Claude Code.
  */
 
 import type {
   AgentInstallation,
   CodingAgent,
+  InstalledMcp,
   InstalledSkill,
+  McpAgent,
+  McpAgentBadge,
+  McpCatalogFailure,
+  McpConnectionType,
   SkillAgent,
   SkillAgentBadge,
   SkillRoot,
@@ -38,14 +42,22 @@ export interface HubAgent {
   readonly vendor: string;
   /** The executable detection looks for, which is not always the agent's id. */
   readonly cli: CodingAgent;
-  /** The name the skill scanner badges this agent under. */
-  readonly skillAgent: SkillAgent;
+  /** The name the skill and MCP scanners both badge this agent under. */
+  readonly catalogAgent: CatalogAgent;
 }
 
+/** The agent name both scanners badge under, which they spell the same way. */
+export type CatalogAgent = SkillAgent & McpAgent;
+
 export const HUB_AGENTS: readonly HubAgent[] = [
-  { id: 'codex', name: 'Codex', vendor: 'OpenAI', cli: 'codex', skillAgent: 'codex' },
-  { id: 'claude-code', name: 'Claude Code', vendor: 'Anthropic', cli: 'claude', skillAgent: 'claudeCode' }
+  { id: 'codex', name: 'Codex', vendor: 'OpenAI', cli: 'codex', catalogAgent: 'codex' },
+  { id: 'claude-code', name: 'Claude Code', vendor: 'Anthropic', cli: 'claude', catalogAgent: 'claudeCode' }
 ];
+
+/** The hub agent one scanner badge belongs to, for copy that names it. */
+export function findAgentByCatalogAgent(catalogAgent: SkillAgent | McpAgent): HubAgent | undefined {
+  return HUB_AGENTS.find((agent) => agent.catalogAgent === catalogAgent);
+}
 
 export function findAgent(id: AgentId): HubAgent | undefined {
   return HUB_AGENTS.find((agent) => agent.id === id);
@@ -89,9 +101,11 @@ export function describeAgentAction(availability: AgentAvailability, agentId: Ag
 /**
  * What a catalog entry declares for one agent, independent of this machine:
  * `enabled` — turned on for that agent, so the chip carries the green check;
- * `available` — supported by that agent but not turned on.
+ * `available` — supported by that agent but not turned on;
+ * `unsupported` — the agent cannot run this entry at all, which is what an SSE
+ * MCP is to Codex.
  */
-export type CatalogEnablement = 'enabled' | 'available';
+export type CatalogEnablement = 'enabled' | 'available' | 'unsupported';
 
 /**
  * How the chip is actually drawn. `unavailable` is never declared by an entry;
@@ -118,6 +132,7 @@ export function resolveCompatibilityState(
 const COMPATIBILITY_DESCRIPTIONS: Record<CompatibilityState, string> = {
   enabled: 'enabled',
   available: 'installed, not enabled',
+  unsupported: 'not supported by this agent',
   unavailable: 'agent not installed'
 };
 
@@ -173,24 +188,31 @@ const SKILL_ROOT_LABELS: Readonly<Record<SkillRoot, string>> = {
 /** Stands in for a skill whose SKILL.md carries no description. */
 export const MISSING_SUMMARY_TEXT = 'No description in this skill’s SKILL.md.';
 
+/** What one scanner badge says about the agent it names. */
+const BADGE_ENABLEMENTS: Readonly<Record<McpAgentBadge['state'], CatalogEnablement>> = {
+  checked: 'enabled',
+  unchecked: 'available',
+  disabled: 'unsupported'
+};
+
 /**
- * A skill's chips, read from the badges the main process scanner produces:
- * checked means the skill is deployed under a root that agent reads, which the
- * card draws as the green check. Anything else is merely supported.
+ * An entry's chips, read from the badges the main process scanners produce:
+ * checked means that agent already loads it, which the card draws as the green
+ * check. An agent the scan never badged is merely supported.
  *
- * Every card that shows a skill goes through here — installed ones and the ones
- * only sitting in the repository cache — so the same badge means the same chip
- * wherever it is drawn.
+ * Every card that shows a skill or an MCP goes through here — installed ones
+ * and the ones only sitting in the repository cache — so the same badge means
+ * the same chip wherever it is drawn.
  */
 export function toCompatibilityChips(
-  badges: readonly SkillAgentBadge[]
+  badges: readonly (SkillAgentBadge | McpAgentBadge)[]
 ): readonly CompatibilityChip[] {
-  const checkedAgents = new Set(
-    badges.filter((badge) => badge.state === 'checked').map((badge) => badge.agent)
+  const badgeStates = new Map<SkillAgent | McpAgent, SkillAgentBadge['state'] | McpAgentBadge['state']>(
+    badges.map((badge) => [badge.agent, badge.state])
   );
   return HUB_AGENTS.map((agent) => ({
     agentId: agent.id,
-    enablement: checkedAgents.has(agent.skillAgent) ? 'enabled' : 'available'
+    enablement: BADGE_ENABLEMENTS[badgeStates.get(agent.catalogAgent) ?? 'unchecked']
   }));
 }
 
@@ -205,28 +227,49 @@ export function toSkillCatalogEntries(skills: readonly InstalledSkill[]): readon
   }));
 }
 
-export const MCP_CATALOG: readonly CatalogEntry[] = [
-  {
-    id: 'filesystem',
-    name: 'Filesystem',
-    source: 'GitHub',
-    description: 'Read and write files inside an allowed workspace folder.',
-    compatibility: [
-      { agentId: 'claude-code', enablement: 'enabled' },
-      { agentId: 'codex', enablement: 'available' }
-    ]
-  },
-  {
-    id: 'playwright',
-    name: 'Playwright',
-    source: 'GitHub',
-    description: 'Drive a real browser to test pages and read the result.',
-    compatibility: [
-      { agentId: 'claude-code', enablement: 'available' },
-      { agentId: 'codex', enablement: 'available' }
-    ]
+/**
+ * How each transport is named on a card. An MCP has no vendor or registry to
+ * cite, so the card's source slot says how the agent reaches it instead.
+ */
+const MCP_CONNECTION_LABELS: Readonly<Record<McpConnectionType, string>> = {
+  stdio: 'stdio',
+  sse: 'SSE',
+  streamable_http: 'HTTP'
+};
+
+/**
+ * What an MCP actually runs or talks to, which is the only description its
+ * configuration carries: the command line for a local server, the endpoint for
+ * a remote one.
+ */
+export function describeMcpEndpoint(mcp: InstalledMcp): string {
+  if (mcp.connectionType === 'stdio') {
+    return [mcp.command ?? '', ...mcp.arguments].join(' ').trim();
   }
-];
+  return mcp.url ?? '';
+}
+
+/**
+ * The agents that cannot load an entry at all, which the Manage dialog locks:
+ * for an MCP that is Codex opposite an SSE server, since Codex has no such
+ * transport.
+ */
+export function readUnsupportedAgents(
+  badges: readonly (SkillAgentBadge | McpAgentBadge)[]
+): readonly CatalogAgent[] {
+  return badges.filter((badge) => badge.state === 'disabled').map((badge) => badge.agent);
+}
+
+/** Turns one MCP scan into the cards the "MCPs" tab draws. */
+export function toMcpCatalogEntries(servers: readonly InstalledMcp[]): readonly CatalogEntry[] {
+  return servers.map((mcp) => ({
+    id: mcp.id,
+    name: mcp.title,
+    source: MCP_CONNECTION_LABELS[mcp.connectionType],
+    description: describeMcpEndpoint(mcp),
+    compatibility: toCompatibilityChips(mcp.badges)
+  }));
+}
 
 /**
  * The entries a tab shows, narrowed to those whose name, description, or source
@@ -254,14 +297,16 @@ export function selectCatalogEntries(
 }
 
 /**
- * The Manage Skill dialog (Figma 225:1301). OpenCode is drawn there too, but
- * Tokiie does not manage it, so the dialog lists `HUB_AGENTS` like the rest of
- * the page.
+ * The Manage dialog (Figma 225:1301), which both catalogs open and which says
+ * above the name which of them asked. OpenCode is drawn there too, but Tokiie
+ * does not manage it, so the dialog lists `HUB_AGENTS` like the rest of the page.
  */
-export const MANAGE_DIALOG_EYEBROW = 'MANAGE SKILL';
+export const MANAGE_SKILL_DIALOG_EYEBROW = 'MANAGE SKILL';
+export const MANAGE_MCP_DIALOG_EYEBROW = 'MANAGE MCP';
 export const MANAGE_DIALOG_ENABLE_HEADING = 'Enable for';
 export const MANAGE_DIALOG_ENABLE_HINT = 'Choose one or more agents. You can change this later.';
 export const MANAGE_DIALOG_COMPATIBLE_LABEL = 'Compatible';
+export const MANAGE_DIALOG_UNSUPPORTED_LABEL = 'Not supported';
 export const MANAGE_DIALOG_LOADING_TEXT = 'Reading…';
 export const UNINSTALL_LABEL = 'Uninstall';
 export const CANCEL_LABEL = 'Cancel';
@@ -273,7 +318,7 @@ export function describeSelectedAgentCount(count: number): string {
 }
 
 /** Reports why a save or uninstall left the filesystem untouched. */
-export function describeSkillActionFailure(error: string): string {
+export function describeManageFailure(error: string): string {
   return `That did not work: ${error}`;
 }
 
@@ -307,10 +352,25 @@ export const ADD_MCP_LABEL = '+ Add MCP';
 
 /** Held while the first filesystem scan is still running. */
 export const SKILL_SCAN_LOADING_TEXT = 'Scanning installed skills…';
+export const MCP_SCAN_LOADING_TEXT = 'Reading agent MCP configuration…';
 
 /** Says why the grid is empty when the scan itself failed. */
 export function describeSkillScanFailure(error: string): string {
   return `Could not read installed skills: ${error}`;
+}
+
+export function describeMcpScanFailure(error: string): string {
+  return `Could not read installed MCPs: ${error}`;
+}
+
+/**
+ * One agent's unreadable configuration file. The other agent's servers are
+ * still listed, so this reports what is missing from the grid rather than
+ * standing in for it.
+ */
+export function describeMcpAgentFailure(failure: McpCatalogFailure): string {
+  const name = findAgentByCatalogAgent(failure.agent)?.name ?? failure.agent;
+  return `Could not read ${name}’s MCP configuration: ${failure.message}`;
 }
 
 /** Shown on the upload button while the picker or the copy is still running. */

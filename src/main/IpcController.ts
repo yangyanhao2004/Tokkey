@@ -15,6 +15,7 @@ import type {
   SkillsShPage,
   SkillsShSkill,
   InstallRepositorySkillRequest,
+  InstalledMcp,
   InstalledSkill,
   McpAgent,
   RepositorySyncResult,
@@ -112,6 +113,11 @@ export default class IpcController {
       'mcps:list-installed': () => this.scanInstalledMcps(),
       'mcps:apply-configuration': (request: unknown) =>
         this.applyMcpConfiguration(this.requireMcpApplyRequest(request)),
+      'mcps:apply-agent-selection': (mcpId: unknown, selectedAgents: unknown) =>
+        this.applyMcpAgentSelection(
+          this.requireString(mcpId, 'MCP ID'),
+          this.requireMcpAgents(selectedAgents)
+        ),
       'skills:list-installed': () => this.getInstalledSkills(),
       'skills:get-agent-selection': (skillId: unknown) =>
         this.getSkillAgentSelection(this.requireSkillId(skillId)),
@@ -255,6 +261,32 @@ export default class IpcController {
   async applyMcpConfiguration(request: ApplyMcpConfigurationRequest): Promise<McpCatalogScan> {
     await this.mcpConfigurationApplier.apply(request.configurationJson, request.selectedAgents);
     return this.scanInstalledMcps();
+  }
+
+  /**
+   * Writes one installed MCP into exactly `selectedAgents`, removing it from
+   * the agents left out — an empty selection removes it everywhere. The
+   * difference is taken here against a fresh scan rather than trusted from the
+   * renderer, so a file edited outside the app is still what the save is
+   * measured against.
+   */
+  async applyMcpAgentSelection(
+    mcpId: string,
+    selectedAgents: McpAgent[]
+  ): Promise<McpCatalogScan> {
+    const mcp = await this.findMcp(mcpId);
+    const addAgents = selectedAgents.filter((agent) => !mcp.agents.includes(agent));
+    const removeAgents = mcp.agents.filter((agent) => !selectedAgents.includes(agent));
+    await this.mcpConfigurationApplier.applySelection(mcp.definition, addAgents, removeAgents);
+    return this.scanInstalledMcps();
+  }
+
+  private async findMcp(mcpId: string): Promise<InstalledMcp> {
+    const mcp = (await this.scanInstalledMcps()).servers.find((candidate) => candidate.id === mcpId);
+    if (!mcp) {
+      throw new Error(`MCP not found: ${mcpId}`);
+    }
+    return mcp;
   }
 
   /** Lists cached or freshly fetched local model rows and their target capability. */

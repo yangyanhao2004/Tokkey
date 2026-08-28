@@ -209,6 +209,14 @@ export class ClaudeCodeMcpAdapter implements McpAgentConfigAdapter {
 
 /** Parses Codex's [mcp_servers.<name>] TOML tables. */
 export class CodexMcpAdapter implements McpAgentConfigAdapter {
+  /**
+   * Codex options that tune how a server runs rather than what it is. They are
+   * read past instead of skipping the server, so a real Codex configuration
+   * still lists; nothing is lost by ignoring them, because the applier only
+   * ever appends new tables and never rewrites an existing one.
+   */
+  private static readonly RUNTIME_ONLY_FIELDS = ['enabled', 'cwd', 'startup_timeout_sec', 'tool_timeout_sec'];
+
   private readonly support = new McpAdapterSupport();
 
   agent(): McpAgent {
@@ -239,6 +247,8 @@ export class CodexMcpAdapter implements McpAgentConfigAdapter {
       try {
         const rawEntry = root.mcp_servers[name];
         if (!this.support.isRecord(rawEntry)) throw new Error('entry must be a table');
+        // Codex itself ignores a disabled server, so it is not installed here either.
+        if (rawEntry.enabled === false) continue;
         const { env: environment, ...entry } = rawEntry;
         const configuration = this.parseEntry(entry, environment);
         servers.push({ ...configuration, name: this.support.normalizeName(name) });
@@ -250,7 +260,8 @@ export class CodexMcpAdapter implements McpAgentConfigAdapter {
   }
 
   private parseEntry(entry: Record<string, unknown>, environment: unknown): McpServerConfiguration {
-    const unsupported = Object.keys(entry).find((key) => !['command', 'args', 'url'].includes(key));
+    const supportedFields = ['command', 'args', 'url', ...CodexMcpAdapter.RUNTIME_ONLY_FIELDS];
+    const unsupported = Object.keys(entry).find((key) => !supportedFields.includes(key));
     if (unsupported) throw new Error(`unsupported field: ${unsupported}`);
     if (entry.command !== undefined && entry.url !== undefined) {
       throw new Error('server cannot include both command and url');

@@ -164,6 +164,7 @@ export interface TokiieApi {
   scanInstalledMcps(): Promise<McpCatalogScan>;
   prepareMcpConfiguration(draft: McpConfigurationDraft): McpConfigurationPreparation;
   applyMcpConfiguration(request: ApplyMcpConfigurationRequest): Promise<McpCatalogScan>;
+  applyMcpAgentSelection(mcpId: string, selectedAgents: McpAgent[]): Promise<McpCatalogScan>;
   getInstalledSkills(): Promise<InstalledSkill[]>;
   getSkillAgentSelection(skillId: string): Promise<SkillAgentSelection>;
   applySkillAgentSelection(skillId: string, selectedAgents: SkillAgent[]): Promise<InstalledSkill[]>;

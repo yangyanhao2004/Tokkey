@@ -15,13 +15,15 @@ import { PushButton } from './PushButton';
 
 /**
  * Only the enabled chip is drawn in the design (Figma 1051:3869 and 1051:3881),
- * which rings it in pale green. The other two states carry the same avatar and
- * say the rest with the ring: a hairline where the agent could run the entry,
- * and a drained mark where the agent is not installed at all.
+ * which rings it in pale green. The rest carry the same avatar and say it with
+ * the ring: a hairline where the agent could run the entry, a faded mark where
+ * the agent cannot run this kind of entry, and a drained one where the agent is
+ * not installed at all.
  */
 const CHIP_STATE_CLASSES: Record<CompatibilityState, string> = {
   enabled: 'ring-1 ring-chip-enabled-ring',
   available: 'ring-1 ring-black/8',
+  unsupported: 'opacity-40 ring-1 ring-black/8',
   unavailable: 'opacity-40 grayscale'
 };
 

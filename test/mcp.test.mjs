@@ -116,6 +116,15 @@ test('parses quoted Codex names and nested environment tables', () => {
   assert.deepEqual(readout.servers[0].environment, { TOKEN: 'secret' });
 });
 
+test('reads past Codex runtime options and drops disabled servers', () => {
+  const readout = new CodexMcpAdapter().parse(
+    '[mcp_servers.tools]\ncommand = "node"\ncwd = "."\nstartup_timeout_sec = 120\n\n' +
+    '[mcp_servers.off]\ncommand = "node"\nenabled = false\n'
+  );
+  assert.deepEqual(readout.servers.map((server) => server.name), ['tools']);
+  assert.deepEqual(readout.skipped, []);
+});
+
 test('treats empty adapter input as an empty configuration', () => {
   assert.deepEqual(new ClaudeCodeMcpAdapter().parse(''), { servers: [], skipped: [] });
   assert.deepEqual(new CodexMcpAdapter().parse(''), { servers: [], skipped: [] });
@@ -224,6 +233,101 @@ test('stages every selected adapter before writing and rejects Codex SSE', async
       url: 'https://example.com/events'
     });
     await assert.rejects(() => applier.apply(sse, ['codex']), /does not support SSE/);
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('moves one server between agents in a single selection', async () => {
+  const home = new TestHome();
+  try {
+    home.write('.claude.json', '{"theme":"dark","mcpServers":{"tools":{"type":"stdio","command":"node"}}}\n');
+    home.write('.codex/config.toml', '# hand written\nmodel = "gpt-5"\n');
+    const configurationJson = new McpConfigurationCodec().encode({
+      name: 'tools',
+      connectionType: 'stdio',
+      command: 'node',
+      arguments: [],
+      environment: {},
+      url: null
+    });
+
+    await new LocalMcpConfigurationApplier({ homeDirectory: home.root }).applySelection(
+      configurationJson,
+      ['codex'],
+      ['claudeCode']
+    );
+
+    const claude = JSON.parse(home.read('.claude.json'));
+    assert.equal(claude.theme, 'dark');
+    assert.deepEqual(claude.mcpServers, {});
+    assert.match(home.read('.codex/config.toml'), /# hand written/);
+    const catalog = await new LocalMcpCatalogScanner({ homeDirectory: home.root }).scanInstalledMcps();
+    assert.deepEqual(catalog.servers.map((server) => server.agents), [['codex']]);
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('removing a Codex server keeps every unrelated table and comment', async () => {
+  const home = new TestHome();
+  try {
+    home.write(
+      '.codex/config.toml',
+      '# top comment\nmodel = "gpt-5"\n\n' +
+      '[mcp_servers."my tools"]\ncommand = "node"\n\n' +
+      '[mcp_servers."my tools".env]\nTOKEN = "secret"\n\n' +
+      '[mcp_servers.keep]\ncommand = "other"\n\n' +
+      '[history]\npersistence = "none"\n'
+    );
+    const configurationJson = new McpConfigurationCodec().encode({
+      name: 'my tools',
+      connectionType: 'stdio',
+      command: 'node',
+      arguments: [],
+      environment: {},
+      url: null
+    });
+
+    await new LocalMcpConfigurationApplier({ homeDirectory: home.root }).applySelection(
+      configurationJson,
+      [],
+      ['codex']
+    );
+
+    const remaining = home.read('.codex/config.toml');
+    assert.match(remaining, /# top comment/);
+    assert.match(remaining, /\[mcp_servers\.keep\]/);
+    assert.match(remaining, /\[history\]/);
+    assert.doesNotMatch(remaining, /my tools/);
+    const catalog = await new LocalMcpCatalogScanner({ homeDirectory: home.root }).scanInstalledMcps();
+    assert.deepEqual(catalog.servers.map((server) => server.name), ['keep']);
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('an uninstall that touches no agent file leaves nothing behind', async () => {
+  const home = new TestHome();
+  try {
+    home.write('.claude.json', '{"mcpServers":{"other":{"command":"node"}}}\n');
+    const configurationJson = new McpConfigurationCodec().encode({
+      name: 'absent',
+      connectionType: 'stdio',
+      command: 'node',
+      arguments: [],
+      environment: {},
+      url: null
+    });
+
+    await new LocalMcpConfigurationApplier({ homeDirectory: home.root }).applySelection(
+      configurationJson,
+      [],
+      ['claudeCode', 'codex']
+    );
+
+    assert.deepEqual(Object.keys(JSON.parse(home.read('.claude.json')).mcpServers), ['other']);
+    assert.throws(() => home.read('.codex/config.toml'));
   } finally {
     home.cleanup();
   }

@@ -17,6 +17,8 @@ class PreloadBridge {
       scanInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),
       prepareMcpConfiguration: (draft) => ipcRenderer.sendSync('mcps:prepare-configuration', draft),
       applyMcpConfiguration: (request) => ipcRenderer.invoke('mcps:apply-configuration', request),
+      applyMcpAgentSelection: (mcpId, selectedAgents) =>
+        ipcRenderer.invoke('mcps:apply-agent-selection', mcpId, selectedAgents),
       getInstalledSkills: () => ipcRenderer.invoke('skills:list-installed'),
       getSkillAgentSelection: (skillId) => ipcRenderer.invoke('skills:get-agent-selection', skillId),
       applySkillAgentSelection: (skillId, selectedAgents) =>

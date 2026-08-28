@@ -17,6 +17,16 @@ import {
 /** Reusable contract for persisting one canonical MCP document to selected agents. */
 export interface McpConfigurationApplying {
   apply(configurationJson: string, selectedAgents: readonly McpAgent[]): Promise<void>;
+  /**
+   * Moves one already-configured server onto exactly `addAgents` and off
+   * `removeAgents` in a single transaction, which is what the Manage dialog
+   * saves. Both files change together or neither does.
+   */
+  applySelection(
+    configurationJson: string,
+    addAgents: readonly McpAgent[],
+    removeAgents: readonly McpAgent[]
+  ): Promise<void>;
 }
 
 /** Stages every selected agent file, then commits the changes transactionally. */
@@ -42,44 +52,77 @@ export class LocalMcpConfigurationApplier implements McpConfigurationApplying {
   }
 
   async apply(configurationJson: string, selectedAgents: readonly McpAgent[]): Promise<void> {
-    const uniqueAgents = [...new Set(selectedAgents)];
-    if (uniqueAgents.length === 0) {
+    const addAgents = [...new Set(selectedAgents)];
+    if (addAgents.length === 0) {
       throw new Error('Select at least one agent.');
     }
-    const selectedAdapters = this.registry.selected(uniqueAgents);
-    if (selectedAdapters.length !== uniqueAgents.length) {
-      const supportedAgents = new Set(this.registry.adapters.map((adapter) => adapter.agent()));
-      const unsupportedAgent = uniqueAgents.find((agent) => !supportedAgents.has(agent));
-      throw new Error(`Unsupported MCP agent: ${String(unsupportedAgent)}.`);
-    }
+    await this.applySelection(configurationJson, addAgents, []);
+  }
+
+  async applySelection(
+    configurationJson: string,
+    addAgents: readonly McpAgent[],
+    removeAgents: readonly McpAgent[]
+  ): Promise<void> {
+    const uniqueAddAgents = [...new Set(addAgents)];
+    // An agent being added to is never also removed from, whatever the caller said.
+    const uniqueRemoveAgents = [...new Set(removeAgents)].filter(
+      (agent) => !uniqueAddAgents.includes(agent)
+    );
+    this.requireKnownAgents([...uniqueAddAgents, ...uniqueRemoveAgents]);
 
     const configuration = this.codec.decode(configurationJson);
-    uniqueAgents.forEach((agent) => this.compatibility.requireSupported(agent, configuration.connectionType));
+    uniqueAddAgents.forEach((agent) =>
+      this.compatibility.requireSupported(agent, configuration.connectionType)
+    );
 
     // All reads and renders finish before commit so adapter failures cannot cause partial writes.
-    const fileReads = await Promise.all(selectedAdapters.map((adapter) =>
-      this.writer.read(adapter.filePath(this.homeDirectory))
+    const stagings = [
+      ...this.registry.selected(uniqueAddAgents).map((adapter) => ({
+        adapter,
+        write: (text: string) => adapter.render(text, configuration)
+      })),
+      ...this.registry.selected(uniqueRemoveAgents).map((adapter) => ({
+        adapter,
+        write: (text: string) => adapter.remove(text, configuration.name)
+      }))
+    ];
+    const fileReads = await Promise.all(stagings.map((staging) =>
+      this.writer.read(staging.adapter.filePath(this.homeDirectory))
     ));
-    const changes = selectedAdapters
-      .map((adapter, index) => this.stageChange(adapter, fileReads[index], configuration))
+    const changes = stagings
+      .map((staging, index) => this.stageChange(staging.adapter, fileReads[index], staging.write))
       .filter((change): change is McpConfigurationFileChange => change !== null);
     await this.writer.commit(changes);
+  }
+
+  /** Rejects an agent no adapter owns before any file is read. */
+  private requireKnownAgents(agents: readonly McpAgent[]): void {
+    const supportedAgents = new Set(this.registry.adapters.map((adapter) => adapter.agent()));
+    const unsupportedAgent = agents.find((agent) => !supportedAgents.has(agent));
+    if (unsupportedAgent !== undefined) {
+      throw new Error(`Unsupported MCP agent: ${String(unsupportedAgent)}.`);
+    }
   }
 
   private stageChange(
     adapter: McpAgentConfigurationAdapter,
     fileRead: McpConfigurationFileRead,
-    configuration: McpServerConfiguration
+    write: (existingText: string) => string
   ): McpConfigurationFileChange | null {
     let replacementText: string;
     try {
-      replacementText = adapter.render(fileRead.text, configuration);
+      replacementText = write(fileRead.text);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(`Unable to prepare ${adapter.agent()} configuration at ${fileRead.filePath}: ${detail}`);
     }
     const replacementBytes = new TextEncoder().encode(replacementText);
     if (fileRead.originalBytes !== null && this.bytesEqual(fileRead.originalBytes, replacementBytes)) {
+      return null;
+    }
+    // Removing from an agent that has no file yet must not create an empty one.
+    if (fileRead.originalBytes === null && replacementBytes.length === 0) {
       return null;
     }
     return { ...fileRead, replacementBytes };
