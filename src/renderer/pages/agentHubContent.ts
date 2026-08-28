@@ -163,7 +163,12 @@ export interface CatalogEntry {
    * Discover Skills pane, whose whole tab already says where its cards are from.
    */
   readonly source?: string;
-  readonly description: string;
+  /**
+   * The line under the name. Omitted where an entry has nothing to say for
+   * itself — an MCP is a command line or a URL, which the card's transport
+   * label already covers.
+   */
+  readonly description?: string;
   readonly compatibility: readonly CompatibilityChip[];
   /**
    * What this one card's button says, for a grid whose cards do not all offer
@@ -238,18 +243,6 @@ const MCP_CONNECTION_LABELS: Readonly<Record<McpConnectionType, string>> = {
 };
 
 /**
- * What an MCP actually runs or talks to, which is the only description its
- * configuration carries: the command line for a local server, the endpoint for
- * a remote one.
- */
-export function describeMcpEndpoint(mcp: InstalledMcp): string {
-  if (mcp.connectionType === 'stdio') {
-    return [mcp.command ?? '', ...mcp.arguments].join(' ').trim();
-  }
-  return mcp.url ?? '';
-}
-
-/**
  * The agents that cannot load an entry at all, which the Manage dialog locks:
  * for an MCP that is Codex opposite an SSE server, since Codex has no such
  * transport.
@@ -266,7 +259,6 @@ export function toMcpCatalogEntries(servers: readonly InstalledMcp[]): readonly 
     id: mcp.id,
     name: mcp.title,
     source: MCP_CONNECTION_LABELS[mcp.connectionType],
-    description: describeMcpEndpoint(mcp),
     compatibility: toCompatibilityChips(mcp.badges)
   }));
 }
@@ -291,7 +283,7 @@ export function selectCatalogEntries(
   return entries.filter(
     (entry) =>
       entry.name.toLowerCase().includes(needle) ||
-      entry.description.toLowerCase().includes(needle) ||
+      (entry.description ?? '').toLowerCase().includes(needle) ||
       (entry.source ?? '').toLowerCase().includes(needle)
   );
 }

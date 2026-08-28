@@ -117,10 +117,13 @@ export function CatalogCard({
           )}
         </div>
         {/* Skill descriptions are written for agents and run long; clamping them
-            keeps every card the height the design draws. */}
-        <p className="line-clamp-3 w-full text-[10px] leading-[12px] text-text-secondary" title={entry.description}>
-          {entry.description}
-        </p>
+            keeps every card the height the design draws. An entry without one
+            draws no line at all rather than an empty row. */}
+        {entry.description && (
+          <p className="line-clamp-3 w-full text-[10px] leading-[12px] text-text-secondary" title={entry.description}>
+            {entry.description}
+          </p>
+        )}
       </div>
 
       <div className="flex w-full flex-col gap-2">
