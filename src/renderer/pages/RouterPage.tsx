@@ -1,19 +1,25 @@
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
-  CLOUD_MODELS,
+  CLOUD_MODELS_EMPTY_MESSAGE,
   CLOUD_MODELS_SUBTITLE,
   CLOUD_MODELS_TITLE,
+  CLOUD_MODELS_UNAVAILABLE_PREFIX,
+  CLOUD_MODEL_CONNECT_FAILED_PREFIX,
   CLOUD_MODEL_SUMMARY,
-  DEFAULT_CLOUD_MODEL_ID,
   ICON_BASE_PATH,
   LOCAL_MODEL_SUMMARY,
+  NO_CLOUD_MODEL_DETAIL,
+  NO_CLOUD_MODEL_NAME,
   NO_LOCAL_MODEL_DETAIL,
   NO_LOCAL_MODEL_NAME,
   ROUTER_TOGGLE_DESCRIPTION,
   ROUTER_TOGGLE_TITLE,
+  selectButtonLabel,
+  toCloudModel,
   type CloudModel,
   type ModelSummary
 } from './routerContent';
+import { useCloudModelCards, type CloudModelCards } from '../hooks/useCloudModelCards';
 import { PageShell } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
 import { Switch } from '../components/Switch';
@@ -134,11 +140,21 @@ function ModelSummaryCard({ summary, name, detail, testId }: ModelSummaryCardPro
 interface CloudModelCardProps {
   model: CloudModel;
   isSelected: boolean;
+  /** True while this card's connect is still running. */
+  isConnecting: boolean;
+  /** True while any card is connecting, which no second click may interrupt. */
+  isBusy: boolean;
   onSelect: (modelId: string) => void;
 }
 
 /** One choice in the cloud model grid, with its own Select/Selected button. */
-function CloudModelCard({ model, isSelected, onSelect }: CloudModelCardProps) {
+function CloudModelCard({
+  model,
+  isSelected,
+  isConnecting,
+  isBusy,
+  onSelect
+}: CloudModelCardProps) {
   return (
     <div
       className={`flex items-center justify-between gap-2 rounded-[8px] border p-3 ${
@@ -163,23 +179,37 @@ function CloudModelCard({ model, isSelected, onSelect }: CloudModelCardProps) {
       <PushButton
         variant={isSelected ? 'filled' : 'tinted'}
         onClick={() => onSelect(model.id)}
+        // Only a running connect disables the row: the selected card keeps its
+        // full-strength "Selected" button rather than fading out as done.
+        disabled={isBusy}
         testId={`cloud-model-select-${model.id}`}
       >
-        {isSelected ? 'Selected' : 'Select'}
+        {selectButtonLabel(isSelected, isConnecting)}
       </PushButton>
     </div>
   );
 }
 
 interface CloudModelsCardProps {
-  selectedModelId: string;
+  models: readonly CloudModel[];
+  selectedModelId: string | null;
+  connectingModelId: string | null;
   onSelect: (modelId: string) => void;
+  /** Why the catalog or the last connect failed, if either did. */
+  notice: string | null;
   /** Router off means nothing is routed to a cloud model, so the card greys out. */
   isEnabled: boolean;
 }
 
 /** "Cloud Models" card: heading plus the two-column grid of choices. */
-function CloudModelsCard({ selectedModelId, onSelect, isEnabled }: CloudModelsCardProps) {
+function CloudModelsCard({
+  models,
+  selectedModelId,
+  connectingModelId,
+  onSelect,
+  notice,
+  isEnabled
+}: CloudModelsCardProps) {
   return (
     <section
       // `min-h-0` with the scrolling grid below keeps any number of models
@@ -197,12 +227,23 @@ function CloudModelsCard({ selectedModelId, onSelect, isEnabled }: CloudModelsCa
         <TitleBlock title={CLOUD_MODELS_TITLE} subtitle={CLOUD_MODELS_SUBTITLE} as="h2" />
       </div>
 
+      {notice && (
+        <p
+          className="shrink-0 px-4 text-[10px] leading-[12px] text-text-secondary"
+          data-testid="cloud-models-notice"
+        >
+          {notice}
+        </p>
+      )}
+
       <div className="grid min-h-0 grid-cols-2 gap-3 overflow-y-auto px-4">
-        {CLOUD_MODELS.map((model) => (
+        {models.map((model) => (
           <CloudModelCard
             key={model.id}
             model={model}
             isSelected={model.id === selectedModelId}
+            isConnecting={model.id === connectingModelId}
+            isBusy={connectingModelId !== null}
             onSelect={onSelect}
           />
         ))}
@@ -212,13 +253,33 @@ function CloudModelsCard({ selectedModelId, onSelect, isEnabled }: CloudModelsCa
 }
 
 /**
+ * The one line the "Cloud Models" card shows above its grid: why a call failed,
+ * or that this build offers nothing to select. Nothing is said while the
+ * catalog is still on its way, so an empty grid never claims to be the answer.
+ */
+function buildCloudModelsNotice(cloudModels: CloudModelCards, modelCount: number): string | null {
+  if (cloudModels.listError) {
+    return `${CLOUD_MODELS_UNAVAILABLE_PREFIX}${cloudModels.listError}`;
+  }
+  if (cloudModels.connectError) {
+    return `${CLOUD_MODEL_CONNECT_FAILED_PREFIX}${cloudModels.connectError}`;
+  }
+  if (cloudModels.cards === null) return null;
+  return modelCount === 0 ? CLOUD_MODELS_EMPTY_MESSAGE : null;
+}
+
+/**
  * The page behind the "Router" nav row: the routing switch, what it currently
  * routes between, and the cloud model it falls back to for complex tasks.
  */
 export function RouterPage() {
   const [isRouterOn, setIsRouterOn] = useState(true);
-  const [selectedModelId, setSelectedModelId] = useState(DEFAULT_CLOUD_MODEL_ID);
-  const selectedModel = CLOUD_MODELS.find((model) => model.id === selectedModelId);
+  const cloudModels = useCloudModelCards();
+  const models = useMemo(() => (cloudModels.cards ?? []).map(toCloudModel), [cloudModels.cards]);
+  // Selecting a card is what connects it, so the connected card is the
+  // selection: nothing is reported above the grid that Router cannot reach.
+  const selectedModel = models.find((model) => model.id === cloudModels.connectedCardId);
+  const notice = buildCloudModelsNotice(cloudModels, models.length);
 
   return (
     <PageShell
@@ -243,15 +304,18 @@ export function RouterPage() {
         />
         <ModelSummaryCard
           summary={CLOUD_MODEL_SUMMARY}
-          name={selectedModel?.name ?? ''}
-          detail={selectedModel?.detail ?? ''}
+          name={selectedModel?.name ?? NO_CLOUD_MODEL_NAME}
+          detail={selectedModel?.detail ?? NO_CLOUD_MODEL_DETAIL}
           testId="cloud-model-summary"
         />
       </div>
 
       <CloudModelsCard
-        selectedModelId={selectedModelId}
-        onSelect={setSelectedModelId}
+        models={models}
+        selectedModelId={selectedModel?.id ?? null}
+        connectingModelId={cloudModels.connectingCardId}
+        onSelect={cloudModels.connect}
+        notice={notice}
         isEnabled={isRouterOn}
       />
     </PageShell>

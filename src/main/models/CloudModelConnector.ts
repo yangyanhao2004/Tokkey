@@ -34,6 +34,15 @@ export class CloudModelConnector {
   private readonly catalog: CloudModelCatalog;
   private readonly store: ModelProfileStoring;
   private readonly client: GatewayModelClient;
+  /**
+   * The connect still running for a card, shared by every later caller.
+   *
+   * Two connects for the same card would both find no route and both try to
+   * create one, and the gateway rejects the second as a duplicate name. Since
+   * a startup restore and a click on the card can overlap, the second caller
+   * waits on the first instead of racing it.
+   */
+  private readonly connectsInFlight = new Map<string, Promise<CloudModelConnection>>();
 
   constructor(options: {
     catalog?: CloudModelCatalog;
@@ -55,8 +64,40 @@ export class CloudModelConnector {
     return this.catalog.list();
   }
 
+  /**
+   * Re-creates the gateway routes for the cards connected in an earlier run.
+   *
+   * The gateway holds its routes only in memory, so every restart comes up with
+   * none of them while the profiles survive in the database. Restoring puts the
+   * two back in step without waiting for the user to press Select again. Cards
+   * with no saved profile were never connected and are left alone.
+   *
+   * One card is restored at a time: the gateway is being asked to create routes,
+   * and a serial walk keeps that work in a predictable order.
+   */
+  async restoreConnected(): Promise<CloudModelConnection[]> {
+    const restored: CloudModelConnection[] = [];
+    for (const card of this.catalog.list()) {
+      if (!(await this.store.find(card.id))) continue;
+      restored.push(await this.connect(card.id));
+    }
+    return restored;
+  }
+
   /** Connects one card, reusing the existing profile and route when they survive. */
-  async connect(cardId: string): Promise<CloudModelConnection> {
+  connect(cardId: string): Promise<CloudModelConnection> {
+    const running = this.connectsInFlight.get(cardId);
+    if (running) return running;
+
+    const attempt = this.runConnect(cardId).finally(() => {
+      this.connectsInFlight.delete(cardId);
+    });
+    this.connectsInFlight.set(cardId, attempt);
+    return attempt;
+  }
+
+  /** The connect itself, run once per card at a time. */
+  private async runConnect(cardId: string): Promise<CloudModelConnection> {
     const card = this.catalog.require(cardId);
     const savedProfile = await this.store.find(card.id);
     const profile = savedProfile ?? this.buildProfile(card);

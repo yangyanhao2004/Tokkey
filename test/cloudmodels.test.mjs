@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { CloudModelCatalog } from '../dist/main/models/CloudModelCatalog.js';
+import { CloudModelCatalog, EnvFile } from '../dist/main/models/CloudModelCatalog.js';
 import { CloudModelConnector } from '../dist/main/models/CloudModelConnector.js';
 import {
   GatewayModelClient,
@@ -16,11 +16,21 @@ const CARD = {
   provider: 'custom',
   modelName: 'gpt-5.6-terra',
   url: 'https://api.onetokens.net',
-  prefix: 'openai',
-  apiKey: ''
+  prefix: 'openai'
 };
 
 const ROUTE_NAME = 'custom-gpt-5.6-terra-openai-c05442';
+
+// The key is read from the environment, so the connect tests are pinned to a
+// file that does not exist and a cleared variable: nothing here may depend on
+// whatever the developer happens to have in `~/.env`.
+delete process.env.TOK_API_KEY;
+const NO_ENV_FILE = new EnvFile(path.join(tmpdir(), 'tokiie-absent.env'));
+
+/** A catalog over the given cards that resolves no API key. */
+function buildCatalog(cards = [CARD]) {
+  return new CloudModelCatalog(cards, NO_ENV_FILE);
+}
 
 /** An in-memory stand-in for the SQLite-backed profile store. */
 class FakeModelProfileStore {
@@ -77,6 +87,9 @@ function gatewayResponder(routes, created = { id: 'route-uuid-1' }) {
         })
       };
     }
+    // A created route joins the table, so a later call sees what the gateway
+    // would now be holding.
+    routes.push({ modelId: created.id, modelName: JSON.parse(init.body).model_name });
     return { ok: true, status: 200, json: async () => ({ model_id: created.id }) };
   };
   return { fetcher, calls };
@@ -87,7 +100,7 @@ function buildConnector({ store = new FakeModelProfileStore(), routes = [], crea
   const gateway = new FakeGateway();
   const { fetcher, calls } = gatewayResponder(routes, created);
   const connector = new CloudModelConnector({
-    catalog: new CloudModelCatalog([CARD]),
+    catalog: buildCatalog(),
     store,
     client: new GatewayModelClient({ gateway, fetcher })
   });
@@ -95,14 +108,66 @@ function buildConnector({ store = new FakeModelProfileStore(), routes = [], crea
 }
 
 test('the catalog hands out copies so a caller cannot mutate the shipped card', () => {
-  const catalog = new CloudModelCatalog([CARD]);
+  const catalog = buildCatalog();
   catalog.list()[0].url = 'https://evil.example';
   assert.equal(catalog.require(CARD.id).url, 'https://api.onetokens.net');
 });
 
 test('requiring an unknown card fails with the requested id', () => {
-  const catalog = new CloudModelCatalog([CARD]);
+  const catalog = buildCatalog();
   assert.throws(() => catalog.require('missing'), /Cloud model card not found: missing/);
+});
+
+test('a card with no key configured anywhere is still served', () => {
+  assert.equal(buildCatalog().list()[0].apiKey, '');
+  assert.equal(buildCatalog().require(CARD.id).apiKey, '');
+});
+
+test('every served card carries the key written in the env file', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-env-'));
+  const envPath = path.join(directory, '.env');
+  try {
+    writeFileSync(
+      envPath,
+      ['# a comment', '', 'DEEPSEEK_API_KEY=other', 'TOK_API_KEY = "sk-from-file" '].join('\n')
+    );
+    const catalog = new CloudModelCatalog([CARD], new EnvFile(envPath));
+
+    assert.equal(catalog.list()[0].apiKey, 'sk-from-file');
+    assert.equal(catalog.require(CARD.id).apiKey, 'sk-from-file');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a real environment variable overrides the env file', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-env-'));
+  const envPath = path.join(directory, '.env');
+  try {
+    writeFileSync(envPath, 'TOK_API_KEY=sk-from-file\n');
+    process.env.TOK_API_KEY = 'sk-from-shell';
+    const catalog = new CloudModelCatalog([CARD], new EnvFile(envPath));
+
+    assert.equal(catalog.list()[0].apiKey, 'sk-from-shell');
+  } finally {
+    delete process.env.TOK_API_KEY;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('a key added to the env file after startup is picked up without a restart', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-env-'));
+  const envPath = path.join(directory, '.env');
+  try {
+    const catalog = new CloudModelCatalog([CARD], new EnvFile(envPath));
+    assert.equal(catalog.list()[0].apiKey, '');
+
+    writeFileSync(envPath, 'TOK_API_KEY=sk-written-later\n');
+
+    assert.equal(catalog.list()[0].apiKey, 'sk-written-later');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('a first connect creates the route and persists the profile', async () => {
@@ -253,11 +318,87 @@ test('an unrelated route in the gateway does not satisfy the connect', async () 
   assert.equal(calls.filter((call) => call.input.endsWith('/model/new')).length, 1);
 });
 
+/** The row an earlier run would have left behind for the card. */
+function savedProfile(modelId = 'route-uuid-1') {
+  return {
+    id: CARD.id,
+    name: '',
+    provider: 'custom',
+    apiUrl: 'https://api.onetokens.net',
+    apiKey: '',
+    modelName: 'gpt-5.6-terra',
+    type: 'cloud',
+    supportedApiFormats: ['AMIS_GATEWAY_MANAGED'],
+    litellmLinks: [{ modelID: modelId, apiFormat: 'AMIS_GATEWAY_MANAGED', modelName: ROUTE_NAME }],
+    createdAt: 1_787_000_000
+  };
+}
+
+test('a restart restores the route of a saved card the gateway no longer holds', async () => {
+  const { connector, store, calls } = buildConnector({
+    store: new FakeModelProfileStore([savedProfile('dead-route')]),
+    created: { id: 'route-uuid-2' }
+  });
+
+  const restored = await connector.restoreConnected();
+
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0].card.id, CARD.id);
+  assert.equal(restored[0].status, 'reconnected');
+  assert.equal(calls.filter((call) => call.input.endsWith('/model/new')).length, 1);
+  assert.equal(store.saves[0].litellmLinks[0].modelID, 'route-uuid-2');
+});
+
+test('a restore leaves a card that was never connected alone', async () => {
+  const { connector, store, calls } = buildConnector();
+
+  assert.deepEqual(await connector.restoreConnected(), []);
+
+  assert.equal(calls.length, 0);
+  assert.equal(store.saves.length, 0);
+});
+
+test('a restore writes nothing when the route outlived the app', async () => {
+  const { connector, store, calls } = buildConnector({
+    store: new FakeModelProfileStore([savedProfile()]),
+    routes: [{ modelId: 'route-uuid-1', modelName: ROUTE_NAME }]
+  });
+
+  const restored = await connector.restoreConnected();
+
+  assert.equal(restored[0].status, 'alreadyConnected');
+  assert.equal(calls.filter((call) => call.input.endsWith('/model/new')).length, 0);
+  assert.equal(store.saves.length, 0);
+});
+
+test('two connects for one card share a single attempt instead of racing', async () => {
+  const { connector, store, calls } = buildConnector();
+
+  // What a restore overlapping a click does: the gateway rejects a duplicate
+  // route name, so the second caller has to wait on the first, not repeat it.
+  const [first, second] = await Promise.all([connector.connect(CARD.id), connector.connect(CARD.id)]);
+
+  assert.equal(first, second);
+  assert.equal(calls.filter((call) => call.input.endsWith('/model/new')).length, 1);
+  assert.equal(store.saves.length, 1);
+});
+
+test('a card connects again after its previous attempt settled', async () => {
+  const { connector, calls } = buildConnector();
+
+  await connector.connect(CARD.id);
+  await connector.connect(CARD.id);
+
+  // The second connect adopts what the first created rather than creating again.
+  assert.equal(calls.filter((call) => call.input.endsWith('/model/new')).length, 1);
+  assert.equal(calls.filter((call) => call.input.endsWith('/model/info')).length, 2);
+});
+
 test('an already-prefixed card model name is not prefixed twice', async () => {
   const gateway = new FakeGateway();
   const { fetcher, calls } = gatewayResponder([]);
   const connector = new CloudModelConnector({
-    catalog: new CloudModelCatalog([{ ...CARD, modelName: 'OpenAI/gpt-5.6-terra' }]),
+    catalog: buildCatalog([{ ...CARD, modelName: 'OpenAI/gpt-5.6-terra' }]),
     store: new FakeModelProfileStore(),
     client: new GatewayModelClient({ gateway, fetcher })
   });
@@ -279,7 +420,7 @@ test('the gateway is started before any management call', async () => {
 test('a gateway that never came up fails the connect with a clear reason', async () => {
   const gateway = new FakeGateway(null);
   const connector = new CloudModelConnector({
-    catalog: new CloudModelCatalog([CARD]),
+    catalog: buildCatalog(),
     store: new FakeModelProfileStore(),
     client: new GatewayModelClient({ gateway, fetcher: async () => assert.fail('no request') })
   });
@@ -291,7 +432,7 @@ test('a rejected creation surfaces the gateway detail and writes nothing', async
   const store = new FakeModelProfileStore();
   const gateway = new FakeGateway();
   const connector = new CloudModelConnector({
-    catalog: new CloudModelCatalog([CARD]),
+    catalog: buildCatalog(),
     store,
     client: new GatewayModelClient({
       gateway,

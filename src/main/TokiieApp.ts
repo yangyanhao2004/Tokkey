@@ -21,6 +21,7 @@ export class TokiieApp {
   private readonly height: number;
   private readonly ipcController: IpcController;
   private readonly gatewayProcessManager: GatewayProcessManager;
+  private readonly cloudModelConnector: CloudModelConnector;
   private readonly isDev: boolean;
   private readonly evidenceMode: boolean;
   private readonly evidenceCapture: RendererEvidenceCapture | null;
@@ -46,9 +47,10 @@ export class TokiieApp {
     this.gatewayProcessManager = new GatewayProcessManager({
       resourcesPath: app.isPackaged ? process.resourcesPath : undefined
     });
+    this.cloudModelConnector = CloudModelConnector.forGateway(this.gatewayProcessManager);
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
-      cloudModelConnector: CloudModelConnector.forGateway(this.gatewayProcessManager)
+      cloudModelConnector: this.cloudModelConnector
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
     this.isDev = TokiieApp.shouldOpenDevTools(this.evidenceMode, process.argv);
@@ -93,14 +95,26 @@ export class TokiieApp {
   }
 
   /**
-   * Boots the local gateway without blocking window creation. A failure here is
-   * reported and left recoverable: everything in the app that does not need
-   * model routing keeps working, and the gateway can be started again later.
+   * Boots the local gateway without blocking window creation, then rebuilds the
+   * routes of the cloud models connected in an earlier run: a fresh gateway has
+   * none of them, while the database still has their profiles.
+   *
+   * A failure here is reported and left recoverable: everything in the app that
+   * does not need model routing keeps working, the gateway can be started again
+   * later, and pressing Select on the Router page restores a route on its own.
    */
   startGateway(): void {
-    this.gatewayProcessManager.startIfNeeded().catch((error: unknown) => {
-      console.error('[AmisGateway] Gateway failed to start:', error);
-    });
+    this.gatewayProcessManager
+      .startIfNeeded()
+      .then(() => this.cloudModelConnector.restoreConnected())
+      .then((restored) => {
+        if (restored.length > 0) {
+          console.info(`[AmisGateway] Restored ${restored.length} cloud model route(s).`);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('[AmisGateway] Gateway start or cloud model restore failed:', error);
+      });
   }
 
   /** On macOS, clicking the dock icon re-opens a window when none is left. */

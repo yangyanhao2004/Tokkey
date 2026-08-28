@@ -3,9 +3,11 @@
  * (194:3905). Kept apart from the components so copy and rows can change
  * without touching markup.
  *
- * Everything here is still the design's reference value: the page is UI only,
- * so nothing is read from the main process yet.
+ * The copy here is still the design's reference value; the cloud model rows
+ * are drawn from the catalog the main process serves.
  */
+
+import type { CloudModelCard } from '../../shared/types';
 
 /** Shared with the sidebar so every page resolves assets from one place. */
 export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
@@ -52,21 +54,55 @@ export const NO_LOCAL_MODEL_DETAIL = 'Start a local model from Tokii to use it h
 export interface CloudModel {
   readonly id: string;
   readonly name: string;
-  /** Second line: who runs the model, or why it is the suggested one. */
+  /** Second line: the host the model is reached through. */
   readonly detail: string;
   /** The letter drawn in the tile fronting the row, in place of a brand mark. */
   readonly initial: string;
 }
 
-export const CLOUD_MODELS: readonly CloudModel[] = [
-  { id: 'tokii-cloud', name: 'Tokii Cloud', detail: 'Recommended', initial: 'T' },
-  { id: 'claude-sonnet', name: 'Claude Sonnet', detail: 'Anthropic', initial: 'A' },
-  { id: 'gemini-2-5-pro', name: 'Gemini 2.5 Pro', detail: 'Google', initial: 'G' },
-  { id: 'deepseek-v3', name: 'DeepSeek V3', detail: 'DeepSeek', initial: 'D' }
-];
+/**
+ * Draws one catalog card as a grid row. The catalog carries connection
+ * details rather than display copy, so the row's second line falls back to
+ * the raw url when it is not a parsable address.
+ */
+export function toCloudModel(card: CloudModelCard): CloudModel {
+  return {
+    id: card.id,
+    name: card.modelName,
+    detail: hostOf(card.url),
+    initial: card.modelName.charAt(0).toUpperCase()
+  };
+}
 
-export const DEFAULT_CLOUD_MODEL_ID = 'claude-sonnet';
+/** The host of an endpoint url, or the url itself when it is not parsable. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+/** Stands in for the cloud summary until a card has been connected. */
+export const NO_CLOUD_MODEL_NAME = 'No cloud model selected';
+export const NO_CLOUD_MODEL_DETAIL = 'Select a model below to use it for complex tasks.';
 
 export const CLOUD_MODELS_TITLE = 'Cloud Models';
 export const CLOUD_MODELS_SUBTITLE =
   'Choose the model Router uses for complex tasks. The selection is shown above.';
+
+/** Shown in place of the grid when the catalog offers nothing. */
+export const CLOUD_MODELS_EMPTY_MESSAGE = 'No cloud models are available in this build.';
+
+/** Said in front of whatever reason the main process gave for a failed call. */
+export const CLOUD_MODELS_UNAVAILABLE_PREFIX = 'Could not load cloud models: ';
+export const CLOUD_MODEL_CONNECT_FAILED_PREFIX = 'Could not connect: ';
+
+/**
+ * The label on one row's button. Selecting a model connects it, which is worth
+ * naming: the click can take a moment while the gateway route is created.
+ */
+export function selectButtonLabel(isSelected: boolean, isConnecting: boolean): string {
+  if (isConnecting) return 'Connecting...';
+  return isSelected ? 'Selected' : 'Select';
+}

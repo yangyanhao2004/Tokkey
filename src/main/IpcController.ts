@@ -173,6 +173,7 @@ export default class IpcController {
       'models:remove-installed': (modelId: unknown) =>
         this.removeInstalledLocalModel(this.requireModelId(modelId)),
       'models:cloud-cards': () => this.listCloudModelCards(),
+      'models:restore-cloud': () => this.restoreCloudModels(),
       'models:connect-cloud': (cardId: unknown) =>
         this.connectCloudModel(this.requireString(cardId, 'Cloud model card ID'))
     };
@@ -346,6 +347,11 @@ export default class IpcController {
   /** Creates the gateway route for one card and persists its model profile. */
   connectCloudModel(cardId: string): Promise<CloudModelConnection> {
     return this.requireCloudModelConnector().connect(cardId);
+  }
+
+  /** Rebuilds the gateway routes for the cards saved by an earlier run. */
+  restoreCloudModels(): Promise<CloudModelConnection[]> {
+    return this.requireCloudModelConnector().restoreConnected();
   }
 
   /**

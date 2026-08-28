@@ -194,6 +194,7 @@ export interface TokiieApi {
   removeInstalledLocalModel(modelId: string): Promise<InstalledLocalModel[]>;
   listCloudModelCards(): Promise<CloudModelCard[]>;
   connectCloudModel(cardId: string): Promise<CloudModelConnection>;
+  restoreCloudModels(): Promise<CloudModelConnection[]>;
 }
 
 /**

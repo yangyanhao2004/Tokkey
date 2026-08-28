@@ -46,7 +46,8 @@ class PreloadBridge {
       listInstalledLocalModels: () => ipcRenderer.invoke('models:list-installed'),
       removeInstalledLocalModel: (modelId) => ipcRenderer.invoke('models:remove-installed', modelId),
       listCloudModelCards: () => ipcRenderer.invoke('models:cloud-cards'),
-      connectCloudModel: (cardId) => ipcRenderer.invoke('models:connect-cloud', cardId)
+      connectCloudModel: (cardId) => ipcRenderer.invoke('models:connect-cloud', cardId),
+      restoreCloudModels: () => ipcRenderer.invoke('models:restore-cloud')
     };
     contextBridge.exposeInMainWorld('tokiie', api);
   }
