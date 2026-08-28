@@ -7,7 +7,6 @@ import test from 'node:test';
 import {
   ClaudeCodeMcpAdapter,
   CodexMcpAdapter,
-  HermesMcpAdapter,
   LocalMcpCatalogScanner
 } from '../dist/main/mcp/McpCatalogScanner.js';
 import {
@@ -59,7 +58,7 @@ test('equivalent Claude and Codex stdio definitions merge into one card', async 
     assert.equal(result.failures.length, 0);
     assert.equal(result.servers.length, 1);
     assert.deepEqual(result.servers[0].agents, ['claudeCode', 'codex']);
-    assert.deepEqual(result.servers[0].badges.map((badge) => badge.state), ['checked', 'unchecked', 'checked']);
+    assert.deepEqual(result.servers[0].badges.map((badge) => badge.state), ['checked', 'checked']);
   } finally {
     home.cleanup();
   }
@@ -117,9 +116,17 @@ test('parses quoted Codex names and nested environment tables', () => {
   assert.deepEqual(readout.servers[0].environment, { TOKEN: 'secret' });
 });
 
+test('reads past Codex runtime options and drops disabled servers', () => {
+  const readout = new CodexMcpAdapter().parse(
+    '[mcp_servers.tools]\ncommand = "node"\ncwd = "."\nstartup_timeout_sec = 120\n\n' +
+    '[mcp_servers.off]\ncommand = "node"\nenabled = false\n'
+  );
+  assert.deepEqual(readout.servers.map((server) => server.name), ['tools']);
+  assert.deepEqual(readout.skipped, []);
+});
+
 test('treats empty adapter input as an empty configuration', () => {
   assert.deepEqual(new ClaudeCodeMcpAdapter().parse(''), { servers: [], skipped: [] });
-  assert.deepEqual(new HermesMcpAdapter().parse(''), { servers: [], skipped: [] });
   assert.deepEqual(new CodexMcpAdapter().parse(''), { servers: [], skipped: [] });
 });
 
@@ -169,11 +176,10 @@ test('enforces the strict one-server full JSON schema', () => {
   );
 });
 
-test('applies one canonical MCP to Claude, Hermes, and Codex in one call', async () => {
+test('applies one canonical MCP to Claude and Codex in one call', async () => {
   const home = new TestHome();
   try {
     home.write('.claude.json', '{"theme":"dark"}\n');
-    home.write('.hermes/config.yaml', '# retained\nmodel: default\n');
     home.write('.codex/config.toml', 'model = "gpt-5"\n');
     const configurationJson = new McpConfigurationCodec().encode({
       name: 'tools',
@@ -186,16 +192,14 @@ test('applies one canonical MCP to Claude, Hermes, and Codex in one call', async
 
     await new LocalMcpConfigurationApplier({ homeDirectory: home.root }).apply(
       configurationJson,
-      ['claudeCode', 'hermes', 'codex']
+      ['claudeCode', 'codex']
     );
 
     assert.equal(JSON.parse(home.read('.claude.json')).theme, 'dark');
-    assert.match(home.read('.hermes/config.yaml'), /# retained/);
-    assert.match(home.read('.hermes/config.yaml'), /mcp_servers:/);
     assert.match(home.read('.codex/config.toml'), /model = "gpt-5"/);
     assert.match(home.read('.codex/config.toml'), /\[mcp_servers\."tools"\]/);
     const catalog = await new LocalMcpCatalogScanner({ homeDirectory: home.root }).scanInstalledMcps();
-    assert.deepEqual(catalog.servers[0].agents, ['claudeCode', 'hermes', 'codex']);
+    assert.deepEqual(catalog.servers[0].agents, ['claudeCode', 'codex']);
   } finally {
     home.cleanup();
   }
@@ -206,7 +210,7 @@ test('stages every selected adapter before writing and rejects Codex SSE', async
   try {
     const originalClaude = '{"theme":"dark"}\n';
     home.write('.claude.json', originalClaude);
-    home.write('.hermes/config.yaml', 'mcp_servers:\n  duplicate:\n    command: node\n');
+    home.write('.codex/config.toml', '[mcp_servers.duplicate]\ncommand = "node"\n');
     const codec = new McpConfigurationCodec();
     const duplicate = codec.encode({
       name: 'duplicate',
@@ -217,7 +221,7 @@ test('stages every selected adapter before writing and rejects Codex SSE', async
       url: null
     });
     const applier = new LocalMcpConfigurationApplier({ homeDirectory: home.root });
-    await assert.rejects(() => applier.apply(duplicate, ['claudeCode', 'hermes']), /already has/);
+    await assert.rejects(() => applier.apply(duplicate, ['claudeCode', 'codex']), /already has/);
     assert.equal(home.read('.claude.json'), originalClaude);
 
     const sse = codec.encode({
@@ -234,12 +238,107 @@ test('stages every selected adapter before writing and rejects Codex SSE', async
   }
 });
 
+test('moves one server between agents in a single selection', async () => {
+  const home = new TestHome();
+  try {
+    home.write('.claude.json', '{"theme":"dark","mcpServers":{"tools":{"type":"stdio","command":"node"}}}\n');
+    home.write('.codex/config.toml', '# hand written\nmodel = "gpt-5"\n');
+    const configurationJson = new McpConfigurationCodec().encode({
+      name: 'tools',
+      connectionType: 'stdio',
+      command: 'node',
+      arguments: [],
+      environment: {},
+      url: null
+    });
+
+    await new LocalMcpConfigurationApplier({ homeDirectory: home.root }).applySelection(
+      configurationJson,
+      ['codex'],
+      ['claudeCode']
+    );
+
+    const claude = JSON.parse(home.read('.claude.json'));
+    assert.equal(claude.theme, 'dark');
+    assert.deepEqual(claude.mcpServers, {});
+    assert.match(home.read('.codex/config.toml'), /# hand written/);
+    const catalog = await new LocalMcpCatalogScanner({ homeDirectory: home.root }).scanInstalledMcps();
+    assert.deepEqual(catalog.servers.map((server) => server.agents), [['codex']]);
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('removing a Codex server keeps every unrelated table and comment', async () => {
+  const home = new TestHome();
+  try {
+    home.write(
+      '.codex/config.toml',
+      '# top comment\nmodel = "gpt-5"\n\n' +
+      '[mcp_servers."my tools"]\ncommand = "node"\n\n' +
+      '[mcp_servers."my tools".env]\nTOKEN = "secret"\n\n' +
+      '[mcp_servers.keep]\ncommand = "other"\n\n' +
+      '[history]\npersistence = "none"\n'
+    );
+    const configurationJson = new McpConfigurationCodec().encode({
+      name: 'my tools',
+      connectionType: 'stdio',
+      command: 'node',
+      arguments: [],
+      environment: {},
+      url: null
+    });
+
+    await new LocalMcpConfigurationApplier({ homeDirectory: home.root }).applySelection(
+      configurationJson,
+      [],
+      ['codex']
+    );
+
+    const remaining = home.read('.codex/config.toml');
+    assert.match(remaining, /# top comment/);
+    assert.match(remaining, /\[mcp_servers\.keep\]/);
+    assert.match(remaining, /\[history\]/);
+    assert.doesNotMatch(remaining, /my tools/);
+    const catalog = await new LocalMcpCatalogScanner({ homeDirectory: home.root }).scanInstalledMcps();
+    assert.deepEqual(catalog.servers.map((server) => server.name), ['keep']);
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('an uninstall that touches no agent file leaves nothing behind', async () => {
+  const home = new TestHome();
+  try {
+    home.write('.claude.json', '{"mcpServers":{"other":{"command":"node"}}}\n');
+    const configurationJson = new McpConfigurationCodec().encode({
+      name: 'absent',
+      connectionType: 'stdio',
+      command: 'node',
+      arguments: [],
+      environment: {},
+      url: null
+    });
+
+    await new LocalMcpConfigurationApplier({ homeDirectory: home.root }).applySelection(
+      configurationJson,
+      [],
+      ['claudeCode', 'codex']
+    );
+
+    assert.deepEqual(Object.keys(JSON.parse(home.read('.claude.json')).mcpServers), ['other']);
+    assert.throws(() => home.read('.codex/config.toml'));
+  } finally {
+    home.cleanup();
+  }
+});
+
 /** In-memory operations that fail the second initial commit but allow rollback. */
 class FailingFileOperations {
   constructor() {
     this.files = new Map([
       ['/claude', new TextEncoder().encode('claude-original')],
-      ['/hermes', new TextEncoder().encode('hermes-original')]
+      ['/codex', new TextEncoder().encode('codex-original')]
     ]);
     this.didFail = false;
   }
@@ -250,7 +349,7 @@ class FailingFileOperations {
   }
 
   async replaceAtomically(filePath, bytes) {
-    if (filePath === '/hermes' && !this.didFail) {
+    if (filePath === '/codex' && !this.didFail) {
       this.didFail = true;
       throw new Error('simulated write failure');
     }
@@ -270,17 +369,52 @@ class FailingFileOperations {
 test('restores exact original bytes when a later atomic write fails', async () => {
   const operations = new FailingFileOperations();
   const writer = new McpConfigurationFileWriter(operations);
-  const [claudeRead, createdRead, hermesRead] = await Promise.all([
+  const [claudeRead, createdRead, codexRead] = await Promise.all([
     writer.read('/claude'),
     writer.read('/created'),
-    writer.read('/hermes')
+    writer.read('/codex')
   ]);
   await assert.rejects(() => writer.commit([
     { ...claudeRead, replacementBytes: new TextEncoder().encode('claude-new') },
     { ...createdRead, replacementBytes: new TextEncoder().encode('created-new') },
-    { ...hermesRead, replacementBytes: new TextEncoder().encode('hermes-new') }
+    { ...codexRead, replacementBytes: new TextEncoder().encode('codex-new') }
   ]), /Previously written files were restored/);
   assert.equal(operations.text('/claude'), 'claude-original');
   assert.equal(operations.text('/created'), null);
-  assert.equal(operations.text('/hermes'), 'hermes-original');
+  assert.equal(operations.text('/codex'), 'codex-original');
+});
+
+test('an uninstalled agent contributes no MCPs and no failure', async () => {
+  const home = new TestHome();
+  try {
+    home.write('.claude.json', JSON.stringify({ mcpServers: { tools: { command: 'node' } } }));
+    home.write('.codex/config.toml', '[mcp_servers.legacy]\ncommand = "codex-tool"\n');
+
+    const catalog = await new LocalMcpCatalogScanner({
+      homeDirectory: home.root,
+      agentGate: { installedAgents: async () => ['claudeCode'] }
+    }).scanInstalledMcps();
+
+    assert.deepEqual(catalog.failures, []);
+    assert.deepEqual(catalog.servers.map((server) => server.name), ['tools']);
+    assert.deepEqual(catalog.servers[0].agents, ['claudeCode']);
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('a failed detection reads every agent rather than blanking the catalog', async () => {
+  const home = new TestHome();
+  try {
+    home.write('.codex/config.toml', '[mcp_servers.tools]\ncommand = "codex-tool"\n');
+
+    const catalog = await new LocalMcpCatalogScanner({
+      homeDirectory: home.root,
+      agentGate: { installedAgents: async () => { throw new Error('probe timed out'); } }
+    }).scanInstalledMcps();
+
+    assert.deepEqual(catalog.servers.map((server) => server.name), ['tools']);
+  } finally {
+    home.cleanup();
+  }
 });

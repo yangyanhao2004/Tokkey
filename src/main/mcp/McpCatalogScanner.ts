@@ -3,7 +3,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse as parseToml } from '@iarna/toml';
-import { parse as parseYaml } from 'yaml';
 import { McpConfigurationCodec } from '../../shared/McpConfiguration';
 import type {
   InstalledMcp,
@@ -15,9 +14,10 @@ import type {
   McpConnectionType,
   McpServerConfiguration
 } from '../../shared/types';
+import type { InstalledAgentGating } from '../agents/InstalledAgentGate';
 
 /** Stable order used by the catalog cards and their agent badges. */
-export const MCP_AGENT_ORDER: readonly McpAgent[] = ['claudeCode', 'hermes', 'codex'];
+export const MCP_AGENT_ORDER: readonly McpAgent[] = ['claudeCode', 'codex'];
 
 /** Adapter contract for one agent's user-scope MCP configuration file. */
 export interface McpAgentConfigAdapter {
@@ -208,83 +208,16 @@ export class ClaudeCodeMcpAdapter implements McpAgentConfigAdapter {
   }
 }
 
-/** Parses Hermes' top-level ~/.hermes/config.yaml MCP mapping. */
-export class HermesMcpAdapter implements McpAgentConfigAdapter {
-  private readonly support = new McpAdapterSupport();
-
-  agent(): McpAgent {
-    return 'hermes';
-  }
-
-  filePath(homeDirectory: string): string {
-    return path.join(homeDirectory, '.hermes', 'config.yaml');
-  }
-
-  parse(text: string): McpAgentConfigurationReadout {
-    if (text.trim().length === 0) {
-      return { servers: [], skipped: [] };
-    }
-    const root = parseYaml(text) as unknown;
-    if (!this.support.isRecord(root)) {
-      throw new Error('Hermes configuration must be an object');
-    }
-    if (root.mcp_servers === undefined) {
-      return { servers: [], skipped: [] };
-    }
-    if (!this.support.isRecord(root.mcp_servers)) {
-      throw new Error('top-level mcp_servers must be an object');
-    }
-    const servers: McpServerConfiguration[] = [];
-    const skipped = [];
-    for (const name of Object.keys(root.mcp_servers).sort()) {
-      try {
-        const entry = root.mcp_servers[name];
-        if (!this.support.isRecord(entry)) {
-          throw new Error('entry must be an object');
-        }
-        const configuration = this.parseEntry(entry);
-        servers.push({ ...configuration, name: this.support.normalizeName(name) });
-      } catch (error) {
-        skipped.push({ name, reason: this.describeError(error) });
-      }
-    }
-    return { servers, skipped };
-  }
-
-  private parseEntry(entry: Record<string, unknown>): McpServerConfiguration {
-    const hasCommand = entry.command !== undefined;
-    const hasUrl = entry.url !== undefined;
-    if (hasCommand && hasUrl) {
-      throw new Error('server cannot include both command and url');
-    }
-    if (hasCommand) {
-      this.assertAllowedFields(entry, ['command', 'args', 'env']);
-      return this.support.makeStdio(entry.command, entry.args, entry.env);
-    }
-    this.assertAllowedFields(entry, ['url', 'transport']);
-    const connectionType = entry.transport === undefined
-      ? 'streamable_http'
-      : entry.transport;
-    if (connectionType !== 'streamable_http' && connectionType !== 'sse') {
-      throw new Error('unsupported transport');
-    }
-    return this.support.makeRemote(connectionType, entry.url);
-  }
-
-  private assertAllowedFields(entry: Record<string, unknown>, allowedFields: string[]): void {
-    const unsupported = Object.keys(entry).find((key) => !allowedFields.includes(key));
-    if (unsupported) {
-      throw new Error(`unsupported field: ${unsupported}`);
-    }
-  }
-
-  private describeError(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-  }
-}
-
 /** Parses Codex's [mcp_servers.<name>] TOML tables. */
 export class CodexMcpAdapter implements McpAgentConfigAdapter {
+  /**
+   * Codex options that tune how a server runs rather than what it is. They are
+   * read past instead of skipping the server, so a real Codex configuration
+   * still lists; nothing is lost by ignoring them, because the applier only
+   * ever appends new tables and never rewrites an existing one.
+   */
+  private static readonly RUNTIME_ONLY_FIELDS = ['enabled', 'cwd', 'startup_timeout_sec', 'tool_timeout_sec'];
+
   private readonly support = new McpAdapterSupport();
 
   agent(): McpAgent {
@@ -315,6 +248,8 @@ export class CodexMcpAdapter implements McpAgentConfigAdapter {
       try {
         const rawEntry = root.mcp_servers[name];
         if (!this.support.isRecord(rawEntry)) throw new Error('entry must be a table');
+        // Codex itself ignores a disabled server, so it is not installed here either.
+        if (rawEntry.enabled === false) continue;
         const { env: environment, ...entry } = rawEntry;
         const configuration = this.parseEntry(entry, environment);
         servers.push({ ...configuration, name: this.support.normalizeName(name) });
@@ -326,7 +261,8 @@ export class CodexMcpAdapter implements McpAgentConfigAdapter {
   }
 
   private parseEntry(entry: Record<string, unknown>, environment: unknown): McpServerConfiguration {
-    const unsupported = Object.keys(entry).find((key) => !['command', 'args', 'url'].includes(key));
+    const supportedFields = ['command', 'args', 'url', ...CodexMcpAdapter.RUNTIME_ONLY_FIELDS];
+    const unsupported = Object.keys(entry).find((key) => !supportedFields.includes(key));
     if (unsupported) throw new Error(`unsupported field: ${unsupported}`);
     if (entry.command !== undefined && entry.url !== undefined) {
       throw new Error('server cannot include both command and url');
@@ -397,7 +333,6 @@ export class McpCatalogDeduplicator {
     const primaryAgent = agents[0] ?? 'claudeCode';
     const shortNames: Record<McpAgent, string> = {
       claudeCode: 'Claude',
-      hermes: 'Hermes',
       codex: 'Codex'
     };
     const shortName = shortNames[primaryAgent];
@@ -431,28 +366,35 @@ export class LocalMcpCatalogScanner {
   private readonly fileReader: McpFileReader;
   private readonly adapters: McpAgentConfigAdapter[];
   private readonly deduplicator: McpCatalogDeduplicator;
+  private readonly agentGate: InstalledAgentGating | null;
 
   constructor(options: {
     homeDirectory?: string;
     fileReader?: McpFileReader;
     adapters?: McpAgentConfigAdapter[];
     deduplicator?: McpCatalogDeduplicator;
+    /** Omitted to read every agent's file, which is what an isolated scan wants. */
+    agentGate?: InstalledAgentGating;
   } = {}) {
     this.homeDirectory = options.homeDirectory ?? os.homedir();
     this.fileReader = options.fileReader ?? new McpConfigFileReader();
     this.adapters = options.adapters ?? [
       new ClaudeCodeMcpAdapter(),
-      new HermesMcpAdapter(),
       new CodexMcpAdapter()
     ];
     this.deduplicator = options.deduplicator ?? new McpCatalogDeduplicator();
+    this.agentGate = options.agentGate ?? null;
   }
 
   async scanInstalledMcps(): Promise<McpCatalogScan> {
     const discovered: DiscoveredMcp[] = [];
     const failures: McpCatalogFailure[] = [];
+    const installedAgents = await this.readInstalledAgents();
     for (const adapter of this.adapters) {
       const agent = adapter.agent();
+      // An uninstalled CLI leaves its configuration file behind; reading it
+      // would list servers nothing on this machine can start.
+      if (!installedAgents.includes(agent)) continue;
       try {
         const text = await this.fileReader.readUtf8OrEmpty(adapter.filePath(this.homeDirectory));
         if (text.trim().length === 0) continue;
@@ -474,10 +416,29 @@ export class LocalMcpCatalogScanner {
   scanInstalledMCPs(): Promise<McpCatalogScan> {
     return this.scanInstalledMcps();
   }
+
+  /**
+   * Which agents this machine has, or all of them when nothing can say.
+   *
+   * A failed detection must not blank the catalog: an unreadable probe is not
+   * evidence that an agent is gone, and hiding configured servers is the more
+   * destructive of the two mistakes.
+   */
+  private async readInstalledAgents(): Promise<readonly McpAgent[]> {
+    if (!this.agentGate) {
+      return MCP_AGENT_ORDER;
+    }
+    try {
+      return await this.agentGate.installedAgents();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`MCP scan could not detect installed agents, reading every file: ${message}`);
+      return MCP_AGENT_ORDER;
+    }
+  }
 }
 
 export { ClaudeCodeMcpAdapter as ClaudeCodeMCPAdapter };
-export { HermesMcpAdapter as HermesMCPAdapter };
 export { CodexMcpAdapter as CodexMCPAdapter };
 export { LocalMcpCatalogScanner as LocalMCPCatalogScanner };
 export { McpConfigurationCodec as CanonicalMcpCodec };

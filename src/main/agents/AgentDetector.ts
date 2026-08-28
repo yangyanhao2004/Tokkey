@@ -11,6 +11,8 @@ export class AgentDetector {
   private readonly shellRunner: ShellRunner;
   private readonly timeoutMs: number;
   private readonly cache = new Map<ShellAgent, AgentDetection>();
+  /** Probes still running, so concurrent callers share one login shell each. */
+  private readonly pendingProbes = new Map<ShellAgent, Promise<AgentDetection>>();
 
   constructor(shellRunner?: ShellRunner, timeoutMs?: number);
   constructor(options?: AgentDetectorOptions);
@@ -24,19 +26,19 @@ export class AgentDetector {
     this.timeoutMs = shellRunnerOrOptions.timeoutMs ?? timeoutMs;
   }
 
-  /** Detects one agent, caching the live PATH result until invalidated. */
+  /**
+   * Detects one agent, caching the live PATH result until invalidated.
+   *
+   * Callers that arrive while a probe is still running join it rather than
+   * spawning a second login shell: the catalog scanners and the Agent Hub both
+   * ask at startup, and a login shell is the most expensive thing this class does.
+   */
   async detect(agent: ShellAgent): Promise<AgentDetection> {
     this.assertAgent(agent);
     const cached = this.cache.get(agent);
     if (cached) return { ...cached };
-    const result = await this.shellRunner.run(`which ${agent}`, {
-      shell: '/bin/bash',
-      login: true,
-      timeoutMs: this.timeoutMs
-    });
-    const detection = this.toDetection(agent, result);
-    this.cache.set(agent, detection);
-    return { ...detection };
+    const probe = this.pendingProbes.get(agent) ?? this.startProbe(agent);
+    return { ...(await probe) };
   }
 
   /** Detects both supported agents in parallel because the probes are independent. */
@@ -49,6 +51,20 @@ export class AgentDetector {
   invalidate(agent?: ShellAgent): void {
     if (agent) this.cache.delete(agent);
     else this.cache.clear();
+  }
+
+  /** Runs one PATH probe and registers it for the callers that join it. */
+  private startProbe(agent: ShellAgent): Promise<AgentDetection> {
+    const probe = this.shellRunner
+      .run(`which ${agent}`, { shell: '/bin/bash', login: true, timeoutMs: this.timeoutMs })
+      .then((result) => {
+        const detection = this.toDetection(agent, result);
+        this.cache.set(agent, detection);
+        return detection;
+      })
+      .finally(() => this.pendingProbes.delete(agent));
+    this.pendingProbes.set(agent, probe);
+    return probe;
   }
 
   private toDetection(agent: ShellAgent, result: ShellRunResult): AgentDetection {

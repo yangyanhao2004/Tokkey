@@ -1,17 +1,49 @@
 import type { ReactNode } from 'react';
 import { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
+import { useNavigation } from './NavigationProvider';
 import { TitleBlock } from './TitleBlock';
 
-interface PageHeaderProps {
-  /** Supplied only by pages opened from another page; elsewhere Back is inert. */
-  onBack?: () => void;
+interface HistoryButtonProps {
+  direction: 'back' | 'forward';
+  onClick: () => void;
+  /** True at that end of the history, where the button has nowhere to go. */
+  disabled: boolean;
+  /** The leading button carries no divider; the one beside it does. */
+  isFirst?: boolean;
+}
+
+/** One half of the header's history control. */
+function HistoryButton({ direction, onClick, disabled, isFirst = false }: HistoryButtonProps) {
+  const label = direction === 'back' ? 'Go back' : 'Go forward';
+  const divider = isFirst ? '' : 'border-l-[0.831px] border-separator';
+
+  return (
+    <button
+      type="button"
+      className={`flex h-[28px] w-[30px] items-center justify-center focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary disabled:opacity-40 ${divider}`}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={direction === 'back' ? 'Back' : 'Forward'}
+      data-testid={`nav-${direction}`}
+    >
+      <img
+        className="block size-[14.958px] max-w-none"
+        src={`${ICON_BASE_PATH}/main-nav-${direction}.svg`}
+        alt=""
+      />
+    </button>
+  );
 }
 
 /**
  * Back/forward pair plus the connection pill. Chrome that every page carries,
- * so it lives with the shell rather than with one page's content.
+ * so it lives with the shell rather than with one page's content. Both buttons
+ * walk the window's one history, and each is inert at that history's end.
  */
-function PageHeader({ onBack }: PageHeaderProps) {
+function PageHeader() {
+  const { canGoBack, canGoForward, goBack, goForward } = useNavigation();
+
   return (
     // This strip is the page's share of the title bar the window does not have,
     // so it drags the window; the buttons inside it opt back out.
@@ -20,34 +52,13 @@ function PageHeader({ onBack }: PageHeaderProps) {
       data-testid="page-header"
     >
       <div className="app-no-drag flex h-[28px] items-center overflow-hidden rounded-full border border-black/8 bg-white/50 shadow-[0px_2.493px_9.972px_0px_rgba(0,0,0,0.05)]">
-        <button
-          type="button"
-          className="flex h-[28px] w-[30px] items-center justify-center focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary"
-          onClick={onBack}
-          disabled={!onBack}
-          aria-label="Go back"
-          title="Back"
-          data-testid="nav-back"
-        >
-          <img
-            className="block size-[14.958px] max-w-none"
-            src={`${ICON_BASE_PATH}/main-nav-back.svg`}
-            alt=""
-          />
-        </button>
-        <button
-          type="button"
-          className="flex h-[28px] w-[30px] items-center justify-center border-l-[0.831px] border-separator focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary"
-          aria-label="Go forward"
-          title="Forward"
-          data-testid="nav-forward"
-        >
-          <img
-            className="block size-[14.958px] max-w-none"
-            src={`${ICON_BASE_PATH}/main-nav-forward.svg`}
-            alt=""
-          />
-        </button>
+        <HistoryButton
+          direction="back"
+          onClick={goBack}
+          disabled={!canGoBack}
+          isFirst
+        />
+        <HistoryButton direction="forward" onClick={goForward} disabled={!canGoForward} />
       </div>
 
       <span
@@ -68,8 +79,6 @@ interface PageShellProps {
   subtitle: string;
   /** Identifies the page in tests, e.g. `tokiie` renders `page-tokiie`. */
   testId: string;
-  /** Passed through to the header's Back button; omit on top-level pages. */
-  onBack?: () => void;
   children: ReactNode;
 }
 
@@ -77,7 +86,7 @@ interface PageShellProps {
  * The right-hand content page: header, heading block, then the page's own
  * sections. Every page renders through this so they share one frame.
  */
-export function PageShell({ title, subtitle, testId, onBack, children }: PageShellProps) {
+export function PageShell({ title, subtitle, testId, children }: PageShellProps) {
   return (
     <main
       // `overflow-hidden` is load-bearing: the header's backdrop-filter is
@@ -86,7 +95,7 @@ export function PageShell({ title, subtitle, testId, onBack, children }: PageShe
       className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[20px] bg-white"
       data-testid={`page-${testId}`}
     >
-      <PageHeader onBack={onBack} />
+      <PageHeader />
       <div className="flex min-h-0 flex-1 flex-col gap-4 p-6">
         <TitleBlock title={title} subtitle={subtitle} size="page" as="h1" />
         {children}

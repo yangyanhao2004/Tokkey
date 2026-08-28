@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { parse as parseToml } from '@iarna/toml';
-import { Document, parseDocument } from 'yaml';
 import type { McpAgent, McpServerConfiguration } from '../../shared/types';
 
 /** Renders one canonical server into an agent's existing user configuration. */
@@ -8,6 +7,11 @@ export interface McpAgentConfigurationAdapter {
   agent(): McpAgent;
   filePath(homeDirectory: string): string;
   render(existingText: string, configuration: McpServerConfiguration): string;
+  /**
+   * Drops one server from the agent's configuration. A name the file does not
+   * carry returns the text unchanged, so removing twice is not an error.
+   */
+  remove(existingText: string, serverName: string): string;
 }
 
 /** Shared structural checks for configuration renderers. */
@@ -98,50 +102,106 @@ export class ClaudeCodeMcpConfigurationAdapter implements McpAgentConfigurationA
     };
     return `${JSON.stringify(updatedRoot, null, 2)}\n`;
   }
+
+  remove(existingText: string, serverName: string): string {
+    if (existingText.trim().length === 0) {
+      return existingText;
+    }
+    const root = JSON.parse(existingText) as unknown;
+    if (!this.support.isRecord(root)) {
+      throw new Error('Claude configuration must be a JSON object.');
+    }
+    const servers = root.mcpServers;
+    if (servers === undefined) {
+      return existingText;
+    }
+    if (!this.support.isRecord(servers)) {
+      throw new Error('Claude mcpServers must be a JSON object.');
+    }
+    if (!Object.prototype.hasOwnProperty.call(servers, serverName)) {
+      return existingText;
+    }
+    const { [serverName]: _removed, ...remainingServers } = servers;
+    return `${JSON.stringify({ ...root, mcpServers: remainingServers }, null, 2)}\n`;
+  }
 }
 
-/** Adds one MCP entry while preserving Hermes YAML comments and settings. */
-export class HermesMcpConfigurationAdapter implements McpAgentConfigurationAdapter {
-  private readonly support = new McpRenderingSupport();
-
-  agent(): McpAgent {
-    return 'hermes';
+/**
+ * Deletes one `[mcp_servers.<name>]` table, and any subtable of it, from Codex
+ * TOML text.
+ *
+ * The whole file is never re-serialized: Codex's config.toml is hand-written
+ * and holds settings and comments Tokiie knows nothing about, so lines are
+ * dropped rather than the document being rebuilt. A table runs from its header
+ * to the next header, which is what makes that safe to do line by line.
+ */
+class CodexTomlTableRemover {
+  remove(existingText: string, serverName: string): string {
+    let isDroppingTable = false;
+    const keptLines = existingText.split('\n').filter((line) => {
+      const headerPath = this.readHeaderPath(line);
+      if (headerPath) {
+        isDroppingTable = this.belongsToServer(headerPath, serverName);
+      }
+      return !isDroppingTable;
+    });
+    // Dropping the last table leaves the blank lines that separated it behind.
+    const remainingText = keptLines.join('\n').replace(/\s+$/, '');
+    return remainingText.length === 0 ? '' : `${remainingText}\n`;
   }
 
-  filePath(homeDirectory: string): string {
-    return path.join(homeDirectory, '.hermes', 'config.yaml');
+  /** Whether a header names the server's own table or one nested under it. */
+  private belongsToServer(headerPath: readonly string[], serverName: string): boolean {
+    return headerPath.length >= 2 && headerPath[0] === 'mcp_servers' && headerPath[1] === serverName;
   }
 
-  render(existingText: string, configuration: McpServerConfiguration): string {
-    const document = existingText.trim().length === 0
-      ? new Document({})
-      : parseDocument(existingText);
-    if (document.errors.length > 0) {
-      throw new Error(`Hermes configuration is invalid YAML: ${document.errors[0].message}`);
+  /** The dotted key a `[table]` or `[[table]]` line opens, or null for any other line. */
+  private readHeaderPath(line: string): string[] | null {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
+      return null;
     }
-    const root = document.toJS() as unknown;
-    if (!this.support.isRecord(root)) {
-      throw new Error('Hermes configuration must be a YAML object.');
+    const inner = trimmed.startsWith('[[') && trimmed.endsWith(']]')
+      ? trimmed.slice(2, -2)
+      : trimmed.slice(1, -1);
+    return this.splitKeyPath(inner);
+  }
+
+  /** Splits a dotted key into segments, so a quoted name may hold dots itself. */
+  private splitKeyPath(inner: string): string[] | null {
+    let segments: string[] = [];
+    let current = '';
+    let openQuote: '"' | '\'' | null = null;
+    for (let index = 0; index < inner.length; index += 1) {
+      const character = inner[index];
+      if (openQuote === null && (character === '"' || character === '\'')) {
+        openQuote = character;
+      } else if (openQuote !== null && character === openQuote) {
+        openQuote = null;
+      } else if (openQuote === '"' && character === '\\') {
+        // Only the following character is consumed; escapes stay as written,
+        // which is enough to compare a name against the scanner's reading.
+        current += inner[index + 1] ?? '';
+        index += 1;
+      } else if (openQuote === null && character === '.') {
+        segments = [...segments, current.trim()];
+        current = '';
+      } else {
+        current += character;
+      }
     }
-    const rawServers = root.mcp_servers;
-    if (rawServers !== undefined && !this.support.isRecord(rawServers)) {
-      throw new Error('Hermes mcp_servers must be a YAML object.');
+    if (openQuote !== null) {
+      return null;
     }
-    this.support.assertAvailable(rawServers ?? {}, configuration.name, 'Hermes');
-    const entry = configuration.connectionType === 'stdio'
-      ? this.support.stdioEntry(configuration, false)
-      : {
-        ...this.support.remoteEntry(configuration, null),
-        ...(configuration.connectionType === 'sse' ? { transport: 'sse' } : {})
-      };
-    document.setIn(['mcp_servers', configuration.name], entry);
-    return document.toString();
+    segments = [...segments, current.trim()];
+    return segments.every((segment) => segment.length > 0) ? segments : null;
   }
 }
 
 /** Appends one official mcp_servers table without rewriting unrelated Codex TOML. */
 export class CodexMcpConfigurationAdapter implements McpAgentConfigurationAdapter {
   private readonly support = new McpRenderingSupport();
+  private readonly remover = new CodexTomlTableRemover();
 
   agent(): McpAgent {
     return 'codex';
@@ -173,6 +233,10 @@ export class CodexMcpConfigurationAdapter implements McpAgentConfigurationAdapte
       ? ''
       : existingText.endsWith('\n\n') ? '' : existingText.endsWith('\n') ? '\n' : '\n\n';
     return `${existingText}${separator}${renderedTable}`;
+  }
+
+  remove(existingText: string, serverName: string): string {
+    return this.remover.remove(existingText, serverName);
   }
 
   private renderStdioTable(configuration: McpServerConfiguration): string {
@@ -215,7 +279,6 @@ export class McpAgentConfigurationAdapterRegistry {
 
   constructor(adapters: readonly McpAgentConfigurationAdapter[] = [
     new ClaudeCodeMcpConfigurationAdapter(),
-    new HermesMcpConfigurationAdapter(),
     new CodexMcpConfigurationAdapter()
   ]) {
     this.adapters = [...adapters];

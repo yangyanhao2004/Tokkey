@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { SKILLS_SH_PAGE_SIZE } from '../../shared/types';
 import type {
   SkillsShCardState,
   SkillsShInstallRequest,
@@ -10,16 +11,18 @@ import type {
   SkillConflictStrategy
 } from '../../shared/types';
 import CachedSourceCatalog, { type CachedSource } from './CachedSourceCatalog';
+import CachedRepositoryCatalog from './CachedRepositoryCatalog';
 import SkillSourceResolver from './SkillSourceResolver';
 import RepositoryCloneCache from './RepositoryCloneCache';
 import SkillDeployer from './SkillDeployer';
+import SkillInstaller from './SkillInstaller';
 import CachedInstalledSkillMatcher from './CachedInstalledSkillMatcher';
 import SkillFolderImporter from './SkillFolderImporter';
 import LocalSkillCatalogScanner from './SkillCatalogScanner';
 import SkillsShClient from './SkillsShClient';
 
 const API_PAGE_SIZE = 200;
-const UI_PAGE_SIZE = 20;
+const UI_PAGE_SIZE = SKILLS_SH_PAGE_SIZE;
 
 export interface DiscoverSkillsServiceOptions {
   skillsShClient?: SkillsShClient;
@@ -29,6 +32,7 @@ export interface DiscoverSkillsServiceOptions {
   skillSourceResolver?: SkillSourceResolver;
   importer?: SkillFolderImporter;
   deployer?: SkillDeployer;
+  installer?: SkillInstaller;
   cache?: RepositoryCloneCache;
 }
 
@@ -39,8 +43,7 @@ export class DiscoverSkillsService {
   private readonly installedCatalog: LocalSkillCatalogScanner;
   private readonly cachedInstalledMatcher: CachedInstalledSkillMatcher;
   private readonly skillSourceResolver: SkillSourceResolver;
-  private readonly importer: SkillFolderImporter;
-  private readonly deployer: SkillDeployer;
+  private readonly installer: SkillInstaller;
   private readonly cachedApiPages = new Map<number, SkillsShPage>();
   private readonly searchResults = new Map<string, SkillsShSkill[]>();
   private readonly installedSkillsById = new Map<string, InstalledSkill>();
@@ -62,8 +65,15 @@ export class DiscoverSkillsService {
       cachedInstalledMatcher: this.cachedInstalledMatcher
     });
     this.skillSourceResolver = options.skillSourceResolver ?? new SkillSourceResolver({ cache });
-    this.importer = options.importer ?? new SkillFolderImporter({ filesystem: installedCatalog.getFilesystem() });
-    this.deployer = options.deployer ?? new SkillDeployer({ scanner: installedCatalog });
+    // Both discover tabs install through the one installer, so a skill from
+    // skills.sh is published exactly as a skill from a cloned repository is.
+    this.installer = options.installer ?? new SkillInstaller({
+      catalog: new CachedRepositoryCatalog({ cache, installedCatalog }),
+      installedCatalog,
+      importer: options.importer ?? new SkillFolderImporter({ filesystem: installedCatalog.getFilesystem() }),
+      deployer: options.deployer ?? new SkillDeployer({ scanner: installedCatalog }),
+      cachedInstalledMatcher: this.cachedInstalledMatcher
+    });
   }
 
   /** Fetches a raw API page, retaining it for all ten UI pages it backs. */
@@ -178,66 +188,51 @@ export class DiscoverSkillsService {
     };
   }
 
-  /** Installs a listing after resolving its local source folder. */
+  /**
+   * Resolves card state for a whole page in one pass. The indexes are built at
+   * most once here, so drawing twenty cards costs one scan rather than twenty.
+   */
+  async getSkillCardStates(listings: readonly SkillsShSkill[]): Promise<SkillsShCardState[]> {
+    if (!this.cachedSources.length) {
+      await this.refreshInstalledStatus();
+    }
+    const cardStates: SkillsShCardState[] = [];
+    for (const listing of listings) {
+      cardStates.push(await this.getSkillCardState(listing));
+    }
+    return cardStates;
+  }
+
+  /**
+   * Installs a listing after resolving its local source folder: a repository
+   * checkout for a GitHub source, a download for a published site. Publishing
+   * and deployment are the installer's, so the only thing this adds is what the
+   * listing knows — which card the result belongs to, and where it came from.
+   */
   async installListing(
     listing: SkillsShSkill,
     enabledAgents: SkillAgent[],
     conflictStrategy: SkillConflictStrategy
   ): Promise<SkillsShInstallResult> {
     const resolved = await this.skillSourceResolver.resolveSkill(listing);
-    if (conflictStrategy === 'reportConflict') {
-      let duplicate: InstalledSkill | null = null;
-      try {
-        await this.refreshInstalledStatus();
-        duplicate = this.cachedInstalledMatcher.findMatch(
-          resolved.skillPath,
-          [...this.installedSkillsById.values()]
-        );
-      } catch {
-        // A failed preflight scan is non-fatal; the importer still reports a real conflict.
-      }
-      if (duplicate) {
-        const installedSkills = await this.deployer.applyAgentSelection(duplicate, enabledAgents);
-        this.updateSessionOverlay(listing, installedSkills, duplicate);
-        await this.refreshInstalledStatus();
-        return {
-          status: 'alreadyInstalled',
-          destinationPath: duplicate.primaryInstallation.absolutePath,
-          conflictPath: null,
-          installedSkills,
-          listing,
-          resolvedPath: resolved.skillPath
-        };
-      }
+    const installation = await this.installer.installResolvedSkill({
+      sourcePath: resolved.skillPath,
+      skillName: path.basename(resolved.skillPath),
+      enabledAgents,
+      conflictStrategy,
+      duplicateStatus: 'alreadyInstalled'
+    });
+    if (installation.installedSkill) {
+      // A card is drawn from the listing's id, which no filesystem scan knows,
+      // so what was just installed is remembered under it before rescanning.
+      this.updateSessionOverlay(listing, installation.installedSkills, installation.installedSkill);
+      await this.refreshInstalledStatus();
     }
-
-    const skillName = path.basename(resolved.skillPath);
-    const importResult = this.importer.importSkill(resolved.skillPath, skillName, conflictStrategy);
-    if (importResult.status === 'conflict' || importResult.status === 'skipped') {
-      const installedSkills = await this.installedCatalog.scanInstalledSkills();
-      return {
-        status: importResult.status,
-        destinationPath: importResult.destinationPath,
-        conflictPath: importResult.conflictPath,
-        installedSkills,
-        listing,
-        resolvedPath: resolved.skillPath
-      };
-    }
-
-    const refreshedSkills = await this.installedCatalog.scanInstalledSkills();
-    const importedSkill = this.findImportedSkill(refreshedSkills, importResult.destinationPath);
-    if (!importedSkill) {
-      throw new Error(`Imported skill was not found after publishing: ${importResult.destinationPath}`);
-    }
-    const installedSkills = await this.deployer.applyAgentSelection(importedSkill, enabledAgents);
-    this.updateSessionOverlay(listing, installedSkills, importedSkill);
-    await this.refreshInstalledStatus();
     return {
-      status: importResult.status,
-      destinationPath: importResult.destinationPath,
-      conflictPath: null,
-      installedSkills,
+      status: installation.status,
+      destinationPath: installation.destinationPath,
+      conflictPath: installation.conflictPath,
+      installedSkills: installation.installedSkills,
       listing,
       resolvedPath: resolved.skillPath
     };
@@ -261,16 +256,6 @@ export class DiscoverSkillsService {
   private updateSessionOverlay(listing: SkillsShSkill, installedSkills: InstalledSkill[], fallback: InstalledSkill): void {
     const matchingSkill = installedSkills.find((skill) => skill.id === fallback.id || skill.name === fallback.name) ?? fallback;
     this.installedSkillsById.set(listing.id, matchingSkill);
-  }
-
-  private findImportedSkill(skills: InstalledSkill[], destinationPath: string | null): InstalledSkill | null {
-    if (!destinationPath) {
-      return null;
-    }
-    const normalizedDestination = path.resolve(destinationPath);
-    return skills.find((skill) => skill.installations.some((installation) =>
-      path.resolve(installation.absolutePath) === normalizedDestination
-    )) ?? null;
   }
 
   private normalizeQuery(query: string): string {

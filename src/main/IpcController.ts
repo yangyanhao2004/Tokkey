@@ -15,6 +15,7 @@ import type {
   SkillsShPage,
   SkillsShSkill,
   InstallRepositorySkillRequest,
+  InstalledMcp,
   InstalledSkill,
   McpAgent,
   RepositorySyncResult,
@@ -42,6 +43,7 @@ import LocalMcpConfigurationApplier, {
   type McpConfigurationApplying
 } from './mcp/McpConfigurationApplier';
 import AgentManager, { type AgentState } from './agents/AgentManager';
+import InstalledAgentGate from './agents/InstalledAgentGate';
 import LocalModelManager from './models/LocalModelManager';
 import CloudModelConnector from './models/CloudModelConnector';
 import HostSnapshotService from './host/HostSnapshotService';
@@ -84,7 +86,12 @@ export default class IpcController {
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
   constructor(options: IpcControllerOptions = {}) {
-    const skillCatalogScanner = options.skillCatalogScanner ?? new LocalSkillCatalogScanner();
+    this.agentManager = options.agentManager ?? new AgentManager();
+    // One gate for both catalogs, so a departed agent disappears from each the
+    // same way and the Agent Hub's greyed chips agree with what was scanned.
+    const agentGate = new InstalledAgentGate({ agentManager: this.agentManager });
+    const skillCatalogScanner =
+      options.skillCatalogScanner ?? new LocalSkillCatalogScanner({ agentGate });
     const skillDeployer =
       options.skillDeployer ?? new SkillDeployer({ scanner: skillCatalogScanner });
     this.skillCatalogScanner = skillCatalogScanner;
@@ -97,12 +104,11 @@ export default class IpcController {
     this.skillUploadService = options.skillUploadService ?? new SkillUploadService({
       installedCatalog: skillCatalogScanner
     });
-    this.mcpCatalogScanner = options.mcpCatalogScanner ?? new LocalMcpCatalogScanner();
+    this.mcpCatalogScanner = options.mcpCatalogScanner ?? new LocalMcpCatalogScanner({ agentGate });
     this.mcpConfigurationApplier =
       options.mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
     this.localModelManager = options.localModelManager ?? new LocalModelManager();
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
-    this.agentManager = options.agentManager ?? new AgentManager();
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
@@ -112,6 +118,11 @@ export default class IpcController {
       'mcps:list-installed': () => this.scanInstalledMcps(),
       'mcps:apply-configuration': (request: unknown) =>
         this.applyMcpConfiguration(this.requireMcpApplyRequest(request)),
+      'mcps:apply-agent-selection': (mcpId: unknown, selectedAgents: unknown) =>
+        this.applyMcpAgentSelection(
+          this.requireString(mcpId, 'MCP ID'),
+          this.requireMcpAgents(selectedAgents)
+        ),
       'skills:list-installed': () => this.getInstalledSkills(),
       'skills:get-agent-selection': (skillId: unknown) =>
         this.getSkillAgentSelection(this.requireSkillId(skillId)),
@@ -136,9 +147,16 @@ export default class IpcController {
         this.fetchSkillsPage(this.requirePage(page)),
       'discover-skills:search': (query: unknown) =>
         this.searchSkills(this.requireString(query, 'skills.sh search query')),
+      'discover-skills:search-page': (query: unknown, page: unknown) =>
+        this.searchSkillsPage(
+          this.requireString(query, 'skills.sh search query'),
+          this.requirePage(page)
+        ),
       'discover-skills:refresh-installed': () => this.refreshSkillsInstalledStatus(),
       'discover-skills:card-state': (listing: unknown) =>
         this.getSkillCardState(this.requireSkillsShSkill(listing)),
+      'discover-skills:card-states': (listings: unknown) =>
+        this.getSkillCardStates(this.requireSkillsShSkills(listings)),
       'discover-skills:install': (request: unknown) =>
         this.installSkill(this.requireSkillsShInstallRequest(request)),
       'models:list': (request: unknown) => this.listLocalModels(this.requireModelRequest(request)),
@@ -248,6 +266,32 @@ export default class IpcController {
   async applyMcpConfiguration(request: ApplyMcpConfigurationRequest): Promise<McpCatalogScan> {
     await this.mcpConfigurationApplier.apply(request.configurationJson, request.selectedAgents);
     return this.scanInstalledMcps();
+  }
+
+  /**
+   * Writes one installed MCP into exactly `selectedAgents`, removing it from
+   * the agents left out — an empty selection removes it everywhere. The
+   * difference is taken here against a fresh scan rather than trusted from the
+   * renderer, so a file edited outside the app is still what the save is
+   * measured against.
+   */
+  async applyMcpAgentSelection(
+    mcpId: string,
+    selectedAgents: McpAgent[]
+  ): Promise<McpCatalogScan> {
+    const mcp = await this.findMcp(mcpId);
+    const addAgents = selectedAgents.filter((agent) => !mcp.agents.includes(agent));
+    const removeAgents = mcp.agents.filter((agent) => !selectedAgents.includes(agent));
+    await this.mcpConfigurationApplier.applySelection(mcp.definition, addAgents, removeAgents);
+    return this.scanInstalledMcps();
+  }
+
+  private async findMcp(mcpId: string): Promise<InstalledMcp> {
+    const mcp = (await this.scanInstalledMcps()).servers.find((candidate) => candidate.id === mcpId);
+    if (!mcp) {
+      throw new Error(`MCP not found: ${mcpId}`);
+    }
+    return mcp;
   }
 
   /** Lists cached or freshly fetched local model rows and their target capability. */
@@ -366,14 +410,24 @@ export default class IpcController {
     return this.discoverSkills.searchSkills(query);
   }
 
-  /** Rebuilds installed comparison indexes for both directory tabs. */
+  /** Slices one UI-sized page out of a search the service already holds. */
+  searchSkillsPage(query: string, page: number): Promise<SkillsShPage> {
+    return this.discoverSkills.fetchSearchPage(query, page);
+  }
+
+  /** Rebuilds installed comparison indexes for both discover tabs. */
   refreshSkillsInstalledStatus(): Promise<void> {
     return this.discoverSkills.refreshInstalledStatus();
   }
 
-  /** Returns the session-aware installed state for one directory listing. */
+  /** Returns the session-aware installed state for one skills.sh listing. */
   getSkillCardState(listing: SkillsShSkill): Promise<SkillsShCardState> {
     return this.discoverSkills.getSkillCardState(listing);
+  }
+
+  /** Returns the installed state for a whole page of listings in one pass. */
+  getSkillCardStates(listings: SkillsShSkill[]): Promise<SkillsShCardState[]> {
+    return this.discoverSkills.getSkillCardStates(listings);
   }
 
   /** Resolves, imports, and deploys one skills.sh listing. */
@@ -524,6 +578,13 @@ export default class IpcController {
       sourceKind,
       url: this.requireString(listing.url, 'skills.sh listing URL')
     };
+  }
+
+  private requireSkillsShSkills(value: unknown): SkillsShSkill[] {
+    if (!Array.isArray(value)) {
+      throw new TypeError('skills.sh listings must be an array');
+    }
+    return value.map((listing) => this.requireSkillsShSkill(listing));
   }
 
   private requireSkillsShInstallRequest(value: unknown): SkillsShInstallRequest {

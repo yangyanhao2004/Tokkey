@@ -21,7 +21,7 @@ export interface AgentInstallation {
 }
 
 /** Supported local configuration sources for installed MCP servers. */
-export type McpAgent = 'claudeCode' | 'hermes' | 'codex';
+export type McpAgent = 'claudeCode' | 'codex';
 
 /** Transport names used by the normalized MCP catalog. */
 export type McpConnectionType = 'stdio' | 'sse' | 'streamable_http';
@@ -164,6 +164,7 @@ export interface TokiieApi {
   scanInstalledMcps(): Promise<McpCatalogScan>;
   prepareMcpConfiguration(draft: McpConfigurationDraft): McpConfigurationPreparation;
   applyMcpConfiguration(request: ApplyMcpConfigurationRequest): Promise<McpCatalogScan>;
+  applyMcpAgentSelection(mcpId: string, selectedAgents: McpAgent[]): Promise<McpCatalogScan>;
   getInstalledSkills(): Promise<InstalledSkill[]>;
   getSkillAgentSelection(skillId: string): Promise<SkillAgentSelection>;
   applySkillAgentSelection(skillId: string, selectedAgents: SkillAgent[]): Promise<InstalledSkill[]>;
@@ -178,8 +179,10 @@ export interface TokiieApi {
   installRepositorySkill(request: InstallRepositorySkillRequest): Promise<SkillInstallResult>;
   fetchSkillsPage(page: number): Promise<SkillsShPage>;
   searchSkills(query: string): Promise<SkillsShSkill[]>;
+  searchSkillsPage(query: string, page: number): Promise<SkillsShPage>;
   refreshSkillsInstalledStatus(): Promise<void>;
   getSkillCardState(listing: SkillsShSkill): Promise<SkillsShCardState>;
+  getSkillCardStates(listings: SkillsShSkill[]): Promise<SkillsShCardState[]>;
   installSkill(request: SkillsShInstallRequest): Promise<SkillsShInstallResult>;
   listLocalModels(request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
   refreshLocalModels(request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
@@ -495,6 +498,14 @@ export interface SkillsShSkill {
   sourceKind: SkillsShSourceKind;
   url: string;
 }
+
+/**
+ * How many listings one browse or search page holds. skills.sh answers browse
+ * requests 200 at a time; the pane draws 20, so the main process slices ten UI
+ * pages out of every response it fetches. Shared so the renderer can say which
+ * range of a listing of thousands it is showing.
+ */
+export const SKILLS_SH_PAGE_SIZE = 20;
 
 /** One API-sized browse response from skills.sh. */
 export interface SkillsShPage {

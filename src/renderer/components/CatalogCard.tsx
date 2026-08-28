@@ -5,29 +5,30 @@ import {
   describeCompatibility,
   findAgent,
   resolveCompatibilityState,
-  type AgentAvailability,
   type CatalogEntry,
   type CompatibilityChip,
   type CompatibilityState
 } from '../pages/agentHubContent';
+import { useAgentAvailability } from './AgentDetectionProvider';
 import { AGENT_ARTWORK } from './AgentMark';
 import { PushButton } from './PushButton';
 
 /**
  * Only the enabled chip is drawn in the design (Figma 1051:3869 and 1051:3881),
- * which rings it in pale green. The other two states carry the same avatar and
- * say the rest with the ring: a hairline where the agent could run the entry,
- * and a drained mark where the agent is not installed at all.
+ * which rings it in pale green. The rest carry the same avatar and say it with
+ * the ring: a hairline where the agent could run the entry, a faded mark where
+ * the agent cannot run this kind of entry, and a drained one where the agent is
+ * not installed at all.
  */
 const CHIP_STATE_CLASSES: Record<CompatibilityState, string> = {
   enabled: 'ring-1 ring-chip-enabled-ring',
   available: 'ring-1 ring-black/8',
+  unsupported: 'opacity-40 ring-1 ring-black/8',
   unavailable: 'opacity-40 grayscale'
 };
 
 interface CompatibilityChipProps {
   chip: CompatibilityChip;
-  availability: AgentAvailability;
 }
 
 /**
@@ -35,7 +36,8 @@ interface CompatibilityChipProps {
  * An enabled entry adds the green check that overhangs the mark's bottom-right
  * corner, so neither this box nor the row it sits in may clip.
  */
-function CompatibilityChipMark({ chip, availability }: CompatibilityChipProps) {
+function CompatibilityChipMark({ chip }: CompatibilityChipProps) {
+  const availability = useAgentAvailability();
   const agent = findAgent(chip.agentId);
   if (!agent) {
     return null;
@@ -76,8 +78,11 @@ function CompatibilityChipMark({ chip, availability }: CompatibilityChipProps) {
 
 export interface CatalogCardProps {
   entry: CatalogEntry;
-  availability: AgentAvailability;
-  /** What the card's one button says; the Discover pane's cards say "+ Add". */
+  /**
+   * What the card's one button says; the Discover pane's cards say "+ Add".
+   * The entry's own label wins, since a grid whose cards differ says so per
+   * card rather than for all of them at once.
+   */
   actionLabel?: string;
   /** Omitted for entries with nothing to act on yet, which disables the button. */
   onAction?: () => void;
@@ -88,12 +93,7 @@ export interface CatalogCardProps {
  * The card is at least as tall as the design's fixed 148px but grows rather
  * than clipping, since a longer description would otherwise spill out.
  */
-export function CatalogCard({
-  entry,
-  availability,
-  actionLabel = MANAGE_LABEL,
-  onAction
-}: CatalogCardProps) {
+export function CatalogCard({ entry, actionLabel = MANAGE_LABEL, onAction }: CatalogCardProps) {
   return (
     <article
       className="flex min-h-[148px] flex-col justify-between gap-4 rounded-[12px] border border-vibrant-tertiary p-4"
@@ -111,10 +111,13 @@ export function CatalogCard({
           )}
         </div>
         {/* Skill descriptions are written for agents and run long; clamping them
-            keeps every card the height the design draws. */}
-        <p className="line-clamp-3 w-full text-[10px] leading-[12px] text-text-secondary" title={entry.description}>
-          {entry.description}
-        </p>
+            keeps every card the height the design draws. An entry without one
+            draws no line at all rather than an empty row. */}
+        {entry.description && (
+          <p className="line-clamp-3 w-full text-[10px] leading-[12px] text-text-secondary" title={entry.description}>
+            {entry.description}
+          </p>
+        )}
       </div>
 
       <div className="flex w-full flex-col gap-2">
@@ -127,7 +130,7 @@ export function CatalogCard({
               so a tighter gap would sit it on top of the next one. */}
           <div className="flex items-center gap-2">
             {entry.compatibility.map((chip) => (
-              <CompatibilityChipMark key={chip.agentId} chip={chip} availability={availability} />
+              <CompatibilityChipMark key={chip.agentId} chip={chip} />
             ))}
           </div>
 
@@ -137,7 +140,7 @@ export function CatalogCard({
             disabled={onAction === undefined}
             testId={`catalog-action-${entry.id}`}
           >
-            {actionLabel}
+            {entry.actionLabel ?? actionLabel}
           </PushButton>
         </div>
       </div>

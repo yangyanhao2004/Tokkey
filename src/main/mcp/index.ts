@@ -3,8 +3,6 @@ export {
   ClaudeCodeMCPAdapter,
   CodexMcpAdapter,
   CodexMCPAdapter,
-  HermesMcpAdapter,
-  HermesMCPAdapter,
   CanonicalMcpCodec,
   LocalMcpCatalogScanner,
   LocalMCPCatalogScanner,
@@ -16,7 +14,6 @@ export type { DiscoveredMcp, McpAgentConfigAdapter, McpFileReader } from './McpC
 export {
   ClaudeCodeMcpConfigurationAdapter,
   CodexMcpConfigurationAdapter,
-  HermesMcpConfigurationAdapter,
   McpAgentConfigurationAdapterRegistry
 } from './McpAgentConfigurationAdapters';
 export type { McpAgentConfigurationAdapter } from './McpAgentConfigurationAdapters';

@@ -24,6 +24,11 @@ export interface DiscoverTabLayoutProps {
   notice?: CatalogNotice | null;
   /** The grid, plus whatever the tab draws in place of it. */
   children: ReactNode;
+  /**
+   * Held under the scroll area, e.g. the skills.sh tab's pagination, so paging
+   * stays reachable without scrolling past every card first.
+   */
+  footer?: ReactNode;
 }
 
 /**
@@ -46,7 +51,8 @@ export function DiscoverTabLayout({
   searchLabel,
   actions,
   notice = null,
-  children
+  children,
+  footer = null
 }: DiscoverTabLayoutProps) {
   return (
     <>
@@ -86,6 +92,8 @@ export function DiscoverTabLayout({
       {/* `min-h-0` keeps a listing of any length inside the page rather than
           pushing the window's content out of view. */}
       <div className="min-h-0 w-full flex-1 overflow-y-auto">{children}</div>
+
+      {footer}
     </>
   );
 }

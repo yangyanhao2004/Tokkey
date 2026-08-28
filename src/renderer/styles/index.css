@@ -122,7 +122,8 @@
      sitting on a page, so it carries its own opaque hairlines and surfaces. */
   --color-dialog-border: #dededb;
   --color-dialog-divider: #e6e6e3;
-  --color-dialog-eyebrow: #6f6f6b;
+  /* Small-caps or muted label above a name, in dialogs and on the Router page. */
+  --color-label-eyebrow: #6f6f6b;
   /* An agent the skill is not deployed to, and the same card once selected. */
   --color-toggle-bg: #fafaf9;
   --color-toggle-border: #e3e3e0;
@@ -137,6 +138,19 @@
      dialog's own white. */
   --color-field-bg: #f1f1ef;
   --color-field-placeholder: #94948f;
+
+  /* Router page (Figma 194:3906). */
+  /* Recessed row inside the Local/Cloud model summary cards, and the fill a
+     cloud model card takes once it is the selected one. */
+  --color-vibrant-quaternary: #f7f7f7;
+  /* The opaque 28px tile fronting a model row. Opaque rather than the
+     translucent `fill-tile` because it sits on both white and #f7f7f7. */
+  --color-fill-tile-opaque: #e9e9e6;
+  /* The 10px bold name inside a model row; darker than the page heading ink. */
+  --color-label-strong: #171716;
+  /* Near-black shared by the chosen card's outline and the switch's on track. */
+  --color-selected-ink: #1d1d1b;
+  --color-switch-track-off: rgba(120, 120, 128, 0.16);
 
   /* SF Pro is the system UI face on macOS; no web font is bundled or fetched. */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",

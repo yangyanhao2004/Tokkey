@@ -252,19 +252,13 @@ function CatalogCard() {
   );
 }
 
-interface AddModelPageProps {
-  /** Returns to the Tokiie page; also drives the header's back button. */
-  onBack: () => void;
-}
-
 /** The panel behind the Tokiie page's "Add model" button. */
-export function AddModelPage({ onBack }: AddModelPageProps) {
+export function AddModelPage() {
   return (
     <PageShell
       title="Add Model"
       subtitle="Download a compatible local model for this Mac."
       testId="add-model"
-      onBack={onBack}
     >
       <HostMachineCard />
       <CatalogCard />

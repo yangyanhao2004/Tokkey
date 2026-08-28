@@ -17,6 +17,8 @@ class PreloadBridge {
       scanInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),
       prepareMcpConfiguration: (draft) => ipcRenderer.sendSync('mcps:prepare-configuration', draft),
       applyMcpConfiguration: (request) => ipcRenderer.invoke('mcps:apply-configuration', request),
+      applyMcpAgentSelection: (mcpId, selectedAgents) =>
+        ipcRenderer.invoke('mcps:apply-agent-selection', mcpId, selectedAgents),
       getInstalledSkills: () => ipcRenderer.invoke('skills:list-installed'),
       getSkillAgentSelection: (skillId) => ipcRenderer.invoke('skills:get-agent-selection', skillId),
       applySkillAgentSelection: (skillId, selectedAgents) =>
@@ -30,8 +32,10 @@ class PreloadBridge {
       installRepositorySkill: (request) => ipcRenderer.invoke('discover-repos:install-skill', request),
       fetchSkillsPage: (page) => ipcRenderer.invoke('discover-skills:fetch-page', page),
       searchSkills: (query) => ipcRenderer.invoke('discover-skills:search', query),
+      searchSkillsPage: (query, page) => ipcRenderer.invoke('discover-skills:search-page', query, page),
       refreshSkillsInstalledStatus: () => ipcRenderer.invoke('discover-skills:refresh-installed'),
       getSkillCardState: (listing) => ipcRenderer.invoke('discover-skills:card-state', listing),
+      getSkillCardStates: (listings) => ipcRenderer.invoke('discover-skills:card-states', listings),
       installSkill: (request) => ipcRenderer.invoke('discover-skills:install', request),
       listLocalModels: (request) => ipcRenderer.invoke('models:list', request),
       refreshLocalModels: (request) => ipcRenderer.invoke('models:refresh', request),

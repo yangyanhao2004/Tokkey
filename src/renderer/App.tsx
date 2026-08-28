@@ -1,35 +1,59 @@
-import { useState, type ComponentType } from 'react';
-import { DEFAULT_NAV_ITEM_ID, type NavItemId } from './navigation';
+import type { ComponentType } from 'react';
+import { type NavItemId } from './navigation';
+import { navItemIdForRoute, type RouteId } from './routing';
+import { AgentDetectionProvider } from './components/AgentDetectionProvider';
+import { NavigationProvider, useNavigation } from './components/NavigationProvider';
 import { Sidebar } from './components/Sidebar';
+import { AddModelPage } from './pages/AddModelPage';
 import { AgentHubPage } from './pages/AgentHubPage';
+import { DiscoverSkillsPage } from './pages/DiscoverSkillsPage';
 import { RouterPage } from './pages/RouterPage';
 import { TokiiePage } from './pages/TokiiePage';
 import { ChatPage } from './pages/ChatPage';
 import { UnbuiltPage } from './pages/UnbuiltPage';
 
 /**
- * Pages that exist today. A row missing from here still navigates, it just
+ * Pages that exist today. A nav row missing from here still navigates, it just
  * lands on the generic placeholder below, so rows and pages can land apart.
  */
-const PAGE_BY_NAV_ID: Partial<Record<NavItemId, ComponentType>> = {
+const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
   tokiie: TokiiePage,
   router: RouterPage,
   'agent-hub': AgentHubPage,
-  chat: ChatPage
+  chat: ChatPage,
+  'add-model': AddModelPage,
+  'discover-skills': DiscoverSkillsPage
 };
 
 /**
- * Application shell. Holds the one piece of state the whole window shares —
- * which nav row is selected — and renders that row's page beside the sidebar.
+ * Sidebar plus whichever page the current route names. Selecting a row is a
+ * navigation like any other, so it lands in the history the header walks.
  */
-export function App() {
-  const [activeNavItemId, setActiveNavItemId] = useState<NavItemId>(DEFAULT_NAV_ITEM_ID);
-  const ActivePage = PAGE_BY_NAV_ID[activeNavItemId];
+function AppFrame() {
+  const { route, navigate } = useNavigation();
+  const ActivePage = PAGE_BY_ROUTE[route];
 
   return (
     <>
-      <Sidebar activeItemId={activeNavItemId} onSelect={setActiveNavItemId} />
-      {ActivePage ? <ActivePage /> : <UnbuiltPage navItemId={activeNavItemId} />}
+      <Sidebar
+        activeItemId={navItemIdForRoute(route)}
+        onSelect={(id: NavItemId) => navigate(id)}
+      />
+      {ActivePage ? <ActivePage /> : <UnbuiltPage navItemId={navItemIdForRoute(route)} />}
     </>
+  );
+}
+
+/**
+ * Application shell: one history and one agent detection, shared by every page
+ * inside them.
+ */
+export function App() {
+  return (
+    <NavigationProvider>
+      <AgentDetectionProvider>
+        <AppFrame />
+      </AgentDetectionProvider>
+    </NavigationProvider>
   );
 }
