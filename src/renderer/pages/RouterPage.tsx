@@ -57,10 +57,13 @@ function ModelRow({ tile, name, detail }: ModelRowProps) {
   );
 }
 
-/** The card carrying the whole feature's on/off switch. */
-function RouterToggleCard() {
-  const [isRouterOn, setIsRouterOn] = useState(true);
+interface RouterToggleCardProps {
+  isRouterOn: boolean;
+  onChange: (isRouterOn: boolean) => void;
+}
 
+/** The card carrying the whole feature's on/off switch. */
+function RouterToggleCard({ isRouterOn, onChange }: RouterToggleCardProps) {
   return (
     <section
       className="flex w-full shrink-0 items-center justify-between gap-4 overflow-hidden rounded-[12px] border border-surface-card-border bg-surface-card p-4"
@@ -78,7 +81,7 @@ function RouterToggleCard() {
 
       <Switch
         checked={isRouterOn}
-        onChange={setIsRouterOn}
+        onChange={onChange}
         label={ROUTER_TOGGLE_TITLE}
         testId="router-toggle"
       />
@@ -171,15 +174,23 @@ function CloudModelCard({ model, isSelected, onSelect }: CloudModelCardProps) {
 interface CloudModelsCardProps {
   selectedModelId: string;
   onSelect: (modelId: string) => void;
+  /** Router off means nothing is routed to a cloud model, so the card greys out. */
+  isEnabled: boolean;
 }
 
 /** "Cloud Models" card: heading plus the two-column grid of choices. */
-function CloudModelsCard({ selectedModelId, onSelect }: CloudModelsCardProps) {
+function CloudModelsCard({ selectedModelId, onSelect, isEnabled }: CloudModelsCardProps) {
   return (
     <section
       // `min-h-0` with the scrolling grid below keeps any number of models
       // inside the page instead of pushing the card past its bottom edge.
-      className="flex min-h-0 w-full flex-col gap-3 overflow-hidden rounded-[12px] border border-surface-card-border bg-surface-card py-4"
+      className={`flex min-h-0 w-full flex-col gap-3 overflow-hidden rounded-[12px] border border-surface-card-border bg-surface-card py-4 ${
+        isEnabled ? '' : 'opacity-40'
+      }`}
+      // `inert` takes the whole card out of pointer and keyboard reach, so the
+      // dimmed rows cannot be selected while Router is off. Dimming the card
+      // once here also keeps the buttons from fading twice.
+      inert={!isEnabled}
       data-testid="cloud-models-card"
     >
       <div className="shrink-0 px-4">
@@ -205,6 +216,7 @@ function CloudModelsCard({ selectedModelId, onSelect }: CloudModelsCardProps) {
  * routes between, and the cloud model it falls back to for complex tasks.
  */
 export function RouterPage() {
+  const [isRouterOn, setIsRouterOn] = useState(true);
   const [selectedModelId, setSelectedModelId] = useState(DEFAULT_CLOUD_MODEL_ID);
   const selectedModel = CLOUD_MODELS.find((model) => model.id === selectedModelId);
 
@@ -214,9 +226,15 @@ export function RouterPage() {
       subtitle="Simple tasks run on your Tokii. Hard ones go to a cloud model."
       testId="router"
     >
-      <RouterToggleCard />
+      <RouterToggleCard isRouterOn={isRouterOn} onChange={setIsRouterOn} />
 
-      <div className="flex w-full shrink-0 items-start justify-center gap-3">
+      {/* The pair only reports what Router routes between, so it fades with it.
+          The cards hold nothing focusable, so dimming alone is enough here. */}
+      <div
+        className={`flex w-full shrink-0 items-start justify-center gap-3 ${
+          isRouterOn ? '' : 'opacity-40'
+        }`}
+      >
         <ModelSummaryCard
           summary={LOCAL_MODEL_SUMMARY}
           name={NO_LOCAL_MODEL_NAME}
@@ -231,7 +249,11 @@ export function RouterPage() {
         />
       </div>
 
-      <CloudModelsCard selectedModelId={selectedModelId} onSelect={setSelectedModelId} />
+      <CloudModelsCard
+        selectedModelId={selectedModelId}
+        onSelect={setSelectedModelId}
+        isEnabled={isRouterOn}
+      />
     </PageShell>
   );
 }
