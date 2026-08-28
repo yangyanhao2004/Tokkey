@@ -112,6 +112,12 @@
   --color-toggle-check-off: rgba(120, 120, 128, 0.14);
   --color-toggle-check-on: #1d1d1b;
 
+  /* Add Repository dialog (Figma 225:1711). Its fields are filled rather than
+     outlined, unlike the search box, so they read as boxes to type into on the
+     dialog's own white. */
+  --color-field-bg: #f1f1ef;
+  --color-field-placeholder: #94948f;
+
   /* SF Pro is the system UI face on macOS; no web font is bundled or fetched. */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "Helvetica Neue", sans-serif;

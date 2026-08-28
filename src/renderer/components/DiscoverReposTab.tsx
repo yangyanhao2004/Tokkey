@@ -10,14 +10,17 @@ import {
   REPO_SCAN_LOADING_TEXT,
   REPO_SEARCH_LABEL,
   describeEmptyDiscoverCatalog,
+  describeRepositoryAddOutcome,
   describeRepositoryScanFailure,
   describeRepositorySkillAction,
   describeRepositorySkillInstallFailure,
   describeRepositorySkillInstallOutcome,
+  toRepositoryAddFailureNotice,
   toRepositorySkillEntries,
   type DiscoverTab
 } from '../pages/discoverSkillsContent';
 import { useCachedRepositories } from '../hooks/useCachedRepositories';
+import { AddRepositoryDialog } from './AddRepositoryDialog';
 import { CatalogGrid, CatalogMessage } from './CatalogTabLayout';
 import { DiscoverTabLayout } from './DiscoverTabLayout';
 import { ManageSkillDialog } from './ManageSkillDialog';
@@ -39,15 +42,17 @@ export interface DiscoverReposTabProps {
  * here is the same skill there. "Manage" opens the Agent Hub's own dialog: for
  * a card nothing has installed yet, saving a selection is what installs it.
  *
- * Adding a repository is not wired yet, which is what leaves "Add Repo"
- * disabled. The tab is unmounted when the user switches away, which is also
- * what clears an install notice: it belongs to the tab that raised it.
+ * "Add Repo" downloads another repository into the cache, which is why its
+ * cards arrive by re-reading the cache rather than by being added to a list.
+ * The tab is unmounted when the user switches away, which is also what clears a
+ * notice: it belongs to the tab that raised it.
  */
 export function DiscoverReposTab({ availability, onTabChange }: DiscoverReposTabProps) {
   const [query, setQuery] = useState('');
   const [managedSkillId, setManagedSkillId] = useState<string | null>(null);
+  const [isAddingRepository, setIsAddingRepository] = useState(false);
   const [notice, setNotice] = useState<CatalogNotice | null>(null);
-  const { repositories, isLoading, error, installSkill } = useCachedRepositories();
+  const { repositories, isLoading, error, installSkill, addRepository } = useCachedRepositories();
 
   // Mapping a whole scan is wasted work on every keystroke of the search box.
   const skills = useMemo(
@@ -87,6 +92,26 @@ export function DiscoverReposTab({ availability, onTabChange }: DiscoverReposTab
     [installSkill, managedSkill]
   );
 
+  /**
+   * Downloads a repository, then reports what Git did. The rejection is
+   * rethrown so the dialog holds itself open on the reason, the same way the
+   * Manage dialog does with a failed install.
+   */
+  const downloadRepository = useCallback(
+    async (input: string, branch: string) => {
+      setNotice(null);
+      try {
+        setNotice(describeRepositoryAddOutcome(await addRepository(input, branch)));
+      } catch (cause) {
+        setNotice(
+          toRepositoryAddFailureNotice(cause instanceof Error ? cause.message : String(cause))
+        );
+        throw cause;
+      }
+    },
+    [addRepository]
+  );
+
   return (
     <>
       <DiscoverTabLayout
@@ -97,7 +122,11 @@ export function DiscoverReposTab({ availability, onTabChange }: DiscoverReposTab
         searchLabel={REPO_SEARCH_LABEL}
         notice={notice}
         actions={
-          <PushButton variant="tinted" testId="discover-add-repo">
+          <PushButton
+            variant="tinted"
+            onClick={() => setIsAddingRepository(true)}
+            testId="discover-add-repo"
+          >
             {ADD_REPO_LABEL}
           </PushButton>
         }
@@ -120,6 +149,13 @@ export function DiscoverReposTab({ availability, onTabChange }: DiscoverReposTab
 
         <CatalogGrid entries={entries} availability={availability} onAction={setManagedSkillId} />
       </DiscoverTabLayout>
+
+      {isAddingRepository && (
+        <AddRepositoryDialog
+          onAdd={downloadRepository}
+          onClose={() => setIsAddingRepository(false)}
+        />
+      )}
 
       {managedSkill && (
         <ManageSkillDialog

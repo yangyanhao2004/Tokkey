@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   CachedRepository,
   CachedRepositorySkill,
+  RepositorySyncResult,
   SkillAgent,
   SkillInstallResult
 } from '../../shared/types';
@@ -32,6 +33,13 @@ export interface CachedRepositories {
     skill: CachedRepositorySkill,
     enabledAgents: SkillAgent[]
   ) => Promise<SkillInstallResult>;
+  /**
+   * Downloads one GitHub repository into the cache — a clone, or a fetch when
+   * it is already there — then re-reads the cache so its skills appear in the
+   * grid. An empty `branch` takes the repository's default branch. Rejects when
+   * Git or the name refuses, so the dialog that asked reports the failure.
+   */
+  addRepository: (input: string, branch: string) => Promise<RepositorySyncResult>;
 }
 
 /**
@@ -94,5 +102,16 @@ export function useCachedRepositories(): CachedRepositories {
     [refresh]
   );
 
-  return { repositories, isLoading, error, refresh, installSkill };
+  const addRepository = useCallback(
+    async (input: string, branch: string) => {
+      const result = await window.tokiie.addRepository(input, branch);
+      // The download answers with one repository; the grid draws them all, so
+      // the cache is re-read rather than having this one spliced into it.
+      refresh();
+      return result;
+    },
+    [refresh]
+  );
+
+  return { repositories, isLoading, error, refresh, installSkill, addRepository };
 }

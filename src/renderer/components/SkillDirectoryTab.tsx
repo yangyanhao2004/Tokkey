@@ -16,7 +16,7 @@ export interface SkillDirectoryTabProps {
 }
 
 /**
- * The "Skill Directory" tab (Figma 225:868): the skills.sh listing. It carries
+ * The "skills.sh" tab (Figma 225:868): the skills.sh listing. It carries
  * no action of its own beside the search box — a listing is browsed rather than
  * added to, so the only thing to press is a card's own "+ Add".
  *

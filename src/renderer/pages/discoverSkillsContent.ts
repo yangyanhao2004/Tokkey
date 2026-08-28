@@ -1,15 +1,20 @@
 /**
  * Content model for the Discover Skills pane, taken from the Figma nodes "Main"
- * (198:9865) for the Repos tab and "Section" (225:868) for the Skill Directory
+ * (198:9865) for the Repos tab and "Section" (225:868) for the skills.sh
  * tab. Kept apart from the components so copy and catalog entries can change
  * without touching markup.
  *
  * The Repos tab reads `listCachedRepositories`, so its cards are whatever sits
- * in `~/.amis/cache/skill-repos`. The Skill Directory catalog below is still
+ * in `~/.amis/cache/skill-repos`. The skills.sh catalog below is still
  * fixed content: `fetchSkillsPage` exists but nothing reads it yet.
  */
 
-import type { CachedRepository, CachedRepositorySkill, SkillInstallResult } from '../../shared/types';
+import type {
+  CachedRepository,
+  CachedRepositorySkill,
+  RepositorySyncResult,
+  SkillInstallResult
+} from '../../shared/types';
 import {
   MISSING_SUMMARY_TEXT,
   SAVE_LABEL,
@@ -38,16 +43,16 @@ export interface DiscoverTabOption {
 
 export const DISCOVER_TABS: readonly DiscoverTabOption[] = [
   { value: 'repos', label: 'Repos' },
-  { value: 'skillDirectory', label: 'Skill Directory' }
+  { value: 'skillDirectory', label: 'skills.sh' }
 ];
 
-export const TAB_GROUP_LABEL = 'Browse repositories or the skill directory';
+export const TAB_GROUP_LABEL = 'Browse repositories or skills.sh';
 export const SEARCH_PLACEHOLDER = 'Search';
 export const REPO_SEARCH_LABEL = 'Search repositories';
-export const DIRECTORY_SEARCH_LABEL = 'Search the skill directory';
+export const DIRECTORY_SEARCH_LABEL = 'Search skills.sh';
 export const ADD_REPO_LABEL = 'Add Repo';
 
-/** The action on a Skill Directory card, which installs rather than manages. */
+/** The action on a skills.sh card, which installs rather than manages. */
 export const ADD_SKILL_LABEL = '+ Add';
 
 /** What the Manage dialog's confirming button says for a skill not installed yet. */
@@ -56,9 +61,50 @@ export const INSTALL_LABEL = 'Install';
 /** Held while the first read of the repository cache is still running. */
 export const REPO_SCAN_LOADING_TEXT = 'Reading downloaded repositories…';
 
+/**
+ * The Add Repository dialog (Figma 225:1711). The design draws an "Enable for"
+ * agent row under the two fields, which this dialog leaves out: adding a
+ * repository downloads it into the cache, and choosing which agents load a skill
+ * is the Manage dialog's question, asked per skill rather than per repository.
+ */
+export const ADD_REPO_DIALOG_TITLE = 'Add SKILL repository';
+export const REPO_URL_FIELD_LABEL = 'Repository URL';
+export const REPO_URL_PLACEHOLDER = 'owner/name or https://github.com/owner/name';
+export const BRANCH_FIELD_LABEL = 'Branch';
+/** The branch left empty clones the repository's default, so this is a hint. */
+export const BRANCH_PLACEHOLDER = 'main';
+export const ADD_REPO_CONFIRM_LABEL = 'Add Repository';
+
+/** Held on the confirming button while Git is still cloning or fetching. */
+export const ADD_REPO_BUSY_LABEL = 'Downloading…';
+
 /** Says why the grid is empty when the cache could not be read at all. */
 export function describeRepositoryScanFailure(error: string): string {
   return `Could not read downloaded repositories: ${error}`;
+}
+
+/**
+ * What the tab says after a download settles. The main process already words
+ * the outcome — it is the only side that knows whether the checkout was cloned
+ * or refreshed and how many skills that added — so this only gives it a tone.
+ */
+export function describeRepositoryAddOutcome(result: RepositorySyncResult): CatalogNotice {
+  return { tone: 'neutral', message: result.notice };
+}
+
+/**
+ * Reports why nothing was downloaded, e.g. a name GitHub has no repository for,
+ * a branch that does not exist, or a machine that is offline. The dialog shows
+ * this line while it holds itself open, and the tab repeats it once the dialog
+ * is gone, so both say the same sentence.
+ */
+export function describeRepositoryAddFailure(error: string): string {
+  return `Could not add that repository: ${error}`;
+}
+
+/** The same failure as the line the tab holds above its grid. */
+export function toRepositoryAddFailureNotice(error: string): CatalogNotice {
+  return { tone: 'error', message: describeRepositoryAddFailure(error) };
 }
 
 /**

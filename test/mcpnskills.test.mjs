@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { CachedRepositoryCatalog } from '../dist/main/mcpnskills/CachedRepositoryCatalog.js';
+import { DiscoverRepositories } from '../dist/main/mcpnskills/DiscoverRepositories.js';
 import { GitHubRepositoryCoordinate } from '../dist/main/mcpnskills/GitHubRepositoryCoordinate.js';
 import { RepositoryCloneCache } from '../dist/main/mcpnskills/RepositoryCloneCache.js';
 import { SkillInstaller } from '../dist/main/mcpnskills/SkillInstaller.js';
@@ -427,6 +428,73 @@ test('rejects an install request whose path is not a card in the cache', async (
       }),
       /was not found/
     );
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+/** Emulates a clone that lands one skill folder inside the fresh checkout. */
+class SeedingGitRunner extends RecordingGitRunner {
+  async run(args, options = {}) {
+    const result = await super.run(args, options);
+    if (args[0] === 'clone') {
+      const checkoutPath = args.at(-1);
+      mkdirSync(path.join(checkoutPath, 'skills', 'linting'), { recursive: true });
+      writeFileSync(
+        path.join(checkoutPath, 'skills', 'linting', 'SKILL.md'),
+        '---\nname: linting\ndescription: keeps the tree tidy\n---\n'
+      );
+    }
+    return result;
+  }
+}
+
+test('downloads a repository into the cache and reports the skills it added', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    const runner = new SeedingGitRunner();
+    const cache = new RepositoryCloneCache({ cacheRoot: workspace.resolve('cache'), runner });
+    const installedCatalog = new LocalSkillCatalogScanner({ homeDirectory: workspace.resolve('home') });
+    const catalog = new CachedRepositoryCatalog({ cache, installedCatalog });
+    const repositories = new DiscoverRepositories({
+      cache,
+      catalog,
+      installer: new SkillInstaller({
+        catalog,
+        installedCatalog,
+        importer: new SkillFolderImporter({ filesystem: installedCatalog.getFilesystem() }),
+        deployer: new SkillDeployer({ homeDirectory: workspace.resolve('home') })
+      })
+    });
+
+    // The dialog hands over whatever was pasted, so a full URL must reach the
+    // same checkout an owner/name would.
+    const result = await repositories.addRepository('https://github.com/acme/bundle', 'release');
+    assert.equal(result.wasRefreshed, false);
+    assert.equal(result.newSkillCount, 1);
+    assert.deepEqual(result.repository.skills.map((skill) => skill.name), ['linting']);
+    assert.match(result.notice, /^acme\/bundle downloaded/);
+    assert.deepEqual(runner.calls[0].args, [
+      'clone',
+      '--depth',
+      '1',
+      '--branch',
+      'release',
+      'https://github.com/acme/bundle.git',
+      workspace.resolve('cache/acme/bundle')
+    ]);
+
+    // The tab redraws by re-reading the cache, so the download has to be there.
+    const cached = await repositories.listCached();
+    assert.deepEqual(cached.map((repository) => repository.coordinate.source), ['acme/bundle']);
+    assert.equal(cached[0].skills[0].isInstalled, false);
+
+    // Adding the same repository again refreshes it rather than counting its
+    // skills as new ones.
+    const refreshed = await repositories.addRepository('acme/bundle', '');
+    assert.equal(refreshed.wasRefreshed, true);
+    assert.equal(refreshed.newSkillCount, 0);
+    assert.match(refreshed.notice, /already downloaded/);
   } finally {
     workspace.cleanup();
   }
