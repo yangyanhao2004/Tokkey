@@ -56,11 +56,11 @@ export function SkillUploadConflictDialog({ folderName, onChoose }: SkillUploadC
         data-testid="skill-upload-conflict-dialog"
       >
         <div className="flex w-full items-center gap-2.5 p-4">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-fill-tile text-[16px] leading-none text-dialog-eyebrow">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-fill-tile text-[16px] leading-none text-label-eyebrow">
             ✦
           </span>
           <div className="flex min-w-0 flex-col gap-1">
-            <span className="text-[10px] leading-[12px] text-dialog-eyebrow">
+            <span className="text-[10px] leading-[12px] text-label-eyebrow">
               {UPLOAD_CONFLICT_EYEBROW}
             </span>
             <h2 className="truncate text-[14px] leading-[17px] font-bold text-text-primary">

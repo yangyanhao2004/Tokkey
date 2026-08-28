@@ -53,7 +53,7 @@ function AgentToggle({ agent, isSelected, disabled, supportLabel, onToggle }: Ag
           <span className="truncate text-[10px] leading-[12px] font-bold text-text-primary">
             {agent.name}
           </span>
-          <span className="text-[8px] leading-[10px] text-dialog-eyebrow">{supportLabel}</span>
+          <span className="text-[8px] leading-[10px] text-label-eyebrow">{supportLabel}</span>
         </span>
       </span>
 
@@ -192,11 +192,11 @@ export function ManageAgentsDialog({
         data-testid={`${testId}-dialog`}
       >
         <div className="flex w-full items-center gap-2.5 p-4">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-fill-tile text-[16px] leading-none text-dialog-eyebrow">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-[8px] bg-fill-tile text-[16px] leading-none text-label-eyebrow">
             ✦
           </span>
           <div className="flex min-w-0 flex-col gap-1">
-            <span className="text-[10px] leading-[12px] text-dialog-eyebrow">{eyebrow}</span>
+            <span className="text-[10px] leading-[12px] text-label-eyebrow">{eyebrow}</span>
             <h2 className="truncate text-[14px] leading-[17px] font-bold text-text-primary">
               {name}
             </h2>
