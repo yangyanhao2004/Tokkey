@@ -1,7 +1,6 @@
-import { useState } from 'react';
-import { readAgentAvailability } from './agentHubContent';
+import { useEffect, useState } from 'react';
 import { PAGE_SUBTITLE, PAGE_TITLE, type DiscoverTab } from './discoverSkillsContent';
-import { useAgentDetection } from '../hooks/useAgentDetection';
+import { useAgentDetectionRefresh } from '../components/AgentDetectionProvider';
 import { DiscoverReposTab } from '../components/DiscoverReposTab';
 import { PageShell } from '../components/PageShell';
 import { SkillsShTab } from '../components/SkillsShTab';
@@ -16,19 +15,25 @@ interface DiscoverSkillsPageProps {
  * skills Tokiie can install, from cloned repositories or from skills.sh.
  *
  * Only the open tab is mounted, so each one owns its own search box and its own
- * listing — and switching tabs leaves neither behind. One detection serves both,
- * so every card's chips agree on which agents this machine actually has.
+ * listing — and switching tabs leaves neither behind. Every card's chips read
+ * the shared detection, so they all agree on which agents this machine has.
  */
 export function DiscoverSkillsPage({ onBack }: DiscoverSkillsPageProps) {
   const [tab, setTab] = useState<DiscoverTab>('repos');
-  const availability = readAgentAvailability(useAgentDetection());
+  const refreshAgentDetection = useAgentDetectionRefresh();
+
+  // Opening the pane re-probes PATH: an agent can be installed from a terminal
+  // while the app is open, and the chips here are what would go stale.
+  useEffect(() => {
+    refreshAgentDetection();
+  }, [refreshAgentDetection]);
 
   return (
     <PageShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} testId="discover-skills" onBack={onBack}>
       {tab === 'repos' ? (
-        <DiscoverReposTab availability={availability} onTabChange={setTab} />
+        <DiscoverReposTab onTabChange={setTab} />
       ) : (
-        <SkillsShTab availability={availability} onTabChange={setTab} />
+        <SkillsShTab onTabChange={setTab} />
       )}
     </PageShell>
   );

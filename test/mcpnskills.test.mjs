@@ -499,3 +499,41 @@ test('downloads a repository into the cache and reports the skills it added', as
     workspace.cleanup();
   }
 });
+
+test('an uninstalled agent removes its own skill root but not the shared ones', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    workspace.write('.amis/skills/owned/SKILL.md', '---\nname: owned\ndescription: Tokiie\n---\n');
+    workspace.write('.claude/skills/claude-only/SKILL.md', '---\nname: claude-only\ndescription: Claude\n---\n');
+    workspace.write('.codex/skills/codex-only/SKILL.md', '---\nname: codex-only\ndescription: Codex\n---\n');
+    workspace.write('.agents/skills/shared/SKILL.md', '---\nname: shared\ndescription: Shared\n---\n');
+
+    const scanner = new LocalSkillCatalogScanner({
+      homeDirectory: workspace.root,
+      agentGate: { installedAgents: async () => ['claudeCode'] }
+    });
+    const skills = await scanner.scanInstalledSkills();
+
+    // ~/.codex is Codex's own root and goes with it; ~/.agents and ~/.amis are
+    // nobody's to own, so what lives there stays available to Claude Code.
+    assert.deepEqual(skills.map((skill) => skill.name).sort(), ['claude-only', 'owned', 'shared']);
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test('a failed detection walks every root rather than blanking the catalog', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    workspace.write('.codex/skills/codex-only/SKILL.md', '---\nname: codex-only\ndescription: Codex\n---\n');
+
+    const scanner = new LocalSkillCatalogScanner({
+      homeDirectory: workspace.root,
+      agentGate: { installedAgents: async () => { throw new Error('probe timed out'); } }
+    });
+
+    assert.deepEqual((await scanner.scanInstalledSkills()).map((skill) => skill.name), ['codex-only']);
+  } finally {
+    workspace.cleanup();
+  }
+});

@@ -2,7 +2,6 @@ import type { ReactNode } from 'react';
 import {
   SEARCH_LABEL,
   SEARCH_PLACEHOLDER,
-  type AgentAvailability,
   type CatalogEntry,
   type CatalogMessageTone,
   type CatalogNotice
@@ -37,7 +36,6 @@ export function CatalogMessage({ children, tone = 'neutral', testId }: CatalogMe
 
 export interface CatalogGridProps {
   entries: readonly CatalogEntry[];
-  availability: AgentAvailability;
   /** What every card's button says; defaults to the card's own "Manage". */
   actionLabel?: string;
   /** Omitted by tabs whose entries have nothing to act on yet. */
@@ -45,14 +43,13 @@ export interface CatalogGridProps {
 }
 
 /** The two-column grid of whatever the open tab holds. */
-export function CatalogGrid({ entries, availability, actionLabel, onAction }: CatalogGridProps) {
+export function CatalogGrid({ entries, actionLabel, onAction }: CatalogGridProps) {
   return (
     <div className="grid w-full grid-cols-2 gap-3">
       {entries.map((entry) => (
         <CatalogCard
           key={entry.id}
           entry={entry}
-          availability={availability}
           actionLabel={actionLabel}
           onAction={onAction ? () => onAction(entry.id) : undefined}
         />

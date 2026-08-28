@@ -7,8 +7,7 @@ import {
   describeSkillScanFailure,
   describeUploadAction,
   selectCatalogEntries,
-  toSkillCatalogEntries,
-  type AgentAvailability
+  toSkillCatalogEntries
 } from '../pages/agentHubContent';
 import { useInstalledSkills } from '../hooks/useInstalledSkills';
 import { useSkillUpload } from '../hooks/useSkillUpload';
@@ -18,7 +17,6 @@ import { PushButton } from './PushButton';
 import { SkillUploadConflictDialog } from './SkillUploadConflictDialog';
 
 export interface SkillsCatalogTabProps {
-  availability: AgentAvailability;
   /** Opens the Discover Skills pane. */
   onDiscover: () => void;
 }
@@ -33,7 +31,7 @@ export interface SkillsCatalogTabProps {
  * tab is unmounted when the user switches away, which is also what clears an
  * upload notice: it belongs to the tab that raised it.
  */
-export function SkillsCatalogTab({ availability, onDiscover }: SkillsCatalogTabProps) {
+export function SkillsCatalogTab({ onDiscover }: SkillsCatalogTabProps) {
   const [query, setQuery] = useState('');
   const [managedSkillId, setManagedSkillId] = useState<string | null>(null);
   const { skills, isLoading, error, applyAgentSelection, uninstall, applyScan } = useInstalledSkills();
@@ -83,7 +81,7 @@ export function SkillsCatalogTab({ availability, onDiscover }: SkillsCatalogTabP
           </CatalogMessage>
         )}
 
-        <CatalogGrid entries={entries} availability={availability} onAction={setManagedSkillId} />
+        <CatalogGrid entries={entries} onAction={setManagedSkillId} />
       </CatalogTabLayout>
 
       {managedSkill && (

@@ -14,6 +14,7 @@ import type {
   McpConnectionType,
   McpServerConfiguration
 } from '../../shared/types';
+import type { InstalledAgentGating } from '../agents/InstalledAgentGate';
 
 /** Stable order used by the catalog cards and their agent badges. */
 export const MCP_AGENT_ORDER: readonly McpAgent[] = ['claudeCode', 'codex'];
@@ -365,12 +366,15 @@ export class LocalMcpCatalogScanner {
   private readonly fileReader: McpFileReader;
   private readonly adapters: McpAgentConfigAdapter[];
   private readonly deduplicator: McpCatalogDeduplicator;
+  private readonly agentGate: InstalledAgentGating | null;
 
   constructor(options: {
     homeDirectory?: string;
     fileReader?: McpFileReader;
     adapters?: McpAgentConfigAdapter[];
     deduplicator?: McpCatalogDeduplicator;
+    /** Omitted to read every agent's file, which is what an isolated scan wants. */
+    agentGate?: InstalledAgentGating;
   } = {}) {
     this.homeDirectory = options.homeDirectory ?? os.homedir();
     this.fileReader = options.fileReader ?? new McpConfigFileReader();
@@ -379,13 +383,18 @@ export class LocalMcpCatalogScanner {
       new CodexMcpAdapter()
     ];
     this.deduplicator = options.deduplicator ?? new McpCatalogDeduplicator();
+    this.agentGate = options.agentGate ?? null;
   }
 
   async scanInstalledMcps(): Promise<McpCatalogScan> {
     const discovered: DiscoveredMcp[] = [];
     const failures: McpCatalogFailure[] = [];
+    const installedAgents = await this.readInstalledAgents();
     for (const adapter of this.adapters) {
       const agent = adapter.agent();
+      // An uninstalled CLI leaves its configuration file behind; reading it
+      // would list servers nothing on this machine can start.
+      if (!installedAgents.includes(agent)) continue;
       try {
         const text = await this.fileReader.readUtf8OrEmpty(adapter.filePath(this.homeDirectory));
         if (text.trim().length === 0) continue;
@@ -406,6 +415,26 @@ export class LocalMcpCatalogScanner {
   /** Preserves the acronym spelling used by the product specification. */
   scanInstalledMCPs(): Promise<McpCatalogScan> {
     return this.scanInstalledMcps();
+  }
+
+  /**
+   * Which agents this machine has, or all of them when nothing can say.
+   *
+   * A failed detection must not blank the catalog: an unreadable probe is not
+   * evidence that an agent is gone, and hiding configured servers is the more
+   * destructive of the two mistakes.
+   */
+  private async readInstalledAgents(): Promise<readonly McpAgent[]> {
+    if (!this.agentGate) {
+      return MCP_AGENT_ORDER;
+    }
+    try {
+      return await this.agentGate.installedAgents();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`MCP scan could not detect installed agents, reading every file: ${message}`);
+      return MCP_AGENT_ORDER;
+    }
   }
 }
 

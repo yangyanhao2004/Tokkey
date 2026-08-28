@@ -32,6 +32,37 @@ const ROOT_AGENTS: Readonly<Record<SkillRoot, readonly SkillAgent[]>> = {
 };
 
 /**
+ * The agent whose own installation owns a root, or null for a root that is
+ * nobody's to own: `amis` is Tokiie's store, and `~/.agents` is a shared
+ * convention more tools than Codex write to. Only an owned root is left behind
+ * by an uninstall, so only an owned root is worth skipping when its CLI is gone.
+ */
+const ROOT_OWNERS: Readonly<Record<SkillRoot, SkillAgent | null>> = {
+  amis: null,
+  claudeCode: 'claudeCode',
+  codex: 'codex',
+  agents: null
+};
+
+/**
+ * The roots worth walking on a machine that has only `installedAgents`.
+ *
+ * A CLI that is uninstalled leaves its home directory behind, so scanning it
+ * would list skills no agent on this machine can load. The unowned roots are
+ * always walked: they are where the app's own skills live and where a skill
+ * stays visible for the agents that are still here.
+ */
+export function selectScannableRoots(
+  installedAgents: readonly SkillAgent[]
+): readonly SkillRoot[] {
+  const installed = new Set(installedAgents);
+  return SKILL_ROOTS.filter((root) => {
+    const owner = ROOT_OWNERS[root];
+    return owner === null || installed.has(owner);
+  });
+}
+
+/**
  * One badge per supported agent, checked only for the agents given. Cards that
  * describe a skill nobody has installed yet pass nothing and get the full row
  * unchecked, so every card carries the same chips whatever its source.

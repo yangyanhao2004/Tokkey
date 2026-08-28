@@ -2,18 +2,19 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   CANCEL_LABEL,
   HUB_AGENTS,
-  MANAGE_DIALOG_COMPATIBLE_LABEL,
   MANAGE_DIALOG_ENABLE_HEADING,
   MANAGE_DIALOG_ENABLE_HINT,
   MANAGE_DIALOG_LOADING_TEXT,
-  MANAGE_DIALOG_UNSUPPORTED_LABEL,
   SAVE_LABEL,
   UNINSTALL_LABEL,
+  describeAgentSupport,
   describeManageFailure,
   describeSelectedAgentCount,
+  readUnavailableAgents,
   type CatalogAgent,
   type HubAgent
 } from '../pages/agentHubContent';
+import { useAgentAvailability } from './AgentDetectionProvider';
 import { AgentMarkTile } from './AgentMark';
 import { PushButton } from './PushButton';
 
@@ -99,6 +100,10 @@ export interface ManageAgentsDialogProps {
  * MCP's configuration entries are the same question, "which agents load this",
  * so both ask it with this one dialog and differ only in the eyebrow above the
  * name and in what their Save actually writes.
+ *
+ * Two things lock a toggle: an entry the agent cannot load, and an agent this
+ * machine does not have. The second comes from the shared detection rather than
+ * from a prop, so the dialog can never allow what the card behind it greyed out.
  */
 export function ManageAgentsDialog({
   eyebrow,
@@ -115,6 +120,7 @@ export function ManageAgentsDialog({
   const [selection, setSelection] = useState<Set<CatalogAgent> | null>(null);
   const [pendingAction, setPendingAction] = useState<'save' | 'uninstall' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const availability = useAgentAvailability();
 
   // The reading is the starting point; edits afterwards belong to the dialog.
   useEffect(() => {
@@ -167,6 +173,7 @@ export function ManageAgentsDialog({
 
   const isBusy = pendingAction !== null;
   const message = actionError ?? readError;
+  const unavailableAgents = readUnavailableAgents(availability);
 
   return (
     // A full-window scrim: the dialog belongs to the app, not to the page under it.
@@ -212,17 +219,17 @@ export function ManageAgentsDialog({
           <div className="flex w-full items-start gap-2">
             {HUB_AGENTS.map((agent) => {
               const isUnsupported = unsupportedAgents.includes(agent.catalogAgent);
+              const isUnavailable = unavailableAgents.includes(agent.catalogAgent);
               return (
                 <AgentToggle
                   key={agent.id}
                   agent={agent}
                   isSelected={selection?.has(agent.catalogAgent) === true}
                   // Nothing may be toggled before the current selection is known,
-                  // and an agent that cannot load this entry never may.
-                  disabled={selection === null || isBusy || isUnsupported}
-                  supportLabel={
-                    isUnsupported ? MANAGE_DIALOG_UNSUPPORTED_LABEL : MANAGE_DIALOG_COMPATIBLE_LABEL
-                  }
+                  // and neither an agent that cannot load this entry nor one that
+                  // is not on this machine ever may.
+                  disabled={selection === null || isBusy || isUnsupported || isUnavailable}
+                  supportLabel={describeAgentSupport(isUnsupported, isUnavailable)}
                   onToggle={toggleAgent}
                 />
               );

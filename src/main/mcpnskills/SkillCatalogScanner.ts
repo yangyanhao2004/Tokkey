@@ -10,17 +10,20 @@ import {
 import path from 'node:path';
 import type {
   InstalledSkill,
+  SkillAgent,
   SkillManifest,
   SkillRoot
 } from '../../shared/types';
 import {
+  AGENT_BADGE_ORDER,
   SkillDeduplicator,
-  SKILL_ROOTS
+  selectScannableRoots
 } from './SkillDeduplicator';
+import type { InstalledAgentGating } from '../agents/InstalledAgentGate';
 import type { SkillContentHashing as SkillContentHashingType } from './SkillContentHasher';
 import { SkillFilesystemLayout, type SkillFilesystemLayoutOptions } from './SkillFilesystem';
 
-export { SkillDeduplicator, SKILL_ROOTS } from './SkillDeduplicator';
+export { SkillDeduplicator, SKILL_ROOTS, selectScannableRoots } from './SkillDeduplicator';
 export { FileSkillContentHasher } from './SkillContentHasher';
 export type { SkillContentHashing } from './SkillContentHasher';
 
@@ -309,6 +312,8 @@ export interface LocalSkillCatalogScannerOptions {
   filesystem?: SkillFilesystemLayout;
   walker?: SkillRootWalker;
   contentHasher?: SkillContentHashingType;
+  /** Omitted to walk every root, which is what an isolated scan wants. */
+  agentGate?: InstalledAgentGating;
 }
 
 /** Filesystem-backed scanner used by the main process to list installed skills. */
@@ -316,19 +321,42 @@ export class LocalSkillCatalogScanner {
   private readonly filesystem: SkillFilesystemLayout;
   private readonly walker: SkillRootWalker;
   private readonly deduplicator: SkillDeduplicator;
+  private readonly agentGate: InstalledAgentGating | null;
 
   constructor(options: LocalSkillCatalogScannerOptions = {}) {
     this.filesystem = options.filesystem ?? new SkillFilesystemLayout(options);
     this.walker = options.walker ?? new SkillRootWalker();
     this.deduplicator = new SkillDeduplicator(options.contentHasher);
+    this.agentGate = options.agentGate ?? null;
   }
 
-  /** Scans all roots in priority order and returns one object per deduplicated skill. */
+  /** Scans the applicable roots in priority order and returns one object per deduplicated skill. */
   async scanInstalledSkills(): Promise<InstalledSkill[]> {
-    const discovered = SKILL_ROOTS.flatMap((root) =>
+    const roots = selectScannableRoots(await this.readInstalledAgents());
+    const discovered = roots.flatMap((root) =>
       this.walker.walk(root, this.filesystem.getRootPath(root))
     );
     return this.deduplicator.deduplicate(discovered);
+  }
+
+  /**
+   * Which agents this machine has, or all of them when nothing can say.
+   *
+   * A failed detection must not blank the catalog: an unreadable probe is not
+   * evidence that an agent is gone, and hiding installed skills is the more
+   * destructive of the two mistakes.
+   */
+  private async readInstalledAgents(): Promise<readonly SkillAgent[]> {
+    if (!this.agentGate) {
+      return AGENT_BADGE_ORDER;
+    }
+    try {
+      return await this.agentGate.installedAgents();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Skill scan could not detect installed agents, scanning every root: ${message}`);
+      return AGENT_BADGE_ORDER;
+    }
   }
 
   /** Exposes the shared path layout to filesystem-backed skill operations. */

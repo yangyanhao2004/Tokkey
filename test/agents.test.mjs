@@ -4,6 +4,7 @@ import test from 'node:test';
 
 import { AgentDetector } from '../dist/main/agents/AgentDetector.js';
 import { AgentManager } from '../dist/main/agents/AgentManager.js';
+import { InstalledAgentGate } from '../dist/main/agents/InstalledAgentGate.js';
 import { StreamingShellRunner } from '../dist/main/agents/StreamingShellRunner.js';
 
 /** Keeps shell-runner doubles readable without duplicating result shape literals. */
@@ -106,4 +107,41 @@ test('manager publishes detected state and reports availability only when it fli
 
   manager.invalidate('codex');
   assert.deepEqual(invalidated, ['codex']);
+});
+
+test('concurrent detections of one agent share a single probe', async () => {
+  let probeCount = 0;
+  const runner = {
+    run: async () => {
+      probeCount += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return TestShellResult.create(0, ['/usr/local/bin/codex']);
+    }
+  };
+  const detector = new AgentDetector(runner);
+
+  const [first, second] = await Promise.all([detector.detect('codex'), detector.detect('codex')]);
+  assert.equal(probeCount, 1);
+  assert.equal(first.executablePath, '/usr/local/bin/codex');
+  assert.deepEqual(first, second);
+
+  detector.invalidate('codex');
+  await detector.detect('codex');
+  assert.equal(probeCount, 2);
+});
+
+test('the gate reports only the catalog agents whose CLI is on PATH', async () => {
+  const manager = new AgentManager({
+    detector: {
+      detect: async (agent) => ({
+        agent,
+        installed: agent === 'claude',
+        executablePath: agent === 'claude' ? '/usr/local/bin/claude' : null,
+        error: agent === 'claude' ? null : 'codex is not installed.'
+      }),
+      invalidate: () => {}
+    }
+  });
+
+  assert.deepEqual(await new InstalledAgentGate({ agentManager: manager }).installedAgents(), ['claudeCode']);
 });

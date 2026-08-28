@@ -43,6 +43,7 @@ import LocalMcpConfigurationApplier, {
   type McpConfigurationApplying
 } from './mcp/McpConfigurationApplier';
 import AgentManager, { type AgentState } from './agents/AgentManager';
+import InstalledAgentGate from './agents/InstalledAgentGate';
 import LocalModelManager from './models/LocalModelManager';
 import CloudModelConnector from './models/CloudModelConnector';
 import HostSnapshotService from './host/HostSnapshotService';
@@ -85,7 +86,12 @@ export default class IpcController {
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
   constructor(options: IpcControllerOptions = {}) {
-    const skillCatalogScanner = options.skillCatalogScanner ?? new LocalSkillCatalogScanner();
+    this.agentManager = options.agentManager ?? new AgentManager();
+    // One gate for both catalogs, so a departed agent disappears from each the
+    // same way and the Agent Hub's greyed chips agree with what was scanned.
+    const agentGate = new InstalledAgentGate({ agentManager: this.agentManager });
+    const skillCatalogScanner =
+      options.skillCatalogScanner ?? new LocalSkillCatalogScanner({ agentGate });
     const skillDeployer =
       options.skillDeployer ?? new SkillDeployer({ scanner: skillCatalogScanner });
     this.skillCatalogScanner = skillCatalogScanner;
@@ -98,12 +104,11 @@ export default class IpcController {
     this.skillUploadService = options.skillUploadService ?? new SkillUploadService({
       installedCatalog: skillCatalogScanner
     });
-    this.mcpCatalogScanner = options.mcpCatalogScanner ?? new LocalMcpCatalogScanner();
+    this.mcpCatalogScanner = options.mcpCatalogScanner ?? new LocalMcpCatalogScanner({ agentGate });
     this.mcpConfigurationApplier =
       options.mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
     this.localModelManager = options.localModelManager ?? new LocalModelManager();
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
-    this.agentManager = options.agentManager ?? new AgentManager();
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {

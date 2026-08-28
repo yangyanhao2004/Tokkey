@@ -1,10 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { SkillAgent } from '../../shared/types';
-import {
-  selectCatalogEntries,
-  type AgentAvailability,
-  type CatalogNotice
-} from '../pages/agentHubContent';
+import { selectCatalogEntries, type CatalogNotice } from '../pages/agentHubContent';
 import {
   ADD_REPO_LABEL,
   REPO_SCAN_LOADING_TEXT,
@@ -27,7 +23,6 @@ import { ManageSkillDialog } from './ManageSkillDialog';
 import { PushButton } from './PushButton';
 
 export interface DiscoverReposTabProps {
-  availability: AgentAvailability;
   onTabChange: (tab: DiscoverTab) => void;
 }
 
@@ -47,7 +42,7 @@ export interface DiscoverReposTabProps {
  * The tab is unmounted when the user switches away, which is also what clears a
  * notice: it belongs to the tab that raised it.
  */
-export function DiscoverReposTab({ availability, onTabChange }: DiscoverReposTabProps) {
+export function DiscoverReposTab({ onTabChange }: DiscoverReposTabProps) {
   const [query, setQuery] = useState('');
   const [managedSkillId, setManagedSkillId] = useState<string | null>(null);
   const [isAddingRepository, setIsAddingRepository] = useState(false);
@@ -147,7 +142,7 @@ export function DiscoverReposTab({ availability, onTabChange }: DiscoverReposTab
           </CatalogMessage>
         )}
 
-        <CatalogGrid entries={entries} availability={availability} onAction={setManagedSkillId} />
+        <CatalogGrid entries={entries} onAction={setManagedSkillId} />
       </DiscoverTabLayout>
 
       {isAddingRepository && (

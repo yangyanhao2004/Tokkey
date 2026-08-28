@@ -383,3 +383,38 @@ test('restores exact original bytes when a later atomic write fails', async () =
   assert.equal(operations.text('/created'), null);
   assert.equal(operations.text('/codex'), 'codex-original');
 });
+
+test('an uninstalled agent contributes no MCPs and no failure', async () => {
+  const home = new TestHome();
+  try {
+    home.write('.claude.json', JSON.stringify({ mcpServers: { tools: { command: 'node' } } }));
+    home.write('.codex/config.toml', '[mcp_servers.legacy]\ncommand = "codex-tool"\n');
+
+    const catalog = await new LocalMcpCatalogScanner({
+      homeDirectory: home.root,
+      agentGate: { installedAgents: async () => ['claudeCode'] }
+    }).scanInstalledMcps();
+
+    assert.deepEqual(catalog.failures, []);
+    assert.deepEqual(catalog.servers.map((server) => server.name), ['tools']);
+    assert.deepEqual(catalog.servers[0].agents, ['claudeCode']);
+  } finally {
+    home.cleanup();
+  }
+});
+
+test('a failed detection reads every agent rather than blanking the catalog', async () => {
+  const home = new TestHome();
+  try {
+    home.write('.codex/config.toml', '[mcp_servers.tools]\ncommand = "codex-tool"\n');
+
+    const catalog = await new LocalMcpCatalogScanner({
+      homeDirectory: home.root,
+      agentGate: { installedAgents: async () => { throw new Error('probe timed out'); } }
+    }).scanInstalledMcps();
+
+    assert.deepEqual(catalog.servers.map((server) => server.name), ['tools']);
+  } finally {
+    home.cleanup();
+  }
+});

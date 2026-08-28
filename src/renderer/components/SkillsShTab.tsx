@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { SkillAgent } from '../../shared/types';
-import type { AgentAvailability, CatalogNotice } from '../pages/agentHubContent';
+import type { CatalogNotice } from '../pages/agentHubContent';
 import {
   SKILLS_SH_LOADING_TEXT,
   SKILLS_SH_SEARCH_HINT,
@@ -24,7 +24,6 @@ import { ManageSkillDialog } from './ManageSkillDialog';
 import { PaginationBar } from './PaginationBar';
 
 export interface SkillsShTabProps {
-  availability: AgentAvailability;
   onTabChange: (tab: DiscoverTab) => void;
 }
 
@@ -43,7 +42,7 @@ export interface SkillsShTabProps {
  * deployment changes. The tab is unmounted when the user switches away, which
  * is what clears its search box and its notice: both belong to this listing.
  */
-export function SkillsShTab({ availability, onTabChange }: SkillsShTabProps) {
+export function SkillsShTab({ onTabChange }: SkillsShTabProps) {
   const [query, setQuery] = useState('');
   const [managedListingId, setManagedListingId] = useState<string | null>(null);
   const [notice, setNotice] = useState<CatalogNotice | null>(null);
@@ -128,7 +127,7 @@ export function SkillsShTab({ availability, onTabChange }: SkillsShTabProps) {
           </CatalogMessage>
         )}
 
-        <CatalogGrid entries={entries} availability={availability} onAction={setManagedListingId} />
+        <CatalogGrid entries={entries} onAction={setManagedListingId} />
       </DiscoverTabLayout>
 
       {managedCard && (

@@ -5,11 +5,11 @@ import {
   describeCompatibility,
   findAgent,
   resolveCompatibilityState,
-  type AgentAvailability,
   type CatalogEntry,
   type CompatibilityChip,
   type CompatibilityState
 } from '../pages/agentHubContent';
+import { useAgentAvailability } from './AgentDetectionProvider';
 import { AGENT_ARTWORK } from './AgentMark';
 import { PushButton } from './PushButton';
 
@@ -29,7 +29,6 @@ const CHIP_STATE_CLASSES: Record<CompatibilityState, string> = {
 
 interface CompatibilityChipProps {
   chip: CompatibilityChip;
-  availability: AgentAvailability;
 }
 
 /**
@@ -37,7 +36,8 @@ interface CompatibilityChipProps {
  * An enabled entry adds the green check that overhangs the mark's bottom-right
  * corner, so neither this box nor the row it sits in may clip.
  */
-function CompatibilityChipMark({ chip, availability }: CompatibilityChipProps) {
+function CompatibilityChipMark({ chip }: CompatibilityChipProps) {
+  const availability = useAgentAvailability();
   const agent = findAgent(chip.agentId);
   if (!agent) {
     return null;
@@ -78,7 +78,6 @@ function CompatibilityChipMark({ chip, availability }: CompatibilityChipProps) {
 
 export interface CatalogCardProps {
   entry: CatalogEntry;
-  availability: AgentAvailability;
   /**
    * What the card's one button says; the Discover pane's cards say "+ Add".
    * The entry's own label wins, since a grid whose cards differ says so per
@@ -94,12 +93,7 @@ export interface CatalogCardProps {
  * The card is at least as tall as the design's fixed 148px but grows rather
  * than clipping, since a longer description would otherwise spill out.
  */
-export function CatalogCard({
-  entry,
-  availability,
-  actionLabel = MANAGE_LABEL,
-  onAction
-}: CatalogCardProps) {
+export function CatalogCard({ entry, actionLabel = MANAGE_LABEL, onAction }: CatalogCardProps) {
   return (
     <article
       className="flex min-h-[148px] flex-col justify-between gap-4 rounded-[12px] border border-vibrant-tertiary p-4"
@@ -136,7 +130,7 @@ export function CatalogCard({
               so a tighter gap would sit it on top of the next one. */}
           <div className="flex items-center gap-2">
             {entry.compatibility.map((chip) => (
-              <CompatibilityChipMark key={chip.agentId} chip={chip} availability={availability} />
+              <CompatibilityChipMark key={chip.agentId} chip={chip} />
             ))}
           </div>
 

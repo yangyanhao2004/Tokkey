@@ -6,17 +6,12 @@ import {
   describeMcpAgentFailure,
   describeMcpScanFailure,
   selectCatalogEntries,
-  toMcpCatalogEntries,
-  type AgentAvailability
+  toMcpCatalogEntries
 } from '../pages/agentHubContent';
 import { useInstalledMcps } from '../hooks/useInstalledMcps';
 import { CatalogGrid, CatalogMessage, CatalogTabLayout } from './CatalogTabLayout';
 import { ManageMcpDialog } from './ManageMcpDialog';
 import { PushButton } from './PushButton';
-
-export interface McpCatalogTabProps {
-  availability: AgentAvailability;
-}
 
 /**
  * The "MCPs" tab (Figma 225:2405): the servers configured in Claude Code's and
@@ -27,7 +22,7 @@ export interface McpCatalogTabProps {
  * "+ Add MCP" is drawn for the layout the design asks for and does nothing
  * until the Add MCP dialog exists.
  */
-export function McpCatalogTab({ availability }: McpCatalogTabProps) {
+export function McpCatalogTab() {
   const [query, setQuery] = useState('');
   const [managedMcpId, setManagedMcpId] = useState<string | null>(null);
   const { servers, failures, isLoading, error, applyAgentSelection } = useInstalledMcps();
@@ -65,7 +60,7 @@ export function McpCatalogTab({ availability }: McpCatalogTabProps) {
           <CatalogMessage testId="catalog-empty">{describeEmptyCatalog('mcps', query)}</CatalogMessage>
         )}
 
-        <CatalogGrid entries={entries} availability={availability} onAction={setManagedMcpId} />
+        <CatalogGrid entries={entries} onAction={setManagedMcpId} />
       </CatalogTabLayout>
 
       {managedMcp && (

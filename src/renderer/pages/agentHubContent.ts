@@ -253,6 +253,21 @@ export function readUnsupportedAgents(
   return badges.filter((badge) => badge.state === 'disabled').map((badge) => badge.agent);
 }
 
+/**
+ * The agents missing from this machine, which the Manage dialog locks for the
+ * same reason the cards grey their chips: enabling an entry for a CLI that is
+ * not here writes a configuration nothing will ever read.
+ *
+ * Detection still running locks nothing, so the dialog never refuses a choice
+ * it is about to allow.
+ */
+export function readUnavailableAgents(availability: AgentAvailability): readonly CatalogAgent[] {
+  if (!availability) {
+    return [];
+  }
+  return HUB_AGENTS.filter((agent) => !availability[agent.id]).map((agent) => agent.catalogAgent);
+}
+
 /** Turns one MCP scan into the cards the "MCPs" tab draws. */
 export function toMcpCatalogEntries(servers: readonly InstalledMcp[]): readonly CatalogEntry[] {
   return servers.map((mcp) => ({
@@ -299,7 +314,23 @@ export const MANAGE_DIALOG_ENABLE_HEADING = 'Enable for';
 export const MANAGE_DIALOG_ENABLE_HINT = 'Choose one or more agents. You can change this later.';
 export const MANAGE_DIALOG_COMPATIBLE_LABEL = 'Compatible';
 export const MANAGE_DIALOG_UNSUPPORTED_LABEL = 'Not supported';
+export const MANAGE_DIALOG_UNAVAILABLE_LABEL = 'Not installed';
 export const MANAGE_DIALOG_LOADING_TEXT = 'Reading…';
+
+/**
+ * What one agent's toggle says about itself. A missing agent outranks whatever
+ * the entry declares: "not supported" is a fact about the entry, and there is
+ * no point stating it about a CLI that is not on this machine at all.
+ */
+export function describeAgentSupport(isUnsupported: boolean, isUnavailable: boolean): string {
+  if (isUnavailable) {
+    return MANAGE_DIALOG_UNAVAILABLE_LABEL;
+  }
+  if (isUnsupported) {
+    return MANAGE_DIALOG_UNSUPPORTED_LABEL;
+  }
+  return MANAGE_DIALOG_COMPATIBLE_LABEL;
+}
 export const UNINSTALL_LABEL = 'Uninstall';
 export const CANCEL_LABEL = 'Cancel';
 export const SAVE_LABEL = 'Save changes';
