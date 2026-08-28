@@ -13,6 +13,7 @@ import {
   type CatalogTab,
   type HubAgent
 } from './agentHubContent';
+import { DiscoverSkillsPage } from './DiscoverSkillsPage';
 import { useAgentDetection } from '../hooks/useAgentDetection';
 import { AgentMarkTile } from '../components/AgentMark';
 import { McpCatalogTab } from '../components/McpCatalogTab';
@@ -72,6 +73,8 @@ function AgentRow({ availability }: AgentRowProps) {
 
 interface CatalogSectionProps {
   availability: AgentAvailability;
+  /** Opens the Discover Skills pane, which only the "Skills" tab offers. */
+  onDiscoverSkills: () => void;
 }
 
 /**
@@ -81,7 +84,7 @@ interface CatalogSectionProps {
  * data, and whatever it says about its last action — and switching tabs leaves
  * none of that behind.
  */
-function CatalogSection({ availability }: CatalogSectionProps) {
+function CatalogSection({ availability, onDiscoverSkills }: CatalogSectionProps) {
   const [tab, setTab] = useState<CatalogTab>('skills');
 
   return (
@@ -99,7 +102,7 @@ function CatalogSection({ availability }: CatalogSectionProps) {
       />
 
       {tab === 'skills' ? (
-        <SkillsCatalogTab availability={availability} />
+        <SkillsCatalogTab availability={availability} onDiscover={onDiscoverSkills} />
       ) : (
         <McpCatalogTab availability={availability} />
       )}
@@ -111,10 +114,18 @@ function CatalogSection({ availability }: CatalogSectionProps) {
  * The page behind the "Agent Hub" nav row: coding agents, then their extras.
  * One detection serves the whole page, so the agent row and every catalog chip
  * agree on which agents this machine actually has.
+ *
+ * "Discover Skill" swaps the whole page for the Discover Skills pane, which
+ * returns here through the header's Back button.
  */
 export function AgentHubPage() {
+  const [isDiscoveringSkills, setIsDiscoveringSkills] = useState(false);
   const installations = useAgentDetection();
   const availability = readAgentAvailability(installations);
+
+  if (isDiscoveringSkills) {
+    return <DiscoverSkillsPage onBack={() => setIsDiscoveringSkills(false)} />;
+  }
 
   return (
     <PageShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} testId="agent-hub">
@@ -125,7 +136,10 @@ export function AgentHubPage() {
         <span className="h-px w-full bg-separator" />
       </div>
 
-      <CatalogSection availability={availability} />
+      <CatalogSection
+        availability={availability}
+        onDiscoverSkills={() => setIsDiscoveringSkills(true)}
+      />
     </PageShell>
   );
 }

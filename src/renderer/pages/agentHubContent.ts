@@ -142,8 +142,11 @@ export const CATALOG_TABS: readonly CatalogTabOption[] = [
 export interface CatalogEntry {
   readonly id: string;
   readonly name: string;
-  /** Where the entry came from, e.g. "GitHub" or "skills.sh". */
-  readonly source: string;
+  /**
+   * Where the entry came from, e.g. "GitHub" or "skills.sh". Omitted by the
+   * Discover Skills pane, whose whole tab already says where its cards are from.
+   */
+  readonly source?: string;
   readonly description: string;
   readonly compatibility: readonly CompatibilityChip[];
 }

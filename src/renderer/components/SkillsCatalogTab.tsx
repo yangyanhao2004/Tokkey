@@ -19,6 +19,8 @@ import { SkillUploadConflictDialog } from './SkillUploadConflictDialog';
 
 export interface SkillsCatalogTabProps {
   availability: AgentAvailability;
+  /** Opens the Discover Skills pane. */
+  onDiscover: () => void;
 }
 
 /**
@@ -31,7 +33,7 @@ export interface SkillsCatalogTabProps {
  * tab is unmounted when the user switches away, which is also what clears an
  * upload notice: it belongs to the tab that raised it.
  */
-export function SkillsCatalogTab({ availability }: SkillsCatalogTabProps) {
+export function SkillsCatalogTab({ availability, onDiscover }: SkillsCatalogTabProps) {
   const [query, setQuery] = useState('');
   const [managedSkillId, setManagedSkillId] = useState<string | null>(null);
   const { skills, isLoading, error, applyAgentSelection, uninstall, applyScan } = useInstalledSkills();
@@ -59,7 +61,9 @@ export function SkillsCatalogTab({ availability }: SkillsCatalogTabProps) {
             >
               {upload.isUploading ? SKILL_UPLOAD_BUSY_TEXT : describeUploadAction('skills')}
             </PushButton>
-            <PushButton testId="catalog-discover">{describeDiscoverAction('skills')}</PushButton>
+            <PushButton onClick={onDiscover} testId="catalog-discover">
+              {describeDiscoverAction('skills')}
+            </PushButton>
           </>
         }
       >
@@ -79,7 +83,7 @@ export function SkillsCatalogTab({ availability }: SkillsCatalogTabProps) {
           </CatalogMessage>
         )}
 
-        <CatalogGrid entries={entries} availability={availability} onManage={setManagedSkillId} />
+        <CatalogGrid entries={entries} availability={availability} onAction={setManagedSkillId} />
       </CatalogTabLayout>
 
       {managedSkill && (

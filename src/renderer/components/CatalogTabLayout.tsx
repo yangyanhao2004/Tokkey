@@ -38,12 +38,14 @@ export function CatalogMessage({ children, tone = 'neutral', testId }: CatalogMe
 export interface CatalogGridProps {
   entries: readonly CatalogEntry[];
   availability: AgentAvailability;
-  /** Omitted by tabs whose entries have nothing to manage yet. */
-  onManage?: (entryId: string) => void;
+  /** What every card's button says; defaults to the card's own "Manage". */
+  actionLabel?: string;
+  /** Omitted by tabs whose entries have nothing to act on yet. */
+  onAction?: (entryId: string) => void;
 }
 
 /** The two-column grid of whatever the open tab holds. */
-export function CatalogGrid({ entries, availability, onManage }: CatalogGridProps) {
+export function CatalogGrid({ entries, availability, actionLabel, onAction }: CatalogGridProps) {
   return (
     <div className="grid w-full grid-cols-2 gap-3">
       {entries.map((entry) => (
@@ -51,7 +53,8 @@ export function CatalogGrid({ entries, availability, onManage }: CatalogGridProp
           key={entry.id}
           entry={entry}
           availability={availability}
-          onManage={onManage ? () => onManage(entry.id) : undefined}
+          actionLabel={actionLabel}
+          onAction={onAction ? () => onAction(entry.id) : undefined}
         />
       ))}
     </div>

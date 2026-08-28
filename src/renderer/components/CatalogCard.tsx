@@ -77,8 +77,10 @@ function CompatibilityChipMark({ chip, availability }: CompatibilityChipProps) {
 export interface CatalogCardProps {
   entry: CatalogEntry;
   availability: AgentAvailability;
-  /** Omitted for entries with nothing to manage yet, which disables the button. */
-  onManage?: () => void;
+  /** What the card's one button says; the Discover pane's cards say "+ Add". */
+  actionLabel?: string;
+  /** Omitted for entries with nothing to act on yet, which disables the button. */
+  onAction?: () => void;
 }
 
 /**
@@ -86,7 +88,12 @@ export interface CatalogCardProps {
  * The card is at least as tall as the design's fixed 148px but grows rather
  * than clipping, since a longer description would otherwise spill out.
  */
-export function CatalogCard({ entry, availability, onManage }: CatalogCardProps) {
+export function CatalogCard({
+  entry,
+  availability,
+  actionLabel = MANAGE_LABEL,
+  onAction
+}: CatalogCardProps) {
   return (
     <article
       className="flex min-h-[148px] flex-col justify-between gap-4 rounded-[12px] border border-vibrant-tertiary p-4"
@@ -97,9 +104,11 @@ export function CatalogCard({ entry, availability, onManage }: CatalogCardProps)
           <h3 className="min-w-0 truncate text-[12px] leading-[14px] font-bold text-text-primary">
             {entry.name}
           </h3>
-          <span className="shrink-0 text-[8px] leading-[10px] text-text-secondary">
-            {entry.source}
-          </span>
+          {entry.source && (
+            <span className="shrink-0 text-[8px] leading-[10px] text-text-secondary">
+              {entry.source}
+            </span>
+          )}
         </div>
         {/* Skill descriptions are written for agents and run long; clamping them
             keeps every card the height the design draws. */}
@@ -124,11 +133,11 @@ export function CatalogCard({ entry, availability, onManage }: CatalogCardProps)
 
           <PushButton
             variant="plain-dark"
-            onClick={onManage}
-            disabled={onManage === undefined}
-            testId={`catalog-manage-${entry.id}`}
+            onClick={onAction}
+            disabled={onAction === undefined}
+            testId={`catalog-action-${entry.id}`}
           >
-            {MANAGE_LABEL}
+            {actionLabel}
           </PushButton>
         </div>
       </div>

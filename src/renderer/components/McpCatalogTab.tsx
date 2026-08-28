@@ -40,7 +40,7 @@ export function McpCatalogTab({ availability }: McpCatalogTabProps) {
         <CatalogMessage testId="catalog-empty">{describeEmptyCatalog('mcps', query)}</CatalogMessage>
       )}
 
-      {/* No `onManage`: an MCP entry has nothing to manage yet, which is what
+      {/* No `onAction`: an MCP entry has nothing to manage yet, which is what
           leaves its Manage button disabled. */}
       <CatalogGrid entries={entries} availability={availability} />
     </CatalogTabLayout>
