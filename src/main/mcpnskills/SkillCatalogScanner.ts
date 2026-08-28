@@ -87,19 +87,29 @@ export class SkillManifestParser {
     let skillDescription: string | null = null;
     let activeField: 'name' | 'description' | null = null;
     let blockValue: string[] = [];
+    // Only a `|` or `>` description continues onto the following lines. Without
+    // this, the indented values of any later key are read as more description.
+    let isReadingBlockScalar = false;
 
     const flushBlockValue = (): void => {
       if (activeField === 'description' && blockValue.length > 0) {
         skillDescription = this.normalizeScalar(blockValue.join('\n'));
       }
       blockValue = [];
+      isReadingBlockScalar = false;
     };
 
     for (const line of lines) {
       const fieldMatch = /^(name|description)\s*:\s*(.*)$/.exec(line);
       if (!fieldMatch) {
-        if (activeField === 'description' && /^\s+/.test(line)) {
+        if (isReadingBlockScalar && (line.trim().length === 0 || /^\s/.test(line))) {
           blockValue.push(line.trim());
+          continue;
+        }
+        // Any other key at the top level ends the field being read.
+        if (/^\S/.test(line)) {
+          flushBlockValue();
+          activeField = null;
         }
         continue;
       }
@@ -111,6 +121,7 @@ export class SkillManifestParser {
         skillName = rawValue === '|' || rawValue === '>' ? null : this.normalizeScalar(rawValue);
       } else if (rawValue === '|' || rawValue === '>') {
         blockValue = [];
+        isReadingBlockScalar = true;
       } else {
         skillDescription = this.normalizeScalar(rawValue);
       }
@@ -132,7 +143,9 @@ export class SkillManifestParser {
       if (closingQuoteIndex < 0) {
         return null;
       }
-      return trimmedValue.slice(1, closingQuoteIndex).trim() || null;
+      const quotedValue = trimmedValue.slice(1, closingQuoteIndex).trim();
+      // A quoted scalar escapes its own delimiter; the UI wants the plain text.
+      return quotedValue.replace(/\\(["'\\])/g, '$1') || null;
     }
 
     const withoutComment = trimmedValue.replace(/\s+#.*$/, '').trim();

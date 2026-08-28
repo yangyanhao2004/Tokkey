@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -11,6 +11,7 @@ import {
   LocalSkillCatalogScanner,
   SkillManifestParser
 } from '../dist/main/mcpnskills/SkillCatalogScanner.js';
+import { SkillDeployer } from '../dist/main/mcpnskills/SkillDeployer.js';
 import { SkillFilesystemLayout } from '../dist/main/mcpnskills/SkillFilesystem.js';
 import { SkillFolderImporter } from '../dist/main/mcpnskills/SkillFolderImporter.js';
 
@@ -111,7 +112,7 @@ test('scans and deduplicates installed skills across roots', async () => {
     const amisManifest = '---\nname: shared\ndescription: Shared skill\n---\n';
     workspace.write('.amis/skills/shared/SKILL.md', amisManifest);
     workspace.write('.claude/skills/shared/SKILL.md', amisManifest);
-    workspace.write('.hermes/skills/unique/SKILL.md', '---\nname: unique\ndescription: Unique\n---\n');
+    workspace.write('.agents/skills/unique/SKILL.md', '---\nname: unique\ndescription: Unique\n---\n');
     workspace.write('.codex/skills/shared/SKILL.md', '---\nname: shared\ndescription: Different\n---\n');
     workspace.write('.agents/skills/.hidden/SKILL.md', amisManifest);
 
@@ -122,7 +123,57 @@ test('scans and deduplicates installed skills across roots', async () => {
     assert.equal(sharedSkills.length, 2);
     assert.equal(sharedSkills[0].hasNameCollision, true);
     assert.equal(sharedSkills[1].hasNameCollision, true);
-    assert.equal(skills.find((skill) => skill.name === 'unique').agentBadges[0].state, 'checked');
+    const uniqueBadges = skills.find((skill) => skill.name === 'unique').agentBadges;
+    assert.equal(uniqueBadges.find((badge) => badge.agent === 'codex').state, 'checked');
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test('uninstalls a real agent directory the app never installed', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    // A skill authored directly in the Claude root: discovered by the scanner,
+    // never copied or linked by the app.
+    workspace.write('.claude/skills/legacy/SKILL.md', '---\nname: legacy\ndescription: Legacy\n---\n');
+
+    const deployer = new SkillDeployer({ homeDirectory: workspace.root });
+    const scanner = new LocalSkillCatalogScanner({ homeDirectory: workspace.root });
+    const [legacySkill] = await scanner.scanInstalledSkills();
+    assert.equal(legacySkill.name, 'legacy');
+
+    const remainingSkills = await deployer.uninstallSkill(legacySkill);
+    assert.equal(existsSync(workspace.resolve('.claude/skills/legacy')), false);
+    assert.deepEqual(remainingSkills, []);
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test('uninstalls links and canonical content without touching a same-name skill', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    // The app-managed card: canonical content plus a link from the Claude root.
+    workspace.write('.amis/skills/shared/SKILL.md', '---\nname: shared\ndescription: Managed\n---\n');
+    workspace.directory('.claude/skills');
+    symlinkSync(workspace.resolve('.amis/skills/shared'), workspace.resolve('.claude/skills/shared'), 'dir');
+    // A different card that happens to carry the same name.
+    workspace.write('.codex/skills/shared/SKILL.md', '---\nname: shared\ndescription: Unrelated\n---\n');
+
+    const deployer = new SkillDeployer({ homeDirectory: workspace.root });
+    const scanner = new LocalSkillCatalogScanner({ homeDirectory: workspace.root });
+    const skills = await scanner.scanInstalledSkills();
+    const managedSkill = skills.find((skill) => skill.summary === 'Managed');
+
+    const remainingSkills = await deployer.uninstallSkill(managedSkill);
+    assert.equal(existsSync(workspace.resolve('.amis/skills/shared')), false);
+    assert.equal(existsSync(workspace.resolve('.claude/skills/shared')), false);
+    // The unrelated card owns its own directory and must survive.
+    assert.equal(existsSync(workspace.resolve('.codex/skills/shared')), true);
+    assert.deepEqual(
+      remainingSkills.map((skill) => skill.summary),
+      ['Unrelated']
+    );
   } finally {
     workspace.cleanup();
   }

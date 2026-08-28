@@ -321,7 +321,7 @@ export default class IpcController {
     return this.skillDeployer.applyAgentSelection(skill, selectedAgents);
   }
 
-  /** Uninstalls the app-managed copy while preserving external real directories. */
+  /** Removes the skill from every root it occupies and returns the rescanned catalog. */
   async uninstallSkill(skillId: string): Promise<InstalledSkill[]> {
     const skill = await this.findSkill(skillId);
     return this.skillDeployer.uninstallSkill(skill);

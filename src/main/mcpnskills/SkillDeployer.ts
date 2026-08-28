@@ -13,7 +13,7 @@ import LocalSkillCatalogScanner from './SkillCatalogScanner';
 import { SkillFilesystemLayout, type SkillFilesystemLayoutOptions } from './SkillFilesystem';
 
 /** Stable ordering used by selection responses and filesystem transitions. */
-export const SKILL_AGENT_ORDER: readonly SkillAgent[] = ['hermes', 'claudeCode', 'codex'];
+export const SKILL_AGENT_ORDER: readonly SkillAgent[] = ['claudeCode', 'codex'];
 
 /** Error carrying the path and requested selection that failed. */
 export class SkillDeploymentError extends Error {
@@ -90,7 +90,15 @@ export class SkillDeployer {
     }
   }
 
-  /** Removes app-managed links and canonical content while preserving real external directories. */
+  /**
+   * Removes every location this card owns: app-created links, canonical content,
+   * and real agent-owned directories the app never installed. Uninstall is the
+   * catalog's "remove it everywhere" action, so a skill discovered in place must
+   * disappear too rather than survive and reappear on the next scan.
+   *
+   * Ownership is still checked per path, so a same-name skill belonging to
+   * another catalog card is never deleted.
+   */
   async uninstallSkill(skill: InstalledSkill): Promise<InstalledSkill[]> {
     const relativePath = this.getSkillRelativePath(skill);
     const canonicalPath = this.filesystem.getCanonicalSkillPath(relativePath);
@@ -99,8 +107,7 @@ export class SkillDeployer {
         for (const agentPath of this.getAgentPaths(agent, relativePath)) {
           if (
             this.pathExists(agentPath) &&
-            this.isSymlink(agentPath) &&
-            (this.isSkillPath(skill, agentPath, canonicalPath) || this.resolvePath(agentPath) === null)
+            (this.isSkillPath(skill, agentPath, canonicalPath) || this.isBrokenLink(agentPath))
           ) {
             this.removePath(agentPath);
           }
@@ -167,8 +174,11 @@ export class SkillDeployer {
       ...SKILL_AGENT_ORDER.flatMap((agent) => this.getAgentPaths(agent, relativePath))
     ];
     for (const candidatePath of candidatePaths) {
-      const isBrokenLink = this.isSymlink(candidatePath) && this.resolvePath(candidatePath) === null;
-      if (this.pathExists(candidatePath) && !this.isSkillPath(skill, candidatePath, canonicalPath) && !isBrokenLink) {
+      if (
+        this.pathExists(candidatePath) &&
+        !this.isSkillPath(skill, candidatePath, canonicalPath) &&
+        !this.isBrokenLink(candidatePath)
+      ) {
         throw new Error(`Skill path is occupied by another skill: ${candidatePath}`);
       }
     }
@@ -195,7 +205,7 @@ export class SkillDeployer {
           const isPrimaryAgentSource = installation !== undefined &&
             installation === skill.primaryInstallation &&
             installation.root !== 'amis';
-          const isBrokenAgentLink = this.isSymlink(candidatePath) && this.resolvePath(candidatePath) === null;
+          const isBrokenAgentLink = this.isBrokenLink(candidatePath);
           if (
             (this.isSkillPath(skill, candidatePath, canonicalPath) || isBrokenAgentLink) &&
             (installation?.isSymlink === true || isPrimaryAgentSource || isBrokenAgentLink)
@@ -223,15 +233,17 @@ export class SkillDeployer {
       }
       for (const candidatePath of candidatePaths) {
         if (candidatePath !== targetPath && this.pathExists(candidatePath)) {
-          const isBrokenAgentLink = this.isSymlink(candidatePath) && this.resolvePath(candidatePath) === null;
-          if (!this.isSkillPath(skill, candidatePath, canonicalPath) && !isBrokenAgentLink) {
+          if (!this.isSkillPath(skill, candidatePath, canonicalPath) && !this.isBrokenLink(candidatePath)) {
             throw new Error(`Agent path is occupied by another skill: ${candidatePath}`);
           }
           this.removePath(candidatePath);
         }
       }
-      const isBrokenTarget = this.isSymlink(targetPath) && this.resolvePath(targetPath) === null;
-      if (this.pathExists(targetPath) && !this.isSkillPath(skill, targetPath, canonicalPath) && !isBrokenTarget) {
+      if (
+        this.pathExists(targetPath) &&
+        !this.isSkillPath(skill, targetPath, canonicalPath) &&
+        !this.isBrokenLink(targetPath)
+      ) {
         throw new Error(`Agent path is occupied by another skill: ${targetPath}`);
       }
       this.ensureSymlink(targetPath, canonicalPath);
@@ -334,6 +346,11 @@ export class SkillDeployer {
     } catch {
       return null;
     }
+  }
+
+  /** A link whose target is gone: owned by no skill, so always safe to clear. */
+  private isBrokenLink(candidatePath: string): boolean {
+    return this.isSymlink(candidatePath) && this.resolvePath(candidatePath) === null;
   }
 
   private removePath(candidatePath: string): void {

@@ -3,13 +3,20 @@
  * (192:1921). Kept apart from the components so copy and catalog entries can
  * change without touching markup.
  *
- * The skill and MCP catalogs below are still fixed content, but which agents
- * exist is not: detection decides that, and every function here that takes an
+ * The MCP catalog below is still fixed content; the skill catalog is not — it
+ * is whatever the main process scanner finds installed. Nor is the agent list:
+ * detection decides that, and every function here that takes an
  * `AgentAvailability` reads it. OpenCode is deliberately absent — Tokiie only
  * manages Codex and Claude Code.
  */
 
-import type { AgentInstallation, CodingAgent } from '../../shared/types';
+import type {
+  AgentInstallation,
+  CodingAgent,
+  InstalledSkill,
+  SkillAgent,
+  SkillRoot
+} from '../../shared/types';
 
 /** Shared with the sidebar so every page resolves assets from one place. */
 export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
@@ -28,11 +35,13 @@ export interface HubAgent {
   readonly vendor: string;
   /** The executable detection looks for, which is not always the agent's id. */
   readonly cli: CodingAgent;
+  /** The name the skill scanner badges this agent under. */
+  readonly skillAgent: SkillAgent;
 }
 
 export const HUB_AGENTS: readonly HubAgent[] = [
-  { id: 'codex', name: 'Codex', vendor: 'OpenAI', cli: 'codex' },
-  { id: 'claude-code', name: 'Claude Code', vendor: 'Anthropic', cli: 'claude' }
+  { id: 'codex', name: 'Codex', vendor: 'OpenAI', cli: 'codex', skillAgent: 'codex' },
+  { id: 'claude-code', name: 'Claude Code', vendor: 'Anthropic', cli: 'claude', skillAgent: 'claudeCode' }
 ];
 
 export function findAgent(id: AgentId): HubAgent | undefined {
@@ -137,50 +146,48 @@ export interface CatalogEntry {
   readonly compatibility: readonly CompatibilityChip[];
 }
 
-const SKILL_CATALOG: readonly CatalogEntry[] = [
-  {
-    id: 'video-generation',
-    name: 'Video Generation',
-    source: 'GitHub',
-    description: 'Create short videos from prompts and supplied assets.',
-    compatibility: [
-      { agentId: 'claude-code', enablement: 'available' },
-      { agentId: 'codex', enablement: 'available' }
-    ]
-  },
-  {
-    id: 'ppt-generation',
-    name: 'PPT Generation',
-    source: 'GitHub',
-    description: 'Create and refine presentation decks from a brief.',
-    compatibility: [
-      { agentId: 'claude-code', enablement: 'enabled' },
-      { agentId: 'codex', enablement: 'enabled' }
-    ]
-  },
-  {
-    id: 'image-generation',
-    name: 'Image Generation',
-    source: 'GitHub',
-    description: 'Generate or edit images through an image provider.',
-    compatibility: [
-      { agentId: 'claude-code', enablement: 'available' },
-      { agentId: 'codex', enablement: 'enabled' }
-    ]
-  },
-  {
-    id: 'web-research',
-    name: 'Web Research',
-    source: 'skills.sh',
-    description: 'Research websites and summarize useful sources.',
-    compatibility: [
-      { agentId: 'claude-code', enablement: 'enabled' },
-      { agentId: 'codex', enablement: 'enabled' }
-    ]
-  }
-];
+/**
+ * Where an installed skill lives, said in the words the page uses elsewhere.
+ * The Amis root is Tokiie's own store, so it reads as the app rather than as a
+ * directory nobody outside the code recognizes.
+ */
+const SKILL_ROOT_LABELS: Readonly<Record<SkillRoot, string>> = {
+  amis: 'Tokiie',
+  claudeCode: 'Claude Code',
+  codex: 'Codex',
+  agents: 'Agents'
+};
 
-const MCP_CATALOG: readonly CatalogEntry[] = [
+/** Stands in for a skill whose SKILL.md carries no description. */
+const MISSING_SUMMARY_TEXT = 'No description in this skill’s SKILL.md.';
+
+/**
+ * One agent's chip for an installed skill: checked by the scanner means the
+ * skill is deployed under a root that agent reads, which the card draws as the
+ * green check. Anything else is merely supported.
+ */
+function readSkillCompatibility(skill: InstalledSkill): readonly CompatibilityChip[] {
+  const checkedAgents = new Set(
+    skill.agentBadges.filter((badge) => badge.state === 'checked').map((badge) => badge.agent)
+  );
+  return HUB_AGENTS.map((agent) => ({
+    agentId: agent.id,
+    enablement: checkedAgents.has(agent.skillAgent) ? 'enabled' : 'available'
+  }));
+}
+
+/** Turns one filesystem scan into the cards the "Skills" tab draws. */
+export function toSkillCatalogEntries(skills: readonly InstalledSkill[]): readonly CatalogEntry[] {
+  return skills.map((skill) => ({
+    id: skill.id,
+    name: skill.name,
+    source: SKILL_ROOT_LABELS[skill.primaryInstallation.root],
+    description: skill.summary ?? MISSING_SUMMARY_TEXT,
+    compatibility: readSkillCompatibility(skill)
+  }));
+}
+
+export const MCP_CATALOG: readonly CatalogEntry[] = [
   {
     id: 'filesystem',
     name: 'Filesystem',
@@ -203,27 +210,49 @@ const MCP_CATALOG: readonly CatalogEntry[] = [
   }
 ];
 
-const CATALOGS: Record<CatalogTab, readonly CatalogEntry[]> = {
-  skills: SKILL_CATALOG,
-  mcps: MCP_CATALOG
-};
-
 /**
- * The entries one tab shows, narrowed to those whose name or description
- * matches what has been typed. Matching happens here rather than in the
- * component so the card only ever renders the rows it is handed.
+ * The entries a tab shows, narrowed to those whose name or description matches
+ * what has been typed. Matching happens here rather than in the component so
+ * the card only ever renders the rows it is handed.
  */
-export function selectCatalogEntries(tab: CatalogTab, query: string): readonly CatalogEntry[] {
+export function selectCatalogEntries(
+  entries: readonly CatalogEntry[],
+  query: string
+): readonly CatalogEntry[] {
   const needle = query.trim().toLowerCase();
   if (needle.length === 0) {
-    return CATALOGS[tab];
+    return entries;
   }
 
-  return CATALOGS[tab].filter(
+  return entries.filter(
     (entry) =>
       entry.name.toLowerCase().includes(needle) ||
       entry.description.toLowerCase().includes(needle)
   );
+}
+
+/**
+ * The Manage Skill dialog (Figma 225:1301). OpenCode is drawn there too, but
+ * Tokiie does not manage it, so the dialog lists `HUB_AGENTS` like the rest of
+ * the page.
+ */
+export const MANAGE_DIALOG_EYEBROW = 'MANAGE SKILL';
+export const MANAGE_DIALOG_ENABLE_HEADING = 'Enable for';
+export const MANAGE_DIALOG_ENABLE_HINT = 'Choose one or more agents. You can change this later.';
+export const MANAGE_DIALOG_COMPATIBLE_LABEL = 'Compatible';
+export const MANAGE_DIALOG_LOADING_TEXT = 'Reading…';
+export const UNINSTALL_LABEL = 'Uninstall';
+export const CANCEL_LABEL = 'Cancel';
+export const SAVE_LABEL = 'Save changes';
+
+/** The counter opposite the "Enable for" heading. */
+export function describeSelectedAgentCount(count: number): string {
+  return `${count} selected`;
+}
+
+/** Reports why a save or uninstall left the filesystem untouched. */
+export function describeSkillActionFailure(error: string): string {
+  return `That did not work: ${error}`;
 }
 
 export const SECTION_HEADING = 'Skills & MCPs';
@@ -244,6 +273,14 @@ export function describeUploadAction(tab: CatalogTab): string {
 
 export function describeDiscoverAction(tab: CatalogTab): string {
   return `Discover ${describeTabNoun(tab)}`;
+}
+
+/** Held while the first filesystem scan is still running. */
+export const SKILL_SCAN_LOADING_TEXT = 'Scanning installed skills…';
+
+/** Says why the grid is empty when the scan itself failed. */
+export function describeSkillScanFailure(error: string): string {
+  return `Could not read installed skills: ${error}`;
 }
 
 /** Stands in for the grid when the search leaves nothing to draw. */

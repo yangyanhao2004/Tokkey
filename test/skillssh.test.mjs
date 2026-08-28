@@ -230,11 +230,11 @@ test('installs a resolved listing and reconciles a duplicate without copying aga
     assert.equal(readFileSync(path.join(filesystem.getCanonicalSkillPath('review-tools'), 'SKILL.md'), 'utf8').includes('Review'), true);
     assert.equal((await scanner.scanInstalledSkills())[0].agentBadges.find((badge) => badge.agent === 'claudeCode').state, 'checked');
 
-    const alreadyInstalled = await service.installListing(listing, ['hermes'], 'reportConflict');
+    const alreadyInstalled = await service.installListing(listing, ['codex'], 'reportConflict');
     assert.equal(alreadyInstalled.status, 'alreadyInstalled');
     assert.equal((await service.getSkillCardState(listing)).installedSkill.name, 'review-tools');
     const finalSkill = (await scanner.scanInstalledSkills()).find((skill) => skill.name === 'review-tools');
-    assert.equal(finalSkill.agentBadges.find((badge) => badge.agent === 'hermes').state, 'checked');
+    assert.equal(finalSkill.agentBadges.find((badge) => badge.agent === 'codex').state, 'checked');
     assert.equal(finalSkill.agentBadges.find((badge) => badge.agent === 'claudeCode').state, 'unchecked');
   } finally {
     workspace.cleanup();

@@ -15,18 +15,16 @@ export type { SkillContentHashing } from './SkillContentHasher';
 export const SKILL_ROOTS: readonly SkillRoot[] = [
   'amis',
   'claudeCode',
-  'hermes',
   'codex',
   'agents'
 ];
 
-const AGENT_BADGE_ORDER: readonly SkillAgent[] = ['hermes', 'claudeCode', 'codex'];
+const AGENT_BADGE_ORDER: readonly SkillAgent[] = ['claudeCode', 'codex'];
 
 /** Agents that read each root. The Amis root is an app-owned source only. */
 const ROOT_AGENTS: Readonly<Record<SkillRoot, readonly SkillAgent[]>> = {
   amis: [],
   claudeCode: ['claudeCode'],
-  hermes: ['hermes'],
   codex: ['codex'],
   agents: ['codex']
 };

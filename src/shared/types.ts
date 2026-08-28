@@ -337,10 +337,10 @@ export interface LocalModelCatalogScan {
 }
 
 /** Filesystem roots whose contents are visible to the supported agents. */
-export type SkillRoot = 'amis' | 'claudeCode' | 'hermes' | 'codex' | 'agents';
+export type SkillRoot = 'amis' | 'claudeCode' | 'codex' | 'agents';
 
 /** Agents that can load a skill from one of the supported roots. */
-export type SkillAgent = 'hermes' | 'claudeCode' | 'codex';
+export type SkillAgent = 'claudeCode' | 'codex';
 
 /** A parsed subset of the frontmatter in a skill's SKILL.md. */
 export interface SkillManifest {

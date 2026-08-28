@@ -1,28 +1,31 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   CATALOG_TABS,
   HUB_AGENTS,
   ICON_BASE_PATH,
   MANAGE_LABEL,
+  MCP_CATALOG,
   PAGE_SUBTITLE,
   PAGE_TITLE,
   SEARCH_LABEL,
   SEARCH_PLACEHOLDER,
   SECTION_HEADING,
+  SKILL_SCAN_LOADING_TEXT,
   TAB_GROUP_LABEL,
   WORKS_WITH_LABEL,
   describeAgentAction,
   describeCompatibility,
   describeDiscoverAction,
   describeEmptyCatalog,
+  describeSkillScanFailure,
   describeUploadAction,
   findAgent,
   isAgentInstalled,
   readAgentAvailability,
   resolveCompatibilityState,
   selectCatalogEntries,
+  toSkillCatalogEntries,
   type AgentAvailability,
-  type AgentId,
   type CatalogEntry,
   type CatalogTab,
   type CompatibilityChip,
@@ -30,81 +33,14 @@ import {
   type HubAgent
 } from './agentHubContent';
 import { useAgentDetection } from '../hooks/useAgentDetection';
+import { useInstalledSkills } from '../hooks/useInstalledSkills';
+import { AGENT_ARTWORK, AgentMarkTile } from '../components/AgentMark';
+import { ManageSkillDialog } from '../components/ManageSkillDialog';
 import { PageShell } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
 import { SearchField } from '../components/SearchField';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { TitleBlock } from '../components/TitleBlock';
-
-interface AgentArtwork {
-  /** Mark for the agent row's tile, drawn over `tileClass`. */
-  readonly markFile: string;
-  readonly tileClass: string;
-  readonly markClass: string;
-  /** Round mark for a compatibility chip, drawn over `avatarClass`. */
-  readonly avatarFile: string;
-  readonly avatarClass: string;
-  readonly avatarMarkClass: string;
-}
-
-/**
- * Each agent's own artwork, from the Amis PC library: the row tile (Claude
- * 426:910, Codex 426:923) and the chip avatar (Claude 1051:3869, Codex
- * 1051:3881). Both designs size the mark as a fraction of the box it sits in,
- * so every dimension here stays explicit rather than being filled.
- *
- * These are classes rather than style attributes because the renderer's CSP
- * forbids inline styles, and they live beside the components that draw them
- * rather than in the content module, which owns copy instead of appearance.
- */
-const AGENT_ARTWORK: Record<AgentId, AgentArtwork> = {
-  'claude-code': {
-    markFile: 'agent-claude-mark.svg',
-    // A flat brand fill lit by the white top-down wash Figma lays over it.
-    tileClass: 'bg-agent-claude bg-linear-to-b from-white/20 to-transparent',
-    // Figma insets the mark 10% on every side of the tile.
-    markClass: 'size-[22.4px]',
-    // The chip avatar ships its own tinted disc, so the box behind it is bare.
-    avatarFile: 'agent-claude-avatar.svg',
-    avatarClass: '',
-    avatarMarkClass: 'size-[20px]'
-  },
-  codex: {
-    markFile: 'agent-codex-mark.png',
-    // Figma's tile is plain white; the hairline keeps it off the white card.
-    tileClass: 'bg-white ring-1 ring-tile-border',
-    // Inset 5% top and bottom, and near enough square to letterbox itself.
-    markClass: 'size-[25.2px] object-contain',
-    avatarFile: 'agent-codex-mark.png',
-    avatarClass: 'bg-agent-codex/10',
-    avatarMarkClass: 'size-[14px] object-contain'
-  }
-};
-
-interface AgentMarkTileProps {
-  agentId: AgentId;
-}
-
-/**
- * The 28px tile fronting an agent card. Each agent brings its own background
- * and mark, so unlike the shared `IconTile` this one carries no recess of its
- * own — the artwork is the tile.
- */
-function AgentMarkTile({ agentId }: AgentMarkTileProps) {
-  const artwork = AGENT_ARTWORK[agentId];
-
-  return (
-    <span
-      className={`flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-[5.385px] ${artwork.tileClass}`}
-    >
-      <img
-        className={`block max-w-none ${artwork.markClass}`}
-        src={`${ICON_BASE_PATH}/${artwork.markFile}`}
-        alt=""
-      />
-    </span>
-  );
-}
 
 interface AgentCardProps {
   agent: HubAgent;
@@ -218,6 +154,8 @@ function CompatibilityChipMark({ chip, availability }: CompatibilityChipProps) {
 interface CatalogCardProps {
   entry: CatalogEntry;
   availability: AgentAvailability;
+  /** Omitted for entries with nothing to manage yet, which disables the button. */
+  onManage?: () => void;
 }
 
 /**
@@ -225,7 +163,7 @@ interface CatalogCardProps {
  * The card is at least as tall as the design's fixed 148px but grows rather
  * than clipping, since a longer description would otherwise spill out.
  */
-function CatalogCard({ entry, availability }: CatalogCardProps) {
+function CatalogCard({ entry, availability, onManage }: CatalogCardProps) {
   return (
     <article
       className="flex min-h-[148px] flex-col justify-between gap-4 rounded-[12px] border border-vibrant-tertiary p-4"
@@ -240,7 +178,11 @@ function CatalogCard({ entry, availability }: CatalogCardProps) {
             {entry.source}
           </span>
         </div>
-        <p className="w-full text-[10px] leading-[12px] text-text-secondary">{entry.description}</p>
+        {/* Skill descriptions are written for agents and run long; clamping them
+            keeps every card the height the design draws. */}
+        <p className="line-clamp-3 w-full text-[10px] leading-[12px] text-text-secondary" title={entry.description}>
+          {entry.description}
+        </p>
       </div>
 
       <div className="flex w-full flex-col gap-2">
@@ -257,7 +199,12 @@ function CatalogCard({ entry, availability }: CatalogCardProps) {
             ))}
           </div>
 
-          <PushButton variant="plain-dark" testId={`catalog-manage-${entry.id}`}>
+          <PushButton
+            variant="plain-dark"
+            onClick={onManage}
+            disabled={onManage === undefined}
+            testId={`catalog-manage-${entry.id}`}
+          >
             {MANAGE_LABEL}
           </PushButton>
         </div>
@@ -274,11 +221,25 @@ interface CatalogSectionProps {
  * "Skills & MCPs": the tab picker, the search and add actions, then the grid
  * of whatever the open tab holds. The tab and query are the section's own
  * state; agent availability is the page's, since the agent row reads it too.
+ *
+ * The skill cards come from the main process scan of the agent skill roots, so
+ * a chip is checked exactly when that agent can already load the skill. MCPs
+ * are still fixed content.
  */
 function CatalogSection({ availability }: CatalogSectionProps) {
   const [tab, setTab] = useState<CatalogTab>('skills');
   const [query, setQuery] = useState('');
-  const entries = selectCatalogEntries(tab, query);
+  const [managedSkillId, setManagedSkillId] = useState<string | null>(null);
+  const { skills, isLoading, error, applyAgentSelection, uninstall } = useInstalledSkills();
+
+  // Mapping a whole scan is wasted work on every keystroke of the search box.
+  const skillEntries = useMemo(() => toSkillCatalogEntries(skills ?? []), [skills]);
+  const entries = selectCatalogEntries(tab === 'skills' ? skillEntries : MCP_CATALOG, query);
+  // Only the skills tab is backed by a scan, so only it can be loading or failed.
+  const isScanning = tab === 'skills' && isLoading;
+  const scanError = tab === 'skills' ? error : null;
+  // Held by id rather than by object so the dialog follows the rescanned card.
+  const managedSkill = skills?.find((skill) => skill.id === managedSkillId) ?? null;
 
   return (
     <section className="flex min-h-0 w-full flex-1 flex-col gap-3" data-testid="catalog-section">
@@ -316,7 +277,25 @@ function CatalogSection({ availability }: CatalogSectionProps) {
       {/* `min-h-0` keeps a catalog of any length inside the page rather than
           pushing the window's content out of view. */}
       <div className="min-h-0 w-full flex-1 overflow-y-auto">
-        {entries.length === 0 && (
+        {isScanning && (
+          <p
+            className="w-full py-2 text-[10px] leading-[12px] text-text-secondary"
+            data-testid="catalog-loading"
+          >
+            {SKILL_SCAN_LOADING_TEXT}
+          </p>
+        )}
+
+        {scanError && (
+          <p
+            className="w-full py-2 text-[10px] leading-[12px] text-text-secondary"
+            data-testid="catalog-error"
+          >
+            {describeSkillScanFailure(scanError)}
+          </p>
+        )}
+
+        {!isScanning && !scanError && entries.length === 0 && (
           <p
             className="w-full py-2 text-[10px] leading-[12px] text-text-secondary"
             data-testid="catalog-empty"
@@ -327,10 +306,25 @@ function CatalogSection({ availability }: CatalogSectionProps) {
 
         <div className="grid w-full grid-cols-2 gap-3">
           {entries.map((entry) => (
-            <CatalogCard key={entry.id} entry={entry} availability={availability} />
+            <CatalogCard
+              key={entry.id}
+              entry={entry}
+              availability={availability}
+              // A catalog entry's id is its skill's id, so only skills manage.
+              onManage={tab === 'skills' ? () => setManagedSkillId(entry.id) : undefined}
+            />
           ))}
         </div>
       </div>
+
+      {managedSkill && (
+        <ManageSkillDialog
+          skill={managedSkill}
+          onApply={(selectedAgents) => applyAgentSelection(managedSkill.id, selectedAgents)}
+          onUninstall={() => uninstall(managedSkill.id)}
+          onClose={() => setManagedSkillId(null)}
+        />
+      )}
     </section>
   );
 }

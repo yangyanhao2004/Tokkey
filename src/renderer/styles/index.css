@@ -94,6 +94,20 @@
   --color-agent-claude: #d97757;
   --color-agent-codex: #6155f5;
 
+  /* Manage Skill dialog (Figma 225:1301). It floats over the window rather than
+     sitting on a page, so it carries its own opaque hairlines and surfaces. */
+  --color-dialog-border: #dededb;
+  --color-dialog-divider: #e6e6e3;
+  --color-dialog-eyebrow: #6f6f6b;
+  /* An agent the skill is not deployed to, and the same card once selected. */
+  --color-toggle-bg: #fafaf9;
+  --color-toggle-border: #e3e3e0;
+  --color-toggle-selected-bg: #f2f2f0;
+  --color-toggle-selected-border: #bdbdb8;
+  /* The 12px check box at the end of a toggle, off then on. */
+  --color-toggle-check-off: rgba(120, 120, 128, 0.14);
+  --color-toggle-check-on: #1d1d1b;
+
   /* SF Pro is the system UI face on macOS; no web font is bundled or fetched. */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "Helvetica Neue", sans-serif;
