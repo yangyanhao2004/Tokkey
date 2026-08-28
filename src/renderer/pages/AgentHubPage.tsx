@@ -11,13 +11,13 @@ import {
   type CatalogTab,
   type HubAgent
 } from './agentHubContent';
-import { DiscoverSkillsPage } from './DiscoverSkillsPage';
 import {
   useAgentAvailability,
   useAgentDetectionRefresh
 } from '../components/AgentDetectionProvider';
 import { AgentMarkTile } from '../components/AgentMark';
 import { McpCatalogTab } from '../components/McpCatalogTab';
+import { useNavigation } from '../components/NavigationProvider';
 import { PageShell } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
 import { SegmentedControl } from '../components/SegmentedControl';
@@ -111,11 +111,11 @@ function CatalogSection({ onDiscoverSkills }: CatalogSectionProps) {
  * The agent row and every catalog chip read the one shared detection, so they
  * agree on which agents this machine actually has.
  *
- * "Discover Skill" swaps the whole page for the Discover Skills pane, which
- * returns here through the header's Back button.
+ * "Discover Skill" navigates to the Discover Skills pane, which the header's
+ * Back button returns from like any other move.
  */
 export function AgentHubPage() {
-  const [isDiscoveringSkills, setIsDiscoveringSkills] = useState(false);
+  const { navigate } = useNavigation();
   const refreshAgentDetection = useAgentDetectionRefresh();
 
   // Opening the hub re-probes PATH, so installing an agent from a terminal and
@@ -123,10 +123,6 @@ export function AgentHubPage() {
   useEffect(() => {
     refreshAgentDetection();
   }, [refreshAgentDetection]);
-
-  if (isDiscoveringSkills) {
-    return <DiscoverSkillsPage onBack={() => setIsDiscoveringSkills(false)} />;
-  }
 
   return (
     <PageShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} testId="agent-hub">
@@ -137,7 +133,7 @@ export function AgentHubPage() {
         <span className="h-px w-full bg-separator" />
       </div>
 
-      <CatalogSection onDiscoverSkills={() => setIsDiscoveringSkills(true)} />
+      <CatalogSection onDiscoverSkills={() => navigate('discover-skills')} />
     </PageShell>
   );
 }

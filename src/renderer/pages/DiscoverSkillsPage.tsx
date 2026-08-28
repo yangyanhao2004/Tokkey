@@ -5,11 +5,6 @@ import { DiscoverReposTab } from '../components/DiscoverReposTab';
 import { PageShell } from '../components/PageShell';
 import { SkillsShTab } from '../components/SkillsShTab';
 
-interface DiscoverSkillsPageProps {
-  /** Returns to the Agent Hub; also drives the header's back button. */
-  onBack: () => void;
-}
-
 /**
  * The pane behind the Agent Hub's "Discover Skill" button (Figma 198:9865):
  * skills Tokiie can install, from cloned repositories or from skills.sh.
@@ -18,7 +13,7 @@ interface DiscoverSkillsPageProps {
  * listing — and switching tabs leaves neither behind. Every card's chips read
  * the shared detection, so they all agree on which agents this machine has.
  */
-export function DiscoverSkillsPage({ onBack }: DiscoverSkillsPageProps) {
+export function DiscoverSkillsPage() {
   const [tab, setTab] = useState<DiscoverTab>('repos');
   const refreshAgentDetection = useAgentDetectionRefresh();
 
@@ -29,7 +24,7 @@ export function DiscoverSkillsPage({ onBack }: DiscoverSkillsPageProps) {
   }, [refreshAgentDetection]);
 
   return (
-    <PageShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} testId="discover-skills" onBack={onBack}>
+    <PageShell title={PAGE_TITLE} subtitle={PAGE_SUBTITLE} testId="discover-skills">
       {tab === 'repos' ? (
         <DiscoverReposTab onTabChange={setTab} />
       ) : (

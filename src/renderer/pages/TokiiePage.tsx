@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import {
   CONNECTED_DEVICE,
   ICON_BASE_PATH,
@@ -9,9 +8,9 @@ import {
   formatModelCount,
   type InstalledModel
 } from './tokiieContent';
-import { AddModelPage } from './AddModelPage';
 import { useInstalledModels } from '../hooks/useInstalledModels';
 import { IconTile } from '../components/IconTile';
+import { useNavigation } from '../components/NavigationProvider';
 import { PageShell } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
 import { TitleBlock } from '../components/TitleBlock';
@@ -164,20 +163,16 @@ function LocalModelsCard({ onAddModel }: LocalModelsCardProps) {
 
 /**
  * The page behind the "Tokiie" nav row: device status and local models.
- * "Add model" swaps the whole page for the Add Model panel, which returns here
- * through the header's Back button.
+ * "Add model" navigates to the Add Model panel, which the header's Back button
+ * returns from like any other move.
  */
 export function TokiiePage() {
-  const [isAddingModel, setIsAddingModel] = useState(false);
-
-  if (isAddingModel) {
-    return <AddModelPage onBack={() => setIsAddingModel(false)} />;
-  }
+  const { navigate } = useNavigation();
 
   return (
     <PageShell title="Tokiie" subtitle="Connect Tokii and manage your local models." testId="tokiie">
       <DeviceCard />
-      <LocalModelsCard onAddModel={() => setIsAddingModel(true)} />
+      <LocalModelsCard onAddModel={() => navigate('add-model')} />
     </PageShell>
   );
 }
