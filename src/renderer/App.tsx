@@ -4,6 +4,7 @@ import { Sidebar } from './components/Sidebar';
 import { AgentHubPage } from './pages/AgentHubPage';
 import { RouterPage } from './pages/RouterPage';
 import { TokiiePage } from './pages/TokiiePage';
+import { ChatPage } from './pages/ChatPage';
 import { UnbuiltPage } from './pages/UnbuiltPage';
 
 /**
@@ -13,7 +14,8 @@ import { UnbuiltPage } from './pages/UnbuiltPage';
 const PAGE_BY_NAV_ID: Partial<Record<NavItemId, ComponentType>> = {
   tokiie: TokiiePage,
   router: RouterPage,
-  'agent-hub': AgentHubPage
+  'agent-hub': AgentHubPage,
+  chat: ChatPage
 };
 
 /**
