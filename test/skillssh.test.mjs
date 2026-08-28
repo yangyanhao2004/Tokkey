@@ -127,9 +127,14 @@ test('slices ten UI pages from one cached API page and keeps search results in m
   assert.equal(pageTen.skills[0].skillId, 'skill-0');
   assert.deepEqual(apiCalls, [0, 1]);
 
-  await service.fetchSearchPage('tools', 0);
-  await service.fetchSearchPage(' tools ', 1);
+  const searchPageZero = await service.fetchSearchPage('tools', 0);
+  const searchPageOne = await service.fetchSearchPage(' tools ', 1);
   assert.deepEqual(searchCalls, ['tools']);
+  assert.equal(searchPageZero.skills.length, 20);
+  assert.equal(searchPageZero.total, 25);
+  assert.equal(searchPageZero.hasMore, true);
+  assert.equal(searchPageOne.skills.length, 5);
+  assert.equal(searchPageOne.hasMore, false);
 });
 
 test('downloads a site skill once and publishes it atomically', async () => {
@@ -236,6 +241,16 @@ test('installs a resolved listing and reconciles a duplicate without copying aga
     const finalSkill = (await scanner.scanInstalledSkills()).find((skill) => skill.name === 'review-tools');
     assert.equal(finalSkill.agentBadges.find((badge) => badge.agent === 'codex').state, 'checked');
     assert.equal(finalSkill.agentBadges.find((badge) => badge.agent === 'claudeCode').state, 'unchecked');
+
+    // One page of cards is resolved in a single pass, and only what is actually
+    // installed comes back with a skill attached.
+    const cardStates = await service.getSkillCardStates([
+      listing,
+      { ...listing, id: 'owner/repo/other', skillId: 'other', name: 'other' }
+    ]);
+    assert.equal(cardStates.length, 2);
+    assert.equal(cardStates[0].installedSkill.name, 'review-tools');
+    assert.equal(cardStates[1].installedSkill, null);
   } finally {
     workspace.cleanup();
   }

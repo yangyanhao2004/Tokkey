@@ -4,7 +4,7 @@ import { PAGE_SUBTITLE, PAGE_TITLE, type DiscoverTab } from './discoverSkillsCon
 import { useAgentDetection } from '../hooks/useAgentDetection';
 import { DiscoverReposTab } from '../components/DiscoverReposTab';
 import { PageShell } from '../components/PageShell';
-import { SkillDirectoryTab } from '../components/SkillDirectoryTab';
+import { SkillsShTab } from '../components/SkillsShTab';
 
 interface DiscoverSkillsPageProps {
   /** Returns to the Agent Hub; also drives the header's back button. */
@@ -28,7 +28,7 @@ export function DiscoverSkillsPage({ onBack }: DiscoverSkillsPageProps) {
       {tab === 'repos' ? (
         <DiscoverReposTab availability={availability} onTabChange={setTab} />
       ) : (
-        <SkillDirectoryTab availability={availability} onTabChange={setTab} />
+        <SkillsShTab availability={availability} onTabChange={setTab} />
       )}
     </PageShell>
   );

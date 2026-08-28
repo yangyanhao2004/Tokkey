@@ -150,6 +150,12 @@ export interface CatalogEntry {
   readonly source?: string;
   readonly description: string;
   readonly compatibility: readonly CompatibilityChip[];
+  /**
+   * What this one card's button says, for a grid whose cards do not all offer
+   * the same thing — the skills.sh listing manages a skill already installed
+   * and adds one that is not. Omitted where the whole grid agrees.
+   */
+  readonly actionLabel?: string;
 }
 
 /**

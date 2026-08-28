@@ -136,9 +136,16 @@ export default class IpcController {
         this.fetchSkillsPage(this.requirePage(page)),
       'discover-skills:search': (query: unknown) =>
         this.searchSkills(this.requireString(query, 'skills.sh search query')),
+      'discover-skills:search-page': (query: unknown, page: unknown) =>
+        this.searchSkillsPage(
+          this.requireString(query, 'skills.sh search query'),
+          this.requirePage(page)
+        ),
       'discover-skills:refresh-installed': () => this.refreshSkillsInstalledStatus(),
       'discover-skills:card-state': (listing: unknown) =>
         this.getSkillCardState(this.requireSkillsShSkill(listing)),
+      'discover-skills:card-states': (listings: unknown) =>
+        this.getSkillCardStates(this.requireSkillsShSkills(listings)),
       'discover-skills:install': (request: unknown) =>
         this.installSkill(this.requireSkillsShInstallRequest(request)),
       'models:list': (request: unknown) => this.listLocalModels(this.requireModelRequest(request)),
@@ -366,14 +373,24 @@ export default class IpcController {
     return this.discoverSkills.searchSkills(query);
   }
 
-  /** Rebuilds installed comparison indexes for both directory tabs. */
+  /** Slices one UI-sized page out of a search the service already holds. */
+  searchSkillsPage(query: string, page: number): Promise<SkillsShPage> {
+    return this.discoverSkills.fetchSearchPage(query, page);
+  }
+
+  /** Rebuilds installed comparison indexes for both discover tabs. */
   refreshSkillsInstalledStatus(): Promise<void> {
     return this.discoverSkills.refreshInstalledStatus();
   }
 
-  /** Returns the session-aware installed state for one directory listing. */
+  /** Returns the session-aware installed state for one skills.sh listing. */
   getSkillCardState(listing: SkillsShSkill): Promise<SkillsShCardState> {
     return this.discoverSkills.getSkillCardState(listing);
+  }
+
+  /** Returns the installed state for a whole page of listings in one pass. */
+  getSkillCardStates(listings: SkillsShSkill[]): Promise<SkillsShCardState[]> {
+    return this.discoverSkills.getSkillCardStates(listings);
   }
 
   /** Resolves, imports, and deploys one skills.sh listing. */
@@ -524,6 +541,13 @@ export default class IpcController {
       sourceKind,
       url: this.requireString(listing.url, 'skills.sh listing URL')
     };
+  }
+
+  private requireSkillsShSkills(value: unknown): SkillsShSkill[] {
+    if (!Array.isArray(value)) {
+      throw new TypeError('skills.sh listings must be an array');
+    }
+    return value.map((listing) => this.requireSkillsShSkill(listing));
   }
 
   private requireSkillsShInstallRequest(value: unknown): SkillsShInstallRequest {

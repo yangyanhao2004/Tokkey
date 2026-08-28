@@ -4,6 +4,7 @@ import type {
   CachedRepositorySkill,
   InstallRepositorySkillRequest,
   InstalledSkill,
+  SkillConflictStrategy,
   SkillInstallResult,
   SkillAgent
 } from '../../shared/types';
@@ -20,6 +21,29 @@ export interface SkillInstallerOptions {
   importer: SkillFolderImporter;
   deployer: SkillDeployer;
   cachedInstalledMatcher?: CachedInstalledSkillMatcher;
+}
+
+/**
+ * One install whose source folder has already been resolved on disk, whether by
+ * a repository checkout or by a download from a published site.
+ */
+export interface ResolvedSkillInstallRequest {
+  sourcePath: string;
+  /** The name the folder is published under in Tokiie's skills folder. */
+  skillName: string;
+  enabledAgents: SkillAgent[];
+  conflictStrategy: SkillConflictStrategy;
+  /**
+   * What reusing an identical installed folder is called. The repository tab
+   * has always reported `reused`; the skills.sh tab says `alreadyInstalled`.
+   */
+  duplicateStatus?: 'reused' | 'alreadyInstalled';
+}
+
+/** A finished install, plus the catalog entry it actually landed on. */
+export interface ResolvedSkillInstallation extends SkillInstallResult {
+  /** Null when nothing was installed, i.e. a conflict or a skipped import. */
+  installedSkill: InstalledSkill | null;
 }
 
 /** Installs a cached repository card and then applies its complete agent selection. */
@@ -41,22 +65,49 @@ export class SkillInstaller {
   /** Resolves the source from cache state so renderer paths are never trusted. */
   async install(request: InstallRepositorySkillRequest): Promise<SkillInstallResult> {
     const sourceCard = await this.findSourceCard(request.source, request.relativePath);
-    const installedSkills = await this.installedCatalog.scanInstalledSkills();
-    const duplicate = this.cachedInstalledMatcher.findMatch(sourceCard.absolutePath, installedSkills);
-    if (duplicate && request.conflictStrategy === 'reportConflict') {
-      const reconciledSkills = await this.deployer.applyAgentSelection(duplicate, request.enabledAgents);
-      return {
-        // Keep the repository-tab compatibility status while the directory flow uses alreadyInstalled.
-        status: 'reused',
-        destinationPath: duplicate.primaryInstallation.absolutePath,
-        conflictPath: null,
-        installedSkills: reconciledSkills
-      };
+    const installation = await this.installResolvedSkill({
+      sourcePath: sourceCard.absolutePath,
+      skillName: sourceCard.name,
+      enabledAgents: request.enabledAgents,
+      conflictStrategy: request.conflictStrategy,
+      // Keep the repository-tab compatibility status while the skills.sh flow uses alreadyInstalled.
+      duplicateStatus: 'reused'
+    });
+    return {
+      status: installation.status,
+      destinationPath: installation.destinationPath,
+      conflictPath: installation.conflictPath,
+      installedSkills: installation.installedSkills
+    };
+  }
+
+  /**
+   * Publishes one already-resolved folder into Tokiie's skills folder and then
+   * applies its complete agent selection.
+   *
+   * Every install ends here — a repository card, and a skills.sh listing once
+   * its source has been cloned or downloaded — so a skill lands the same way
+   * whichever tab asked for it: an identical folder already installed is reused
+   * rather than copied again, and only its deployment changes.
+   */
+  async installResolvedSkill(request: ResolvedSkillInstallRequest): Promise<ResolvedSkillInstallation> {
+    if (request.conflictStrategy === 'reportConflict') {
+      const duplicate = await this.findDuplicate(request.sourcePath);
+      if (duplicate) {
+        const reconciledSkills = await this.deployer.applyAgentSelection(duplicate, request.enabledAgents);
+        return {
+          status: request.duplicateStatus ?? 'reused',
+          destinationPath: duplicate.primaryInstallation.absolutePath,
+          conflictPath: null,
+          installedSkills: reconciledSkills,
+          installedSkill: duplicate
+        };
+      }
     }
 
     const importResult = this.importer.importSkill(
-      sourceCard.absolutePath,
-      sourceCard.name,
+      request.sourcePath,
+      request.skillName,
       request.conflictStrategy
     );
     if (importResult.status === 'conflict' || importResult.status === 'skipped') {
@@ -64,7 +115,8 @@ export class SkillInstaller {
         status: importResult.status,
         destinationPath: importResult.destinationPath,
         conflictPath: importResult.conflictPath,
-        installedSkills: await this.installedCatalog.scanInstalledSkills()
+        installedSkills: await this.installedCatalog.scanInstalledSkills(),
+        installedSkill: null
       };
     }
 
@@ -78,7 +130,8 @@ export class SkillInstaller {
       status: importResult.status,
       destinationPath: importResult.destinationPath,
       conflictPath: null,
-      installedSkills: reconciledSkills
+      installedSkills: reconciledSkills,
+      installedSkill: importedSkill
     };
   }
 
@@ -94,6 +147,21 @@ export class SkillInstaller {
       enabledAgents,
       conflictStrategy
     });
+  }
+
+  /**
+   * The installed skill this exact folder was already published as, if any. A
+   * failed hash pass reads as "no duplicate" rather than as a failure: the
+   * importer still refuses a name a different skill holds, so the worst case is
+   * a conflict reported instead of a folder quietly reused.
+   */
+  private async findDuplicate(sourcePath: string): Promise<InstalledSkill | null> {
+    try {
+      const installedSkills = await this.installedCatalog.scanInstalledSkills();
+      return this.cachedInstalledMatcher.findMatch(sourcePath, installedSkills);
+    } catch {
+      return null;
+    }
   }
 
   private async findSourceCard(source: string, relativePath: string): Promise<CachedRepositorySkill> {

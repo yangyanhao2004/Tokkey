@@ -13,8 +13,8 @@ import {
   describeRepositoryAddOutcome,
   describeRepositoryScanFailure,
   describeRepositorySkillAction,
-  describeRepositorySkillInstallFailure,
-  describeRepositorySkillInstallOutcome,
+  describeSkillInstallFailure,
+  describeSkillInstallOutcome,
   toRepositoryAddFailureNotice,
   toRepositorySkillEntries,
   type DiscoverTab
@@ -78,11 +78,11 @@ export function DiscoverReposTab({ availability, onTabChange }: DiscoverReposTab
       try {
         const result = await installSkill(managedSkill, selectedAgents);
         setNotice(
-          describeRepositorySkillInstallOutcome(result, managedSkill.name, selectedAgents.length)
+          describeSkillInstallOutcome(result, managedSkill.name, selectedAgents.length)
         );
       } catch (cause) {
         setNotice(
-          describeRepositorySkillInstallFailure(
+          describeSkillInstallFailure(
             cause instanceof Error ? cause.message : String(cause)
           )
         );

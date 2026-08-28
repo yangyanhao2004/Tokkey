@@ -77,7 +77,11 @@ function CompatibilityChipMark({ chip, availability }: CompatibilityChipProps) {
 export interface CatalogCardProps {
   entry: CatalogEntry;
   availability: AgentAvailability;
-  /** What the card's one button says; the Discover pane's cards say "+ Add". */
+  /**
+   * What the card's one button says; the Discover pane's cards say "+ Add".
+   * The entry's own label wins, since a grid whose cards differ says so per
+   * card rather than for all of them at once.
+   */
   actionLabel?: string;
   /** Omitted for entries with nothing to act on yet, which disables the button. */
   onAction?: () => void;
@@ -137,7 +141,7 @@ export function CatalogCard({
             disabled={onAction === undefined}
             testId={`catalog-action-${entry.id}`}
           >
-            {actionLabel}
+            {entry.actionLabel ?? actionLabel}
           </PushButton>
         </div>
       </div>
