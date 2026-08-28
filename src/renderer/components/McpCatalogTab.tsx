@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import {
+  ADD_MCP_LABEL,
   MCP_CATALOG,
-  describeDiscoverAction,
   describeEmptyCatalog,
-  describeUploadAction,
   selectCatalogEntries,
   type AgentAvailability
 } from '../pages/agentHubContent';
@@ -15,9 +14,9 @@ export interface McpCatalogTabProps {
 }
 
 /**
- * The "MCPs" tab. Its entries are still fixed content, so nothing here scans or
- * installs: the buttons are drawn for the layout the design asks for and do
- * nothing until an MCP catalog backs them.
+ * The "MCPs" tab (Figma 225:2405). Its entries are still fixed content, so
+ * nothing here scans or installs: "+ Add MCP" is drawn for the layout the
+ * design asks for and does nothing until the Add MCP dialog exists.
  */
 export function McpCatalogTab({ availability }: McpCatalogTabProps) {
   const [query, setQuery] = useState('');
@@ -27,14 +26,7 @@ export function McpCatalogTab({ availability }: McpCatalogTabProps) {
     <CatalogTabLayout
       query={query}
       onQueryChange={setQuery}
-      actions={
-        <>
-          <PushButton variant="tinted" testId="catalog-upload">
-            {describeUploadAction('mcps')}
-          </PushButton>
-          <PushButton testId="catalog-discover">{describeDiscoverAction('mcps')}</PushButton>
-        </>
-      }
+      actions={<PushButton testId="catalog-add-mcp">{ADD_MCP_LABEL}</PushButton>}
     >
       {entries.length === 0 && (
         <CatalogMessage testId="catalog-empty">{describeEmptyCatalog('mcps', query)}</CatalogMessage>

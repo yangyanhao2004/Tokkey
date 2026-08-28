@@ -21,7 +21,7 @@ export interface AgentInstallation {
 }
 
 /** Supported local configuration sources for installed MCP servers. */
-export type McpAgent = 'claudeCode' | 'hermes' | 'codex';
+export type McpAgent = 'claudeCode' | 'codex';
 
 /** Transport names used by the normalized MCP catalog. */
 export type McpConnectionType = 'stdio' | 'sse' | 'streamable_http';

@@ -297,6 +297,14 @@ export function describeDiscoverAction(tab: CatalogTab): string {
   return `Discover ${describeTabNoun(tab)}`;
 }
 
+/**
+ * The MCPs tab's one action (Figma 225:2416). MCPs are not uploaded from disk
+ * or browsed from a registry the way skills are — an MCP is a configuration the
+ * user writes — so the tab offers a single button rather than the skills tab's
+ * Upload and Discover pair.
+ */
+export const ADD_MCP_LABEL = '+ Add MCP';
+
 /** Held while the first filesystem scan is still running. */
 export const SKILL_SCAN_LOADING_TEXT = 'Scanning installed skills…';
 

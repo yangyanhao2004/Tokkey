@@ -3,7 +3,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parse as parseToml } from '@iarna/toml';
-import { parse as parseYaml } from 'yaml';
 import { McpConfigurationCodec } from '../../shared/McpConfiguration';
 import type {
   InstalledMcp,
@@ -17,7 +16,7 @@ import type {
 } from '../../shared/types';
 
 /** Stable order used by the catalog cards and their agent badges. */
-export const MCP_AGENT_ORDER: readonly McpAgent[] = ['claudeCode', 'hermes', 'codex'];
+export const MCP_AGENT_ORDER: readonly McpAgent[] = ['claudeCode', 'codex'];
 
 /** Adapter contract for one agent's user-scope MCP configuration file. */
 export interface McpAgentConfigAdapter {
@@ -208,81 +207,6 @@ export class ClaudeCodeMcpAdapter implements McpAgentConfigAdapter {
   }
 }
 
-/** Parses Hermes' top-level ~/.hermes/config.yaml MCP mapping. */
-export class HermesMcpAdapter implements McpAgentConfigAdapter {
-  private readonly support = new McpAdapterSupport();
-
-  agent(): McpAgent {
-    return 'hermes';
-  }
-
-  filePath(homeDirectory: string): string {
-    return path.join(homeDirectory, '.hermes', 'config.yaml');
-  }
-
-  parse(text: string): McpAgentConfigurationReadout {
-    if (text.trim().length === 0) {
-      return { servers: [], skipped: [] };
-    }
-    const root = parseYaml(text) as unknown;
-    if (!this.support.isRecord(root)) {
-      throw new Error('Hermes configuration must be an object');
-    }
-    if (root.mcp_servers === undefined) {
-      return { servers: [], skipped: [] };
-    }
-    if (!this.support.isRecord(root.mcp_servers)) {
-      throw new Error('top-level mcp_servers must be an object');
-    }
-    const servers: McpServerConfiguration[] = [];
-    const skipped = [];
-    for (const name of Object.keys(root.mcp_servers).sort()) {
-      try {
-        const entry = root.mcp_servers[name];
-        if (!this.support.isRecord(entry)) {
-          throw new Error('entry must be an object');
-        }
-        const configuration = this.parseEntry(entry);
-        servers.push({ ...configuration, name: this.support.normalizeName(name) });
-      } catch (error) {
-        skipped.push({ name, reason: this.describeError(error) });
-      }
-    }
-    return { servers, skipped };
-  }
-
-  private parseEntry(entry: Record<string, unknown>): McpServerConfiguration {
-    const hasCommand = entry.command !== undefined;
-    const hasUrl = entry.url !== undefined;
-    if (hasCommand && hasUrl) {
-      throw new Error('server cannot include both command and url');
-    }
-    if (hasCommand) {
-      this.assertAllowedFields(entry, ['command', 'args', 'env']);
-      return this.support.makeStdio(entry.command, entry.args, entry.env);
-    }
-    this.assertAllowedFields(entry, ['url', 'transport']);
-    const connectionType = entry.transport === undefined
-      ? 'streamable_http'
-      : entry.transport;
-    if (connectionType !== 'streamable_http' && connectionType !== 'sse') {
-      throw new Error('unsupported transport');
-    }
-    return this.support.makeRemote(connectionType, entry.url);
-  }
-
-  private assertAllowedFields(entry: Record<string, unknown>, allowedFields: string[]): void {
-    const unsupported = Object.keys(entry).find((key) => !allowedFields.includes(key));
-    if (unsupported) {
-      throw new Error(`unsupported field: ${unsupported}`);
-    }
-  }
-
-  private describeError(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
-  }
-}
-
 /** Parses Codex's [mcp_servers.<name>] TOML tables. */
 export class CodexMcpAdapter implements McpAgentConfigAdapter {
   private readonly support = new McpAdapterSupport();
@@ -397,7 +321,6 @@ export class McpCatalogDeduplicator {
     const primaryAgent = agents[0] ?? 'claudeCode';
     const shortNames: Record<McpAgent, string> = {
       claudeCode: 'Claude',
-      hermes: 'Hermes',
       codex: 'Codex'
     };
     const shortName = shortNames[primaryAgent];
@@ -442,7 +365,6 @@ export class LocalMcpCatalogScanner {
     this.fileReader = options.fileReader ?? new McpConfigFileReader();
     this.adapters = options.adapters ?? [
       new ClaudeCodeMcpAdapter(),
-      new HermesMcpAdapter(),
       new CodexMcpAdapter()
     ];
     this.deduplicator = options.deduplicator ?? new McpCatalogDeduplicator();
@@ -477,7 +399,6 @@ export class LocalMcpCatalogScanner {
 }
 
 export { ClaudeCodeMcpAdapter as ClaudeCodeMCPAdapter };
-export { HermesMcpAdapter as HermesMCPAdapter };
 export { CodexMcpAdapter as CodexMCPAdapter };
 export { LocalMcpCatalogScanner as LocalMCPCatalogScanner };
 export { McpConfigurationCodec as CanonicalMcpCodec };

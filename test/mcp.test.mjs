@@ -7,7 +7,6 @@ import test from 'node:test';
 import {
   ClaudeCodeMcpAdapter,
   CodexMcpAdapter,
-  HermesMcpAdapter,
   LocalMcpCatalogScanner
 } from '../dist/main/mcp/McpCatalogScanner.js';
 import {
@@ -59,7 +58,7 @@ test('equivalent Claude and Codex stdio definitions merge into one card', async 
     assert.equal(result.failures.length, 0);
     assert.equal(result.servers.length, 1);
     assert.deepEqual(result.servers[0].agents, ['claudeCode', 'codex']);
-    assert.deepEqual(result.servers[0].badges.map((badge) => badge.state), ['checked', 'unchecked', 'checked']);
+    assert.deepEqual(result.servers[0].badges.map((badge) => badge.state), ['checked', 'checked']);
   } finally {
     home.cleanup();
   }
@@ -119,7 +118,6 @@ test('parses quoted Codex names and nested environment tables', () => {
 
 test('treats empty adapter input as an empty configuration', () => {
   assert.deepEqual(new ClaudeCodeMcpAdapter().parse(''), { servers: [], skipped: [] });
-  assert.deepEqual(new HermesMcpAdapter().parse(''), { servers: [], skipped: [] });
   assert.deepEqual(new CodexMcpAdapter().parse(''), { servers: [], skipped: [] });
 });
 
@@ -169,11 +167,10 @@ test('enforces the strict one-server full JSON schema', () => {
   );
 });
 
-test('applies one canonical MCP to Claude, Hermes, and Codex in one call', async () => {
+test('applies one canonical MCP to Claude and Codex in one call', async () => {
   const home = new TestHome();
   try {
     home.write('.claude.json', '{"theme":"dark"}\n');
-    home.write('.hermes/config.yaml', '# retained\nmodel: default\n');
     home.write('.codex/config.toml', 'model = "gpt-5"\n');
     const configurationJson = new McpConfigurationCodec().encode({
       name: 'tools',
@@ -186,16 +183,14 @@ test('applies one canonical MCP to Claude, Hermes, and Codex in one call', async
 
     await new LocalMcpConfigurationApplier({ homeDirectory: home.root }).apply(
       configurationJson,
-      ['claudeCode', 'hermes', 'codex']
+      ['claudeCode', 'codex']
     );
 
     assert.equal(JSON.parse(home.read('.claude.json')).theme, 'dark');
-    assert.match(home.read('.hermes/config.yaml'), /# retained/);
-    assert.match(home.read('.hermes/config.yaml'), /mcp_servers:/);
     assert.match(home.read('.codex/config.toml'), /model = "gpt-5"/);
     assert.match(home.read('.codex/config.toml'), /\[mcp_servers\."tools"\]/);
     const catalog = await new LocalMcpCatalogScanner({ homeDirectory: home.root }).scanInstalledMcps();
-    assert.deepEqual(catalog.servers[0].agents, ['claudeCode', 'hermes', 'codex']);
+    assert.deepEqual(catalog.servers[0].agents, ['claudeCode', 'codex']);
   } finally {
     home.cleanup();
   }
@@ -206,7 +201,7 @@ test('stages every selected adapter before writing and rejects Codex SSE', async
   try {
     const originalClaude = '{"theme":"dark"}\n';
     home.write('.claude.json', originalClaude);
-    home.write('.hermes/config.yaml', 'mcp_servers:\n  duplicate:\n    command: node\n');
+    home.write('.codex/config.toml', '[mcp_servers.duplicate]\ncommand = "node"\n');
     const codec = new McpConfigurationCodec();
     const duplicate = codec.encode({
       name: 'duplicate',
@@ -217,7 +212,7 @@ test('stages every selected adapter before writing and rejects Codex SSE', async
       url: null
     });
     const applier = new LocalMcpConfigurationApplier({ homeDirectory: home.root });
-    await assert.rejects(() => applier.apply(duplicate, ['claudeCode', 'hermes']), /already has/);
+    await assert.rejects(() => applier.apply(duplicate, ['claudeCode', 'codex']), /already has/);
     assert.equal(home.read('.claude.json'), originalClaude);
 
     const sse = codec.encode({
@@ -239,7 +234,7 @@ class FailingFileOperations {
   constructor() {
     this.files = new Map([
       ['/claude', new TextEncoder().encode('claude-original')],
-      ['/hermes', new TextEncoder().encode('hermes-original')]
+      ['/codex', new TextEncoder().encode('codex-original')]
     ]);
     this.didFail = false;
   }
@@ -250,7 +245,7 @@ class FailingFileOperations {
   }
 
   async replaceAtomically(filePath, bytes) {
-    if (filePath === '/hermes' && !this.didFail) {
+    if (filePath === '/codex' && !this.didFail) {
       this.didFail = true;
       throw new Error('simulated write failure');
     }
@@ -270,17 +265,17 @@ class FailingFileOperations {
 test('restores exact original bytes when a later atomic write fails', async () => {
   const operations = new FailingFileOperations();
   const writer = new McpConfigurationFileWriter(operations);
-  const [claudeRead, createdRead, hermesRead] = await Promise.all([
+  const [claudeRead, createdRead, codexRead] = await Promise.all([
     writer.read('/claude'),
     writer.read('/created'),
-    writer.read('/hermes')
+    writer.read('/codex')
   ]);
   await assert.rejects(() => writer.commit([
     { ...claudeRead, replacementBytes: new TextEncoder().encode('claude-new') },
     { ...createdRead, replacementBytes: new TextEncoder().encode('created-new') },
-    { ...hermesRead, replacementBytes: new TextEncoder().encode('hermes-new') }
+    { ...codexRead, replacementBytes: new TextEncoder().encode('codex-new') }
   ]), /Previously written files were restored/);
   assert.equal(operations.text('/claude'), 'claude-original');
   assert.equal(operations.text('/created'), null);
-  assert.equal(operations.text('/hermes'), 'hermes-original');
+  assert.equal(operations.text('/codex'), 'codex-original');
 });

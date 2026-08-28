@@ -1,6 +1,5 @@
 import path from 'node:path';
 import { parse as parseToml } from '@iarna/toml';
-import { Document, parseDocument } from 'yaml';
 import type { McpAgent, McpServerConfiguration } from '../../shared/types';
 
 /** Renders one canonical server into an agent's existing user configuration. */
@@ -100,45 +99,6 @@ export class ClaudeCodeMcpConfigurationAdapter implements McpAgentConfigurationA
   }
 }
 
-/** Adds one MCP entry while preserving Hermes YAML comments and settings. */
-export class HermesMcpConfigurationAdapter implements McpAgentConfigurationAdapter {
-  private readonly support = new McpRenderingSupport();
-
-  agent(): McpAgent {
-    return 'hermes';
-  }
-
-  filePath(homeDirectory: string): string {
-    return path.join(homeDirectory, '.hermes', 'config.yaml');
-  }
-
-  render(existingText: string, configuration: McpServerConfiguration): string {
-    const document = existingText.trim().length === 0
-      ? new Document({})
-      : parseDocument(existingText);
-    if (document.errors.length > 0) {
-      throw new Error(`Hermes configuration is invalid YAML: ${document.errors[0].message}`);
-    }
-    const root = document.toJS() as unknown;
-    if (!this.support.isRecord(root)) {
-      throw new Error('Hermes configuration must be a YAML object.');
-    }
-    const rawServers = root.mcp_servers;
-    if (rawServers !== undefined && !this.support.isRecord(rawServers)) {
-      throw new Error('Hermes mcp_servers must be a YAML object.');
-    }
-    this.support.assertAvailable(rawServers ?? {}, configuration.name, 'Hermes');
-    const entry = configuration.connectionType === 'stdio'
-      ? this.support.stdioEntry(configuration, false)
-      : {
-        ...this.support.remoteEntry(configuration, null),
-        ...(configuration.connectionType === 'sse' ? { transport: 'sse' } : {})
-      };
-    document.setIn(['mcp_servers', configuration.name], entry);
-    return document.toString();
-  }
-}
-
 /** Appends one official mcp_servers table without rewriting unrelated Codex TOML. */
 export class CodexMcpConfigurationAdapter implements McpAgentConfigurationAdapter {
   private readonly support = new McpRenderingSupport();
@@ -215,7 +175,6 @@ export class McpAgentConfigurationAdapterRegistry {
 
   constructor(adapters: readonly McpAgentConfigurationAdapter[] = [
     new ClaudeCodeMcpConfigurationAdapter(),
-    new HermesMcpConfigurationAdapter(),
     new CodexMcpConfigurationAdapter()
   ]) {
     this.adapters = [...adapters];
