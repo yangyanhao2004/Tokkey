@@ -2,6 +2,7 @@ import path from 'node:path';
 import type {
   InstalledSkill,
   SkillAgent,
+  SkillAgentBadge,
   SkillInstallation,
   SkillRoot
 } from '../../shared/types';
@@ -19,7 +20,8 @@ export const SKILL_ROOTS: readonly SkillRoot[] = [
   'agents'
 ];
 
-const AGENT_BADGE_ORDER: readonly SkillAgent[] = ['claudeCode', 'codex'];
+/** The order every card draws its agent chips in. */
+export const AGENT_BADGE_ORDER: readonly SkillAgent[] = ['claudeCode', 'codex'];
 
 /** Agents that read each root. The Amis root is an app-owned source only. */
 const ROOT_AGENTS: Readonly<Record<SkillRoot, readonly SkillAgent[]>> = {
@@ -28,6 +30,19 @@ const ROOT_AGENTS: Readonly<Record<SkillRoot, readonly SkillAgent[]>> = {
   codex: ['codex'],
   agents: ['codex']
 };
+
+/**
+ * One badge per supported agent, checked only for the agents given. Cards that
+ * describe a skill nobody has installed yet pass nothing and get the full row
+ * unchecked, so every card carries the same chips whatever its source.
+ */
+export function makeAgentBadges(checkedAgents: Iterable<SkillAgent> = []): SkillAgentBadge[] {
+  const checked = new Set(checkedAgents);
+  return AGENT_BADGE_ORDER.map((agent) => ({
+    agent,
+    state: checked.has(agent) ? 'checked' : 'unchecked'
+  }));
+}
 
 /** Collapses same-name discoveries only when identity or manifest bytes prove sameness. */
 export class SkillDeduplicator {
@@ -137,17 +152,14 @@ export class SkillDeduplicator {
     };
   }
 
-  private makeAgentBadges(installations: SkillInstallation[]) {
+  private makeAgentBadges(installations: SkillInstallation[]): SkillAgentBadge[] {
     const installedAgents = new Set<SkillAgent>();
     for (const installation of installations) {
       for (const agent of ROOT_AGENTS[installation.root]) {
         installedAgents.add(agent);
       }
     }
-    return AGENT_BADGE_ORDER.map((agent) => ({
-      agent,
-      state: installedAgents.has(agent) ? ('checked' as const) : ('unchecked' as const)
-    }));
+    return makeAgentBadges(installedAgents);
   }
 
   private discriminator(cluster: SkillCluster, primary: DiscoveredSkill): string {

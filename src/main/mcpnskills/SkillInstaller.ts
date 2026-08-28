@@ -106,13 +106,15 @@ export class SkillInstaller {
     if (!card) {
       throw new Error(`Cached repository skill was not found: ${coordinate.source}/${normalizedRelativePath}`);
     }
+    // The path installed from is the scanner's, never the caller's: the request
+    // only picks a card out of a freshly scanned cache. What still has to hold
+    // is that the card sits inside its own checkout.
     const repositoryRoot = path.resolve(this.catalog.getCacheRoot(), coordinate.owner, coordinate.name);
-    const sourcePath = path.resolve(repositoryRoot, normalizedRelativePath);
+    const sourcePath = path.resolve(card.absolutePath);
     const relativeToRepository = path.relative(repositoryRoot, sourcePath);
     if (
       relativeToRepository.startsWith('..') ||
       path.isAbsolute(relativeToRepository) ||
-      path.resolve(card.absolutePath) !== sourcePath ||
       !this.isDirectory(sourcePath)
     ) {
       throw new Error(`Cached skill path is outside its repository checkout: ${relativePath}`);

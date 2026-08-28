@@ -11,6 +11,7 @@ import GitHubRepositoryCoordinate from './GitHubRepositoryCoordinate';
 import RepositoryCloneCache from './RepositoryCloneCache';
 import RepositorySkillScanner, { type ScrapedRepository, type ScrapedSkill } from './RepositorySkillScanner';
 import CachedInstalledSkillMatcher from './CachedInstalledSkillMatcher';
+import { makeAgentBadges } from './SkillDeduplicator';
 
 export interface CachedRepositoryCatalogOptions {
   cache?: RepositoryCloneCache;
@@ -127,16 +128,22 @@ export class CachedRepositoryCatalog {
   }
 
   private toCachedRepository(repository: ScrapedRepository, installedSkills: InstalledSkill[]): CachedRepository {
+    // One batch pass per repository, so the installed index and the manifest
+    // hashes are built once rather than once per card.
+    const matches = this.cachedInstalledMatcher.findMatches(
+      repository.skills.map((skill) => skill.absolutePath),
+      installedSkills
+    );
     return {
       coordinate: repository.coordinate,
       checkoutPath: repository.checkoutPath,
       commit: repository.commit,
-      skills: repository.skills.map((skill) => this.toCachedSkill(skill, installedSkills))
+      skills: repository.skills.map((skill) => this.toCachedSkill(skill, matches))
     };
   }
 
-  private toCachedSkill(skill: ScrapedSkill, installedSkills: InstalledSkill[]): CachedRepositorySkill {
-    const matchingInstalledSkill = this.cachedInstalledMatcher.findMatch(skill.absolutePath, installedSkills);
+  private toCachedSkill(skill: ScrapedSkill, matches: Map<string, InstalledSkill>): CachedRepositorySkill {
+    const matchingInstalledSkill = matches.get(path.resolve(skill.absolutePath));
     return {
       id: skill.id,
       name: skill.name,
@@ -146,7 +153,9 @@ export class CachedRepositoryCatalog {
       relativePath: skill.relativePath,
       absolutePath: skill.absolutePath,
       isInstalled: matchingInstalledSkill !== undefined,
-      installedSkillId: matchingInstalledSkill?.id ?? null
+      installedSkillId: matchingInstalledSkill?.id ?? null,
+      // A cached-only skill still gets a full row of chips, all unchecked.
+      agentBadges: matchingInstalledSkill?.agentBadges ?? makeAgentBadges()
     };
   }
 

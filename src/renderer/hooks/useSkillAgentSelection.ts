@@ -12,17 +12,25 @@ export interface SkillAgentSelectionReading {
  * it from the skill's filesystem locations rather than from its catalog badges.
  *
  * This is what the Manage Skill dialog opens on, so the boxes it shows are the
- * same set the deployer will compare a saved selection against.
+ * same set the deployer will compare a saved selection against. A `null` id is
+ * a skill nothing has installed yet — there are no locations to read, so the
+ * dialog opens on an empty selection rather than on a reading.
  */
-export function useSkillAgentSelection(skillId: string): SkillAgentSelectionReading {
+export function useSkillAgentSelection(skillId: string | null): SkillAgentSelectionReading {
   const [selectedAgents, setSelectedAgents] = useState<SkillAgent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setError(null);
+
+    if (skillId === null) {
+      setSelectedAgents([]);
+      return;
+    }
+
+    setSelectedAgents(null);
     // Guards against a reading for a skill the dialog has already moved off.
     let isCurrent = true;
-    setSelectedAgents(null);
-    setError(null);
 
     void (async () => {
       try {

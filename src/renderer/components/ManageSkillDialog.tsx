@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { InstalledSkill, SkillAgent } from '../../shared/types';
+import type { SkillAgent } from '../../shared/types';
 import {
   CANCEL_LABEL,
   HUB_AGENTS,
@@ -70,11 +70,20 @@ function AgentToggle({ agent, isSelected, disabled, onToggle }: AgentToggleProps
 }
 
 export interface ManageSkillDialogProps {
-  skill: InstalledSkill;
+  /** The skill's name, which is what the dialog is titled after. */
+  name: string;
+  /**
+   * The installed skill whose deployment the boxes open on, or `null` for a
+   * skill nothing has installed yet — a repository card, which opens empty.
+   */
+  installedSkillId: string | null;
   /** Deploys the skill to exactly these agents; rejects when the filesystem refuses. */
   onApply: (selectedAgents: SkillAgent[]) => Promise<void>;
-  onUninstall: () => Promise<void>;
+  /** Omitted when there is nothing installed to remove, which hides the button. */
+  onUninstall?: () => Promise<void>;
   onClose: () => void;
+  /** What the confirming button says; installing from a repository says "Install". */
+  applyLabel?: string;
 }
 
 /**
@@ -83,10 +92,20 @@ export interface ManageSkillDialogProps {
  * uninstall that removes it everywhere.
  *
  * The selection is read back from the filesystem rather than from the card's
- * badges, so what the boxes show is what the deployer will diff against.
+ * badges, so what the boxes show is what the deployer will diff against. A
+ * repository card has nothing installed to read, so it opens on an empty
+ * selection and its Save becomes the install — one dialog either way, since
+ * "which agents load this skill" is the same question both times.
  */
-export function ManageSkillDialog({ skill, onApply, onUninstall, onClose }: ManageSkillDialogProps) {
-  const { selectedAgents, error: readError } = useSkillAgentSelection(skill.id);
+export function ManageSkillDialog({
+  name,
+  installedSkillId,
+  onApply,
+  onUninstall,
+  onClose,
+  applyLabel = SAVE_LABEL
+}: ManageSkillDialogProps) {
+  const { selectedAgents, error: readError } = useSkillAgentSelection(installedSkillId);
   const [selection, setSelection] = useState<Set<SkillAgent> | null>(null);
   const [pendingAction, setPendingAction] = useState<'save' | 'uninstall' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -153,7 +172,7 @@ export function ManageSkillDialog({ skill, onApply, onUninstall, onClose }: Mana
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={`Manage ${skill.name}`}
+        aria-label={`Manage ${name}`}
         // The backdrop closes on click, so the dialog must not pass its own through.
         onClick={(event) => event.stopPropagation()}
         className="flex w-[482px] max-w-full flex-col overflow-hidden rounded-[12px] border-[0.829px] border-dialog-border bg-white shadow-[0px_18.245px_58.053px_0px_rgba(18,18,17,0.16)]"
@@ -168,7 +187,7 @@ export function ManageSkillDialog({ skill, onApply, onUninstall, onClose }: Mana
               {MANAGE_DIALOG_EYEBROW}
             </span>
             <h2 className="truncate text-[14px] leading-[17px] font-bold text-text-primary">
-              {skill.name}
+              {name}
             </h2>
           </div>
         </div>
@@ -207,14 +226,20 @@ export function ManageSkillDialog({ skill, onApply, onUninstall, onClose }: Mana
         </div>
 
         <div className="flex w-full items-center justify-between border-t-[0.415px] border-separator-hairline bg-white p-4">
-          <PushButton
-            variant="plain"
-            disabled={isBusy}
-            onClick={() => void run('uninstall', onUninstall)}
-            testId="manage-uninstall"
-          >
-            {UNINSTALL_LABEL}
-          </PushButton>
+          {/* An empty span rather than nothing, so the buttons opposite it stay
+              at the dialog's right edge when there is nothing to uninstall. */}
+          {onUninstall ? (
+            <PushButton
+              variant="plain"
+              disabled={isBusy}
+              onClick={() => void run('uninstall', onUninstall)}
+              testId="manage-uninstall"
+            >
+              {UNINSTALL_LABEL}
+            </PushButton>
+          ) : (
+            <span />
+          )}
 
           <div className="flex shrink-0 items-center gap-2">
             <PushButton variant="tinted" disabled={isBusy} onClick={onClose} testId="manage-cancel">
@@ -225,7 +250,7 @@ export function ManageSkillDialog({ skill, onApply, onUninstall, onClose }: Mana
               onClick={() => void run('save', () => onApply([...(selection ?? [])]))}
               testId="manage-save"
             >
-              {SAVE_LABEL}
+              {applyLabel}
             </PushButton>
           </div>
         </div>

@@ -88,7 +88,8 @@ export function SkillsCatalogTab({ availability, onDiscover }: SkillsCatalogTabP
 
       {managedSkill && (
         <ManageSkillDialog
-          skill={managedSkill}
+          name={managedSkill.name}
+          installedSkillId={managedSkill.id}
           onApply={(selectedAgents) => applyAgentSelection(managedSkill.id, selectedAgents)}
           onUninstall={() => uninstall(managedSkill.id)}
           onClose={() => setManagedSkillId(null)}

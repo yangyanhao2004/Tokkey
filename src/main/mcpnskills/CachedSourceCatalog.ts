@@ -11,6 +11,7 @@ import RepositoryCloneCache from './RepositoryCloneCache';
 import RepositorySkillScanner, { type ScrapedRepository, type ScrapedSkill } from './RepositorySkillScanner';
 import CachedInstalledSkillMatcher from './CachedInstalledSkillMatcher';
 import LocalSkillCatalogScanner from './SkillCatalogScanner';
+import { makeAgentBadges } from './SkillDeduplicator';
 
 /** One source tree already available in the local skills.sh cache. */
 export interface CachedSource {
@@ -187,6 +188,8 @@ export class CachedSourceCatalog {
       absolutePath: skill.absolutePath,
       isInstalled: matchingInstalledSkill !== undefined,
       installedSkillId: matchingInstalledSkill?.id ?? null,
+      // A cached-only skill still gets a full row of chips, all unchecked.
+      agentBadges: matchingInstalledSkill?.agentBadges ?? makeAgentBadges(),
       sourceKind
     };
   }

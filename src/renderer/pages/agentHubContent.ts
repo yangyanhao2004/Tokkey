@@ -15,6 +15,7 @@ import type {
   CodingAgent,
   InstalledSkill,
   SkillAgent,
+  SkillAgentBadge,
   SkillRoot,
   SkillUploadConflictChoice,
   SkillUploadResult
@@ -164,16 +165,22 @@ const SKILL_ROOT_LABELS: Readonly<Record<SkillRoot, string>> = {
 };
 
 /** Stands in for a skill whose SKILL.md carries no description. */
-const MISSING_SUMMARY_TEXT = 'No description in this skill’s SKILL.md.';
+export const MISSING_SUMMARY_TEXT = 'No description in this skill’s SKILL.md.';
 
 /**
- * One agent's chip for an installed skill: checked by the scanner means the
- * skill is deployed under a root that agent reads, which the card draws as the
- * green check. Anything else is merely supported.
+ * A skill's chips, read from the badges the main process scanner produces:
+ * checked means the skill is deployed under a root that agent reads, which the
+ * card draws as the green check. Anything else is merely supported.
+ *
+ * Every card that shows a skill goes through here — installed ones and the ones
+ * only sitting in the repository cache — so the same badge means the same chip
+ * wherever it is drawn.
  */
-function readSkillCompatibility(skill: InstalledSkill): readonly CompatibilityChip[] {
+export function toCompatibilityChips(
+  badges: readonly SkillAgentBadge[]
+): readonly CompatibilityChip[] {
   const checkedAgents = new Set(
-    skill.agentBadges.filter((badge) => badge.state === 'checked').map((badge) => badge.agent)
+    badges.filter((badge) => badge.state === 'checked').map((badge) => badge.agent)
   );
   return HUB_AGENTS.map((agent) => ({
     agentId: agent.id,
@@ -188,7 +195,7 @@ export function toSkillCatalogEntries(skills: readonly InstalledSkill[]): readon
     name: skill.name,
     source: SKILL_ROOT_LABELS[skill.primaryInstallation.root],
     description: skill.summary ?? MISSING_SUMMARY_TEXT,
-    compatibility: readSkillCompatibility(skill)
+    compatibility: toCompatibilityChips(skill.agentBadges)
   }));
 }
 
@@ -216,9 +223,12 @@ export const MCP_CATALOG: readonly CatalogEntry[] = [
 ];
 
 /**
- * The entries a tab shows, narrowed to those whose name or description matches
- * what has been typed. Matching happens here rather than in the component so
- * the card only ever renders the rows it is handed.
+ * The entries a tab shows, narrowed to those whose name, description, or source
+ * matches what has been typed. Matching happens here rather than in the
+ * component so the card only ever renders the rows it is handed.
+ *
+ * The source counts because the Repos tab draws one grid across every cloned
+ * repository, so "anthropics/skills" is a search a user will type there.
  */
 export function selectCatalogEntries(
   entries: readonly CatalogEntry[],
@@ -232,7 +242,8 @@ export function selectCatalogEntries(
   return entries.filter(
     (entry) =>
       entry.name.toLowerCase().includes(needle) ||
-      entry.description.toLowerCase().includes(needle)
+      entry.description.toLowerCase().includes(needle) ||
+      (entry.source ?? '').toLowerCase().includes(needle)
   );
 }
 

@@ -118,8 +118,8 @@ export class SkillManifestParser {
       activeField = fieldMatch[1] as 'name' | 'description';
       const rawValue = fieldMatch[2].trim();
       if (activeField === 'name') {
-        skillName = rawValue === '|' || rawValue === '>' ? null : this.normalizeScalar(rawValue);
-      } else if (rawValue === '|' || rawValue === '>') {
+        skillName = this.isBlockScalarHeader(rawValue) ? null : this.normalizeScalar(rawValue);
+      } else if (this.isBlockScalarHeader(rawValue)) {
         blockValue = [];
         isReadingBlockScalar = true;
       } else {
@@ -128,6 +128,16 @@ export class SkillManifestParser {
     }
     flushBlockValue();
     return { skillName, skillDescription };
+  }
+
+  /**
+   * Whether a value opens a block scalar rather than being one. A header may
+   * carry an indentation digit and a chomping sign — `>-` is what most skills
+   * in the wild write — and reading those as text is what would otherwise put
+   * ">-" on a card in place of the description.
+   */
+  private isBlockScalarHeader(rawValue: string): boolean {
+    return /^[|>]\d*[+-]?$|^[|>][+-]?\d*$/.test(rawValue);
   }
 
   /** Normalizes quoted and scalar values into the strings the UI expects. */

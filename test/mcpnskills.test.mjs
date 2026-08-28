@@ -4,8 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { CachedRepositoryCatalog } from '../dist/main/mcpnskills/CachedRepositoryCatalog.js';
 import { GitHubRepositoryCoordinate } from '../dist/main/mcpnskills/GitHubRepositoryCoordinate.js';
 import { RepositoryCloneCache } from '../dist/main/mcpnskills/RepositoryCloneCache.js';
+import { SkillInstaller } from '../dist/main/mcpnskills/SkillInstaller.js';
 import { RepositorySkillScanner } from '../dist/main/mcpnskills/RepositorySkillScanner.js';
 import {
   LocalSkillCatalogScanner,
@@ -344,6 +346,87 @@ test('refreshes an existing safe checkout with the requested branch', async () =
       ['rev-parse', 'HEAD'],
       ['rev-parse', 'HEAD']
     ]);
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+/** Builds the repository install stack over one temporary tree. */
+function makeRepositoryInstaller(workspace) {
+  const installedCatalog = new LocalSkillCatalogScanner({ homeDirectory: workspace.resolve('home') });
+  const catalog = new CachedRepositoryCatalog({
+    cacheRoot: workspace.resolve('cache'),
+    installedCatalog
+  });
+  const installer = new SkillInstaller({
+    catalog,
+    installedCatalog,
+    importer: new SkillFolderImporter({ filesystem: installedCatalog.getFilesystem() }),
+    deployer: new SkillDeployer({ homeDirectory: workspace.resolve('home') })
+  });
+  return { catalog, installer };
+}
+
+test('installs a card from a repository root and from a nested skills folder', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    // A repository whose own root is the skill folder: its card has no path
+    // below the checkout, which is the shape the install guard used to reject.
+    workspace.write('cache/acme/root-skill/SKILL.md', '---\nname: root-skill\ndescription: at the root\n---\n');
+    workspace.write('cache/acme/bundle/skills/nested/SKILL.md', '---\nname: nested\ndescription: below skills\n---\n');
+    const { catalog, installer } = makeRepositoryInstaller(workspace);
+
+    const rootCard = (await catalog.listSkillCards()).find((card) => card.name === 'root-skill');
+    const rootResult = await installer.installCard(rootCard, ['claudeCode'], 'reportConflict');
+    assert.equal(rootResult.status, 'installed');
+    assert.equal(existsSync(workspace.resolve('home/.amis/skills/root-skill/SKILL.md')), true);
+    assert.equal(existsSync(workspace.resolve('home/.claude/skills/root-skill')), true);
+    assert.equal(existsSync(workspace.resolve('home/.codex/skills/root-skill')), false);
+
+    const nestedCard = (await catalog.listSkillCards()).find((card) => card.name === 'nested');
+    assert.equal(nestedCard.relativePath, 'skills/nested');
+    assert.equal((await installer.installCard(nestedCard, ['codex'], 'reportConflict')).status, 'installed');
+    assert.equal(existsSync(workspace.resolve('home/.codex/skills/nested')), true);
+
+    // The cache is re-read the way the Repos tab reads it: an installed card
+    // reports the agents that can load it, a cached-only one reports none.
+    const cards = await catalog.listSkillCards();
+    const installedCard = cards.find((card) => card.name === 'root-skill');
+    assert.equal(installedCard.isInstalled, true);
+    assert.equal(
+      installedCard.agentBadges.find((badge) => badge.agent === 'claudeCode').state,
+      'checked'
+    );
+    assert.equal(installedCard.agentBadges.find((badge) => badge.agent === 'codex').state, 'unchecked');
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test('rejects an install request whose path is not a card in the cache', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    workspace.write('cache/acme/bundle/skills/nested/SKILL.md', '---\nname: nested\n---\n');
+    const { installer } = makeRepositoryInstaller(workspace);
+
+    await assert.rejects(
+      () => installer.install({
+        source: 'acme/bundle',
+        relativePath: 'nested/../../../../escape',
+        enabledAgents: [],
+        conflictStrategy: 'reportConflict'
+      }),
+      /escapes checkout/
+    );
+    await assert.rejects(
+      () => installer.install({
+        source: 'acme/bundle',
+        relativePath: 'absent',
+        enabledAgents: [],
+        conflictStrategy: 'reportConflict'
+      }),
+      /was not found/
+    );
   } finally {
     workspace.cleanup();
   }

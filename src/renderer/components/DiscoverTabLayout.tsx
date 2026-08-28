@@ -1,10 +1,12 @@
 import type { ReactNode } from 'react';
+import type { CatalogNotice } from '../pages/agentHubContent';
 import {
   DISCOVER_TABS,
   SEARCH_PLACEHOLDER,
   TAB_GROUP_LABEL,
   type DiscoverTab
 } from '../pages/discoverSkillsContent';
+import { CatalogMessage } from './CatalogTabLayout';
 import { SearchField } from './SearchField';
 import { SegmentedControl } from './SegmentedControl';
 
@@ -18,6 +20,8 @@ export interface DiscoverTabLayoutProps {
   searchLabel: string;
   /** The tab's own buttons, e.g. the Repos tab's "Add Repo". */
   actions?: ReactNode;
+  /** One line about the last action, held above the scroll area. */
+  notice?: CatalogNotice | null;
   /** The grid, plus whatever the tab draws in place of it. */
   children: ReactNode;
 }
@@ -41,6 +45,7 @@ export function DiscoverTabLayout({
   onQueryChange,
   searchLabel,
   actions,
+  notice = null,
   children
 }: DiscoverTabLayoutProps) {
   return (
@@ -68,6 +73,15 @@ export function DiscoverTabLayout({
           {actions}
         </div>
       </div>
+
+      {/* Above the scroll area, so an outcome cannot be scrolled out of sight. */}
+      {notice && (
+        <div className="w-full shrink-0">
+          <CatalogMessage tone={notice.tone} testId="discover-notice">
+            {notice.message}
+          </CatalogMessage>
+        </div>
+      )}
 
       {/* `min-h-0` keeps a listing of any length inside the page rather than
           pushing the window's content out of view. */}

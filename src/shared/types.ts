@@ -407,6 +407,12 @@ export interface CachedRepositorySkill {
   absolutePath: string;
   isInstalled: boolean;
   installedSkillId: string | null;
+  /**
+   * Which agents can already load this skill, carried here so a repository card
+   * draws the same chips as an installed one. Every badge is unchecked while the
+   * skill is only cached: the folder exists, but no agent root points at it yet.
+   */
+  agentBadges: SkillAgentBadge[];
 }
 
 /** A locally cached repository and the skills currently published by it. */
