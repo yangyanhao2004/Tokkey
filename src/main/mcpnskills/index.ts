@@ -18,7 +18,9 @@ export { default as SkillsShClient, SkillsShError } from './SkillsShClient';
 export { default as SiteSkillDownloader } from './SiteSkillDownloader';
 export { default as SkillSourceResolver } from './SkillSourceResolver';
 export { default as CachedSourceCatalog, LocalCachedSourceCatalog } from './CachedSourceCatalog';
-export { default as CachedInstalledSkillMatcher } from './CachedInstalledSkillMatcher';
+export { default as CachedInstalledSkillMatcher, LocalSkillDuplicateDetector } from './CachedInstalledSkillMatcher';
+export { default as SkillFolderSelector, ElectronDirectoryChooser } from './SkillFolderSelector';
+export { default as SkillUploadService } from './SkillUploadService';
 export { default as DiscoverSkillsService } from './DiscoverSkillsService';
 export type {
   DiscoveredSkill,
@@ -38,6 +40,13 @@ export type { GitCommandResult, GitCommandRunnerOptions, GitCommandRunOptions } 
 export type { CachedRepositoryCatalogOptions } from './CachedRepositoryCatalog';
 export type { SkillFolderImporterOptions, SkillFolderImportResult } from './SkillFolderImporter';
 export type { SkillInstallerOptions } from './SkillInstaller';
+export type {
+  DirectoryChooser,
+  SkillFolderSelection,
+  SkillFolderSelectionStatus,
+  SkillFolderSelectorOptions
+} from './SkillFolderSelector';
+export type { SkillUploadServiceOptions } from './SkillUploadService';
 export type { DiscoverRepositoriesOptions } from './DiscoverRepositories';
 export type {
   SkillsShClientOptions,
@@ -61,7 +70,10 @@ export type {
   RepositoryCoordinate,
   RepositorySyncResult,
   SkillConflictStrategy,
-  SkillInstallResult
+  SkillInstallResult,
+  SkillUploadConflictChoice,
+  SkillUploadResult,
+  SkillUploadStatus
 } from '../../shared/types';
 export type {
   SkillsShCardState,

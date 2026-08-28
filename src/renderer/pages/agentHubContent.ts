@@ -15,7 +15,9 @@ import type {
   CodingAgent,
   InstalledSkill,
   SkillAgent,
-  SkillRoot
+  SkillRoot,
+  SkillUploadConflictChoice,
+  SkillUploadResult
 } from '../../shared/types';
 
 /** Shared with the sidebar so every page resolves assets from one place. */
@@ -281,6 +283,82 @@ export const SKILL_SCAN_LOADING_TEXT = 'Scanning installed skills…';
 /** Says why the grid is empty when the scan itself failed. */
 export function describeSkillScanFailure(error: string): string {
   return `Could not read installed skills: ${error}`;
+}
+
+/** Shown on the upload button while the picker or the copy is still running. */
+export const SKILL_UPLOAD_BUSY_TEXT = 'Uploading…';
+
+/**
+ * The prompt raised when `~/.amis/skills/<name>` is already taken by a folder
+ * whose SKILL.md differs — which the duplicate check reads as an update the
+ * user may well want, rather than as a re-upload to refuse.
+ */
+export const UPLOAD_CONFLICT_EYEBROW = 'SKILL ALREADY EXISTS';
+export const UPLOAD_CONFLICT_HINT =
+  'Replace overwrites the installed folder, Keep Both installs this one under a new name, and Skip leaves everything as it is.';
+export const REPLACE_LABEL = 'Replace';
+export const KEEP_BOTH_LABEL = 'Keep Both';
+export const SKIP_LABEL = 'Skip';
+
+/** The three answers, in the order the dialog offers them. */
+export const UPLOAD_CONFLICT_CHOICES: readonly { value: SkillUploadConflictChoice; label: string }[] = [
+  { value: 'replace', label: REPLACE_LABEL },
+  { value: 'keepBoth', label: KEEP_BOTH_LABEL },
+  { value: 'skip', label: SKIP_LABEL }
+];
+
+export function describeUploadConflict(folderName: string): string {
+  return `A skill named “${folderName}” is already installed in Tokiie’s skills folder.`;
+}
+
+/** The last path segment, which is the name Keep Both actually settled on. */
+function readFolderName(destinationPath: string | null, fallbackName: string | null): string {
+  const segments = (destinationPath ?? '').split('/').filter((segment) => segment.length > 0);
+  return segments[segments.length - 1] ?? fallbackName ?? 'the skill';
+}
+
+/**
+ * How a line a catalog tab prints reads. `error` is for something turned away —
+ * a duplicate upload, a folder with no SKILL.md, a failed scan — which is the
+ * one thing the user has to act on rather than simply read.
+ */
+export type CatalogMessageTone = 'neutral' | 'error';
+
+export interface CatalogNotice {
+  readonly tone: CatalogMessageTone;
+  readonly message: string;
+}
+
+/**
+ * What the section says after an upload settles. Cancelling and the conflict
+ * prompt say nothing: one is not an outcome, and the other is still a question.
+ */
+export function describeSkillUploadOutcome(result: SkillUploadResult): CatalogNotice | null {
+  const folderName = result.folderName ?? 'the skill';
+  switch (result.status) {
+    case 'installed':
+      return { tone: 'neutral', message: `Uploaded “${folderName}”.` };
+    case 'replaced':
+      return { tone: 'neutral', message: `Replaced the installed “${folderName}”.` };
+    case 'keptBoth':
+      return {
+        tone: 'neutral',
+        message: `Uploaded “${folderName}” as “${readFolderName(result.destinationPath, folderName)}”.`
+      };
+    case 'skipped':
+      return { tone: 'neutral', message: `Kept the installed “${folderName}”.` };
+    case 'alreadyInstalled':
+      return { tone: 'error', message: `“${folderName}” is already installed.` };
+    case 'notASkillFolder':
+      return { tone: 'error', message: `“${folderName}” is not a skill folder: it has no SKILL.md.` };
+    default:
+      return null;
+  }
+}
+
+/** Reports why an upload left the skills folder untouched. */
+export function describeSkillUploadFailure(error: string): CatalogNotice {
+  return { tone: 'error', message: `Could not upload that folder: ${error}` };
 }
 
 /** Stands in for the grid when the search leaves nothing to draw. */

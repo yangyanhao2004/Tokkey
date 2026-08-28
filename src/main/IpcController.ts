@@ -20,7 +20,9 @@ import type {
   RepositorySyncResult,
   SkillAgent,
   SkillAgentSelection,
-  SkillInstallResult
+  SkillInstallResult,
+  SkillUploadConflictChoice,
+  SkillUploadResult
 } from '../shared/types';
 import type { McpCatalogScan } from '../shared/types';
 import type { InstalledLocalModel, LocalModelCatalogRequest } from '../shared/types';
@@ -33,6 +35,7 @@ import RepositoryCloneCache from './mcpnskills/RepositoryCloneCache';
 import RepositorySkillScanner from './mcpnskills/RepositorySkillScanner';
 import SkillFolderImporter from './mcpnskills/SkillFolderImporter';
 import SkillInstaller from './mcpnskills/SkillInstaller';
+import SkillUploadService from './mcpnskills/SkillUploadService';
 import DiscoverSkillsService from './mcpnskills/DiscoverSkillsService';
 import LocalMcpCatalogScanner, { MCP_AGENT_ORDER } from './mcp/McpCatalogScanner';
 import LocalMcpConfigurationApplier, {
@@ -51,6 +54,7 @@ export interface IpcControllerOptions {
   skillDeployer?: SkillDeployer;
   discoverRepositories?: DiscoverRepositories;
   discoverSkills?: DiscoverSkillsService;
+  skillUploadService?: SkillUploadService;
   mcpCatalogScanner?: LocalMcpCatalogScanner;
   mcpConfigurationApplier?: McpConfigurationApplying;
   localModelManager?: LocalModelManager;
@@ -70,6 +74,7 @@ export default class IpcController {
   private readonly skillDeployer: SkillDeployer;
   private readonly discoverRepositories: DiscoverRepositories;
   private readonly discoverSkills: DiscoverSkillsService;
+  private readonly skillUploadService: SkillUploadService;
   private readonly mcpCatalogScanner: LocalMcpCatalogScanner;
   private readonly mcpConfigurationApplier: McpConfigurationApplying;
   private readonly localModelManager: LocalModelManager;
@@ -88,6 +93,9 @@ export default class IpcController {
     this.discoverSkills = options.discoverSkills ?? new DiscoverSkillsService({
       installedCatalog: skillCatalogScanner,
       deployer: skillDeployer
+    });
+    this.skillUploadService = options.skillUploadService ?? new SkillUploadService({
+      installedCatalog: skillCatalogScanner
     });
     this.mcpCatalogScanner = options.mcpCatalogScanner ?? new LocalMcpCatalogScanner();
     this.mcpConfigurationApplier =
@@ -113,6 +121,12 @@ export default class IpcController {
           this.requireSkillAgents(selectedAgents)
         ),
       'skills:uninstall': (skillId: unknown) => this.uninstallSkill(this.requireSkillId(skillId)),
+      'skills:upload-folder': () => this.uploadSkillFolder(),
+      'skills:resolve-upload-conflict': (pendingUploadId: unknown, choice: unknown) =>
+        this.resolveSkillUploadConflict(
+          this.requireString(pendingUploadId, 'Pending upload ID'),
+          this.requireUploadConflictChoice(choice)
+        ),
       'discover-repos:list-cached': () => this.listCachedRepositories(),
       'discover-repos:add': (input: unknown, branch: unknown) =>
         this.addRepository(this.requireString(input, 'Repository input'), this.requireOptionalString(branch)),
@@ -367,6 +381,19 @@ export default class IpcController {
     return this.discoverSkills.installSkill(request);
   }
 
+  /** Opens the folder picker and imports whatever the user chose. */
+  uploadSkillFolder(): Promise<SkillUploadResult> {
+    return this.skillUploadService.uploadSkillFolder();
+  }
+
+  /** Finishes an upload the conflict prompt was holding. */
+  resolveSkillUploadConflict(
+    pendingUploadId: string,
+    choice: SkillUploadConflictChoice
+  ): Promise<SkillUploadResult> {
+    return this.skillUploadService.resolveConflict(pendingUploadId, choice);
+  }
+
   private async findSkill(skillId: string): Promise<InstalledSkill> {
     const skill = (await this.getInstalledSkills()).find((candidate) => candidate.id === skillId);
     if (!skill) {
@@ -378,6 +405,14 @@ export default class IpcController {
   private requireSkillId(value: unknown): string {
     if (typeof value !== 'string' || value.trim().length === 0) {
       throw new TypeError('Skill ID must be a non-empty string');
+    }
+    return value;
+  }
+
+  /** `reportConflict` is the flow's own opening move, never a user's answer. */
+  private requireUploadConflictChoice(value: unknown): SkillUploadConflictChoice {
+    if (value !== 'replace' && value !== 'keepBoth' && value !== 'skip') {
+      throw new TypeError(`Unsupported skill upload choice: ${String(value)}`);
     }
     return value;
   }

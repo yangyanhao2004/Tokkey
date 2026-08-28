@@ -22,6 +22,9 @@ class PreloadBridge {
       applySkillAgentSelection: (skillId, selectedAgents) =>
         ipcRenderer.invoke('skills:apply-agent-selection', skillId, selectedAgents),
       uninstallSkill: (skillId) => ipcRenderer.invoke('skills:uninstall', skillId),
+      uploadSkillFolder: () => ipcRenderer.invoke('skills:upload-folder'),
+      resolveSkillUploadConflict: (pendingUploadId, choice) =>
+        ipcRenderer.invoke('skills:resolve-upload-conflict', pendingUploadId, choice),
       listCachedRepositories: () => ipcRenderer.invoke('discover-repos:list-cached'),
       addRepository: (input, branch) => ipcRenderer.invoke('discover-repos:add', input, branch),
       installRepositorySkill: (request) => ipcRenderer.invoke('discover-repos:install-skill', request),

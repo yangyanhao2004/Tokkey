@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -14,6 +14,8 @@ import {
 import { SkillDeployer } from '../dist/main/mcpnskills/SkillDeployer.js';
 import { SkillFilesystemLayout } from '../dist/main/mcpnskills/SkillFilesystem.js';
 import { SkillFolderImporter } from '../dist/main/mcpnskills/SkillFolderImporter.js';
+import { SkillFolderSelector } from '../dist/main/mcpnskills/SkillFolderSelector.js';
+import { SkillUploadService } from '../dist/main/mcpnskills/SkillUploadService.js';
 
 /** Owns an isolated temporary filesystem tree for one test. */
 class TestWorkspace {
@@ -218,6 +220,108 @@ test('imports skills with explicit conflict strategies and rejects source symlin
     symlinkSync(source, linkedSource, 'dir');
     assert.throws(() => importer.importSkill(linkedSource, 'linked', 'replace'), /cannot be a symbolic link/);
     assert.throws(() => importer.importSkill(source, '../escape', 'replace'), /Invalid skill name/);
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+/** Answers the folder panel with a scripted queue instead of opening one. */
+class ScriptedDirectoryChooser {
+  constructor(folderPaths) {
+    this.folderPaths = [...folderPaths];
+  }
+
+  async chooseDirectory() {
+    return this.folderPaths.shift() ?? null;
+  }
+}
+
+/** Builds an upload service whose roots all live inside one temporary tree. */
+function makeUploadService(workspace, folderPaths) {
+  const installedCatalog = new LocalSkillCatalogScanner({ homeDirectory: workspace.resolve('home') });
+  return new SkillUploadService({
+    installedCatalog,
+    importer: new SkillFolderImporter({ filesystem: installedCatalog.getFilesystem() }),
+    selector: new SkillFolderSelector({ chooser: new ScriptedDirectoryChooser(folderPaths) })
+  });
+}
+
+test('accepts only chosen folders that carry a SKILL.md', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    const plainFolder = workspace.directory('plain');
+    workspace.write('skill/SKILL.md', '---\nname: chosen\n---\n');
+    const selector = new SkillFolderSelector({
+      chooser: new ScriptedDirectoryChooser([null, plainFolder, workspace.resolve('skill')])
+    });
+    assert.equal((await selector.selectSkillFolder()).status, 'cancelled');
+    assert.equal((await selector.selectSkillFolder()).status, 'notASkillFolder');
+
+    const selected = await selector.selectSkillFolder();
+    assert.equal(selected.status, 'selected');
+    assert.equal(selected.folderName, 'skill');
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test('uploads a chosen folder and refuses the identical folder afterwards', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    const manifest = '---\nname: uploaded\ndescription: from finder\n---\n';
+    workspace.write('source/uploaded/SKILL.md', manifest);
+    const sourcePath = workspace.resolve('source/uploaded');
+    const service = makeUploadService(workspace, [sourcePath, sourcePath, workspace.resolve('source')]);
+
+    const installed = await service.uploadSkillFolder();
+    assert.equal(installed.status, 'installed');
+    assert.equal(path.basename(installed.destinationPath), 'uploaded');
+    assert.equal(installed.installedSkills.length, 1);
+    assert.equal(existsSync(workspace.resolve('home/.amis/skills/uploaded/SKILL.md')), true);
+
+    // Same folder name and same SKILL.md bytes: nothing is copied a second time.
+    const repeated = await service.uploadSkillFolder();
+    assert.equal(repeated.status, 'alreadyInstalled');
+    assert.equal(repeated.pendingUploadId, null);
+
+    // A folder with no manifest of its own never reaches the importer.
+    assert.equal((await service.uploadSkillFolder()).status, 'notASkillFolder');
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test('reports a same-name conflict and finishes it with the collected choice', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    workspace.write('home/.amis/skills/uploaded/SKILL.md', '---\nname: uploaded\ndescription: installed\n---\n');
+    workspace.write('source/uploaded/SKILL.md', '---\nname: uploaded\ndescription: newer\n---\n');
+    const sourcePath = workspace.resolve('source/uploaded');
+    const service = makeUploadService(workspace, [sourcePath, sourcePath, sourcePath]);
+
+    // Same name with different bytes is an update, so it becomes a prompt.
+    const keepBothConflict = await service.uploadSkillFolder();
+    assert.equal(keepBothConflict.status, 'conflict');
+    assert.equal(path.basename(keepBothConflict.conflictPath), 'uploaded');
+    const keptBoth = await service.resolveConflict(keepBothConflict.pendingUploadId, 'keepBoth');
+    assert.equal(keptBoth.status, 'keptBoth');
+    assert.equal(path.basename(keptBoth.destinationPath), 'uploaded-2');
+
+    const skippedConflict = await service.uploadSkillFolder();
+    assert.equal((await service.resolveConflict(skippedConflict.pendingUploadId, 'skip')).status, 'skipped');
+
+    const replacedConflict = await service.uploadSkillFolder();
+    const replaced = await service.resolveConflict(replacedConflict.pendingUploadId, 'replace');
+    assert.equal(replaced.status, 'replaced');
+    assert.match(
+      readFileSync(workspace.resolve('home/.amis/skills/uploaded/SKILL.md'), 'utf8'),
+      /newer/
+    );
+    // A spent token cannot be answered twice.
+    await assert.rejects(
+      () => service.resolveConflict(replacedConflict.pendingUploadId, 'replace'),
+      /No skill upload is waiting/
+    );
   } finally {
     workspace.cleanup();
   }

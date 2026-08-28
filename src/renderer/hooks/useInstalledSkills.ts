@@ -15,6 +15,11 @@ export interface InstalledSkills {
    */
   applyAgentSelection: (skillId: string, selectedAgents: SkillAgent[]) => Promise<void>;
   uninstall: (skillId: string) => Promise<void>;
+  /**
+   * Adopts a scan another action already paid for — an upload rescans before it
+   * answers, so asking the filesystem a second time would only cost a walk.
+   */
+  applyScan: (scanned: InstalledSkill[]) => void;
 }
 
 /**
@@ -78,5 +83,12 @@ export function useInstalledSkills(): InstalledSkills {
     [mutate]
   );
 
-  return { skills, isLoading, error, refresh, applyAgentSelection, uninstall };
+  const applyScan = useCallback((scanned: InstalledSkill[]) => {
+    if (isMountedRef.current) {
+      setSkills(scanned);
+      setError(null);
+    }
+  }, []);
+
+  return { skills, isLoading, error, refresh, applyAgentSelection, uninstall, applyScan };
 }

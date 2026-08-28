@@ -83,6 +83,10 @@
   --color-status-idle-text: #717171;
 
   /* Agent Hub page. */
+  /* An upload the skills folder turned away — a duplicate, or a folder with no
+     SKILL.md. System red darkened the way the "Connected" green is, so 10px
+     text still reads on white. */
+  --color-status-error-text: #c9382c;
   /* Hairline around the recessed tile fronting an agent card. */
   --color-tile-border: rgba(60, 60, 67, 0.08);
   /* Small caps section label, e.g. the "Works with" over the agent chips. */

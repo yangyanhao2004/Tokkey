@@ -168,6 +168,11 @@ export interface TokiieApi {
   getSkillAgentSelection(skillId: string): Promise<SkillAgentSelection>;
   applySkillAgentSelection(skillId: string, selectedAgents: SkillAgent[]): Promise<InstalledSkill[]>;
   uninstallSkill(skillId: string): Promise<InstalledSkill[]>;
+  uploadSkillFolder(): Promise<SkillUploadResult>;
+  resolveSkillUploadConflict(
+    pendingUploadId: string,
+    choice: SkillUploadConflictChoice
+  ): Promise<SkillUploadResult>;
   listCachedRepositories(): Promise<CachedRepository[]>;
   addRepository(input: string, branch?: string): Promise<RepositorySyncResult>;
   installRepositorySkill(request: InstallRepositorySkillRequest): Promise<SkillInstallResult>;
@@ -437,6 +442,37 @@ export interface SkillInstallResult {
   destinationPath: string | null;
   conflictPath: string | null;
   installedSkills: InstalledSkill[];
+}
+
+/** The three answers the upload conflict prompt can collect. */
+export type SkillUploadConflictChoice = Exclude<SkillConflictStrategy, 'reportConflict'>;
+
+/**
+ * How one "Upload Skill" attempt ended. `cancelled` and `notASkillFolder` are
+ * picker outcomes, `alreadyInstalled` is the duplicate check refusing to copy,
+ * and `conflict` is the prompt the renderer has to answer before anything moves.
+ */
+export type SkillUploadStatus =
+  | 'cancelled'
+  | 'notASkillFolder'
+  | 'alreadyInstalled'
+  | 'conflict'
+  | 'installed'
+  | 'replaced'
+  | 'keptBoth'
+  | 'skipped';
+
+/** Result of one upload attempt, in the single shape the renderer reads. */
+export interface SkillUploadResult {
+  status: SkillUploadStatus;
+  /** The chosen folder's own name, for whatever the notice has to say about it. */
+  folderName: string | null;
+  destinationPath: string | null;
+  conflictPath: string | null;
+  /** Set only on `conflict`: the token echoed back with the user's choice. */
+  pendingUploadId: string | null;
+  /** The rescanned catalog, or null when no scan could have changed it. */
+  installedSkills: InstalledSkill[] | null;
 }
 
 /** The source form used by skills.sh. */
