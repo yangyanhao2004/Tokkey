@@ -19,7 +19,11 @@ from starlette.routing import Route
 
 from .cancellation import UpstreamAborted, UpstreamExchange, UpstreamExchangeRegistry
 from .registry import ModelRoute, ModelRouteRegistry, RouteConflictError
-from .streaming import NativeResponsesProxyError, NativeResponsesSSEProxy
+from .streaming import (
+    LocalEndpointPolicy,
+    NativeResponsesProxyError,
+    NativeResponsesSSEProxy,
+)
 
 JSONMapping = dict[str, Any]
 AsyncCall = Callable[..., Awaitable[Any]]
@@ -344,13 +348,72 @@ class ResponsesToolOutputNormalizer:
         return f"[unsupported '{part_type}' tool output omitted]"
 
 
+class MissingUpstreamCredential(Exception):
+    """Raised when a public provider call has no credential to carry."""
+
+
+class UpstreamCredentialPolicy:
+    """Choose the credential one provider call carries, in a fixed order.
+
+    The gateway itself is unauthenticated -- it listens on loopback only, so a
+    key checked here would guard nothing the operating system does not already
+    guard. What an incoming `Authorization` header is good for is the upstream
+    call, and only when Tokiie has nothing better:
+
+    1. A local model server needs no credential and is called without one.
+    2. The key stored on the route is Tokiie's own choice for that model and
+       wins over anything a caller sends, so an agent cannot redirect a paid
+       provider call onto someone else's account.
+    3. Otherwise the caller's own header is forwarded, which is what lets an
+       agent bring its own key for a route Tokiie holds no key for.
+
+    A public route with no key anywhere fails here rather than reaching the
+    provider with a placeholder, so the caller reads why it was rejected instead
+    of an opaque upstream 401.
+    """
+
+    # LiteLLM builds a provider SDK client before the request leaves this
+    # process, and the OpenAI client refuses to be constructed without a key.
+    # A loopback server ignores whatever arrives, so this placeholder keeps the
+    # SDK path working without inventing a credential the user has to manage.
+    LOCAL_PLACEHOLDER_KEY = "local"
+
+    def __init__(self, endpoints: LocalEndpointPolicy | None = None) -> None:
+        self._endpoints = endpoints or LocalEndpointPolicy()
+
+    def resolve(self, route: ModelRoute, request: Request) -> str | None:
+        """Return the credential for this route, or None for a local provider."""
+        api_base = route.litellm_params.get("api_base")
+        if isinstance(api_base, str) and api_base.strip() and self._endpoints.is_local(api_base):
+            return None
+        stored_key = route.litellm_params.get("api_key")
+        if isinstance(stored_key, str) and stored_key.strip():
+            return stored_key
+        caller_key = self.caller_credential(request)
+        if caller_key is None:
+            raise MissingUpstreamCredential(
+                f"model '{route.model_name}' has no stored key and the request carried none"
+            )
+        return caller_key
+
+    @staticmethod
+    def caller_credential(request: Request) -> str | None:
+        """Read the caller's own key from either protocol's header form."""
+        authorization = request.headers.get("authorization", "")
+        if authorization.startswith("Bearer "):
+            bearer = authorization.removeprefix("Bearer ").strip()
+            if bearer:
+                return bearer
+        # Anthropic clients authenticate with x-api-key instead of a bearer token.
+        return request.headers.get("x-api-key", "").strip() or None
+
+
 class AmisGatewayApplication:
-    """Compose authentication, route management, and SDK-backed inference."""
+    """Compose route management and SDK-backed inference over a loopback listener."""
 
     def __init__(
         self,
         *,
-        master_key: str,
         instance_id: str = "embedded-test-instance",
         registry: ModelRouteRegistry | None = None,
         chat_call: AsyncCall | None = None,
@@ -358,14 +421,13 @@ class AmisGatewayApplication:
         messages_call: AsyncCall | None = None,
         capability_registrar: LiteLLMModelCapabilityRegistrar | None = None,
         responses_sse_proxy: NativeResponsesSSEProxy | None = None,
+        credential_policy: UpstreamCredentialPolicy | None = None,
     ) -> None:
-        if not master_key:
-            raise ValueError("master_key must not be empty")
         if not instance_id:
             raise ValueError("instance_id must not be empty")
         LiteLLMSDKCompatibility.configure()
-        self._master_key = master_key
         self._instance_id = instance_id
+        self._credentials = credential_policy or UpstreamCredentialPolicy()
         self._registry = registry or ModelRouteRegistry()
         self._chat_call = chat_call or litellm.acompletion
         self._responses_call = responses_call or litellm.aresponses
@@ -405,9 +467,6 @@ class AmisGatewayApplication:
 
     async def create_model(self, request: Request) -> Response:
         """Create one transient route through the legacy-compatible API."""
-        unauthorized = self._authorize(request)
-        if unauthorized is not None:
-            return unauthorized
         try:
             route = self._registry.create(await self._read_object(request))
             return JSONResponse({"model_id": route.model_id, "model_info": route.model_info})
@@ -416,9 +475,6 @@ class AmisGatewayApplication:
 
     async def update_model(self, request: Request) -> Response:
         """Update one route's LiteLLM parameters without changing its identity."""
-        unauthorized = self._authorize(request)
-        if unauthorized is not None:
-            return unauthorized
         model_id = request.path_params["model_id"]
         try:
             payload = await self._read_object(request)
@@ -434,9 +490,6 @@ class AmisGatewayApplication:
 
     async def delete_model(self, request: Request) -> Response:
         """Delete one transient route idempotently."""
-        unauthorized = self._authorize(request)
-        if unauthorized is not None:
-            return unauthorized
         try:
             model_id = (await self._read_object(request)).get("id")
             if not isinstance(model_id, str) or not model_id:
@@ -448,16 +501,10 @@ class AmisGatewayApplication:
 
     async def list_models(self, request: Request) -> Response:
         """List routes in the response shape already decoded by the Swift client."""
-        unauthorized = self._authorize(request)
-        if unauthorized is not None:
-            return unauthorized
         return JSONResponse({"data": [route.management_payload() for route in self._registry.list()]})
 
     async def replace_models(self, request: Request) -> Response:
         """Atomically restore all routes from the host application's stored profiles."""
-        unauthorized = self._authorize(request)
-        if unauthorized is not None:
-            return unauthorized
         try:
             payload = await self._read_object(request)
             models = payload.get("models")
@@ -481,9 +528,6 @@ class AmisGatewayApplication:
         Cancelling nothing is success, not an error: a turn that already finished
         leaves the route with no in-flight exchange, which is the requested state.
         """
-        unauthorized = self._authorize(request)
-        if unauthorized is not None:
-            return unauthorized
         try:
             payload = await self._read_object(request)
             cancellation_id = payload.get("thread_id")
@@ -519,9 +563,6 @@ class AmisGatewayApplication:
 
     async def _inference(self, request: Request, *, protocol: str, call: AsyncCall) -> Response:
         """Resolve an alias, merge protected route parameters, and serialize the SDK result."""
-        unauthorized = self._authorize(request, anthropic=protocol == "messages")
-        if unauthorized is not None:
-            return unauthorized
         payload: JSONMapping = {}
         exchange: UpstreamExchange | None = None
         stream_owns_exchange = False
@@ -548,6 +589,7 @@ class AmisGatewayApplication:
                 # the SDK path copies it in `_call_arguments`.
                 payload = ResponsesToolOutputNormalizer.normalize(payload)
             forwarded_headers = self._forwarded_provider_headers(request)
+            credential = self._credentials.resolve(route, request)
             if self._uses_native_responses_sse(payload, route=route, protocol=protocol):
                 session = await self._await_unless_disconnected(
                     request,
@@ -555,6 +597,7 @@ class AmisGatewayApplication:
                         payload=payload,
                         route=route,
                         forwarded_headers=forwarded_headers,
+                        credential=credential,
                     ),
                     description="opening the provider Responses stream",
                     exchange=exchange,
@@ -576,7 +619,7 @@ class AmisGatewayApplication:
                     headers=response_headers,
                 )
 
-            arguments = self._call_arguments(payload, route)
+            arguments = self._call_arguments(payload, route, credential)
             if protocol == "responses":
                 arguments = ResponsesToolHistoryNormalizer.normalize(arguments)
             self._configure_sdk_tool_handling(arguments, protocol=protocol)
@@ -597,6 +640,8 @@ class AmisGatewayApplication:
             return JSONResponse(self._json_value(result))
         except KeyError:
             return self._protocol_error(protocol, 404, f"model '{payload.get('model', '')}' was not found")
+        except MissingUpstreamCredential as error:
+            return self._protocol_error(protocol, 401, str(error))
         except json.JSONDecodeError as error:
             return self._protocol_error(protocol, 400, f"invalid JSON: {error.msg}")
         except ValueError as error:
@@ -720,14 +765,21 @@ class AmisGatewayApplication:
         )
 
     @staticmethod
-    def _call_arguments(payload: JSONMapping, route: ModelRoute) -> JSONMapping:
-        """Prevent callers from overriding the credential and endpoint selected by Tokiie."""
+    def _call_arguments(
+        payload: JSONMapping,
+        route: ModelRoute,
+        credential: str | None,
+    ) -> JSONMapping:
+        """Prevent callers from overriding the endpoint and credential selected by Tokiie."""
         arguments = dict(payload)
         arguments.pop("extra_headers", None)
         arguments["model"] = route.litellm_params["model"]
         for key, value in route.litellm_params.items():
             if value is not None:
                 arguments[key] = value
+        # Last word on the credential, so a payload key, a route key, and the
+        # caller's header can never disagree about what reaches the provider.
+        arguments["api_key"] = credential or UpstreamCredentialPolicy.LOCAL_PLACEHOLDER_KEY
         arguments.setdefault("drop_params", True)
         return arguments
 
@@ -807,15 +859,6 @@ class AmisGatewayApplication:
         finally:
             await ResponsesStreamTerminationPolicy.close(stream)
 
-    def _authorize(self, request: Request, *, anthropic: bool = False) -> Response | None:
-        """Accept the shared loopback bearer key in OpenAI or Anthropic header form."""
-        authorization = request.headers.get("authorization", "")
-        bearer = authorization.removeprefix("Bearer ") if authorization.startswith("Bearer ") else ""
-        supplied = request.headers.get("x-api-key") if anthropic else bearer
-        if supplied != self._master_key and bearer != self._master_key:
-            return self._protocol_error("messages" if anthropic else "chat", 401, "invalid gateway key")
-        return None
-
     @staticmethod
     async def _read_object(request: Request) -> JSONMapping:
         """Decode one request body and reject arrays/scalars with a useful diagnostic."""
@@ -854,18 +897,10 @@ class AmisGatewayApplication:
         )
 
 
-def create_app(
-    *,
-    master_key: str | None = None,
-    instance_id: str | None = None,
-) -> Starlette:
-    """Build the ASGI app from the explicit secret and launch identity."""
-    key = master_key or os.environ.get("AMIS_GATEWAY_MASTER_KEY", "")
+def create_app(*, instance_id: str | None = None) -> Starlette:
+    """Build the ASGI app from the launch identity owned by the supervisor."""
     resolved_instance_id = instance_id or os.environ.get(
         "AMIS_GATEWAY_INSTANCE_ID",
         "embedded-test-instance",
     )
-    return AmisGatewayApplication(
-        master_key=key,
-        instance_id=resolved_instance_id,
-    ).app
+    return AmisGatewayApplication(instance_id=resolved_instance_id).app

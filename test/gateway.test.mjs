@@ -94,7 +94,6 @@ test('locator reports no interpreter rather than returning an unusable path', ()
 test('health probe rejects an orphaned helper from a previous app launch', async () => {
   const probe = new GatewayHealthProbe({
     instanceId: 'current-launch',
-    masterKey: 'key',
     protocolVersion: GATEWAY_RUNTIME_PROTOCOL_VERSION,
     fetchImplementation: healthResponder({
       status: 'ok',
@@ -110,7 +109,6 @@ test('health probe rejects an orphaned helper from a previous app launch', async
 test('health probe rejects a helper speaking an older runtime protocol', async () => {
   const probe = new GatewayHealthProbe({
     instanceId: 'current-launch',
-    masterKey: 'key',
     protocolVersion: GATEWAY_RUNTIME_PROTOCOL_VERSION,
     fetchImplementation: healthResponder({
       status: 'ok',
@@ -126,7 +124,6 @@ test('health probe rejects a helper speaking an older runtime protocol', async (
 test('health probe accepts this launch on the matching protocol', async () => {
   const probe = new GatewayHealthProbe({
     instanceId: 'current-launch',
-    masterKey: 'key',
     protocolVersion: GATEWAY_RUNTIME_PROTOCOL_VERSION,
     fetchImplementation: healthResponder({
       status: 'ok',
@@ -142,7 +139,6 @@ test('health probe accepts this launch on the matching protocol', async () => {
 test('health probe treats an unreachable port as unhealthy', async () => {
   const probe = new GatewayHealthProbe({
     instanceId: 'current-launch',
-    masterKey: 'key',
     protocolVersion: GATEWAY_RUNTIME_PROTOCOL_VERSION,
     fetchImplementation: async () => {
       throw new Error('connection refused');
@@ -262,8 +258,7 @@ test('manager launches the interpreter with the gateway module and loopback flag
     '4000'
   ]);
   assert.equal(manager.baseUrl(), 'http://127.0.0.1:4000');
-  assert.equal(manager.bearerToken(), 'sk-123456');
-  assert.equal(launchOptions.env.AMIS_GATEWAY_MASTER_KEY, manager.bearerToken());
+  assert.equal(launchOptions.env.AMIS_GATEWAY_MASTER_KEY, undefined);
   assert.equal(launchOptions.env.LITELLM_LOCAL_MODEL_COST_MAP, 'True');
   assert.equal(launchOptions.env.PYTHONDONTWRITEBYTECODE, '1');
   assert.ok(launchOptions.env.AMIS_GATEWAY_INSTANCE_ID);

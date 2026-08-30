@@ -45,21 +45,10 @@ export class GatewayProcessManager {
   private static readonly MAX_RESTART_ATTEMPTS = 5;
   private static readonly RESTART_BASE_SECONDS = 2;
   private static readonly RESTART_CAP_SECONDS = 60;
-  /**
-   * Fixed bearer key for the loopback gateway, so it can be called by hand
-   * without first extracting a per-launch secret from the main process.
-   *
-   * Because it is a constant, any process running as this user can call the
-   * gateway while it is up; a generated per-launch key previously made that
-   * impractical. Replace this with a generated value before shipping a build
-   * that talks to paid upstream providers.
-   */
-  private static readonly MASTER_KEY = 'sk-123456';
 
   // The launch identity stays random: it is what tells this launch's helper
   // apart from an orphan left behind by a previous one.
   private readonly instanceId = randomUUID();
-  private readonly masterKey = GatewayProcessManager.MASTER_KEY;
   private readonly locator: GatewayRuntimeLocator;
   private readonly portResolver: GatewayPortResolver;
   private readonly healthProbe: GatewayHealthProbe;
@@ -86,7 +75,6 @@ export class GatewayProcessManager {
       options.healthProbe ??
       new GatewayHealthProbe({
         instanceId: this.instanceId,
-        masterKey: this.masterKey,
         protocolVersion: GATEWAY_RUNTIME_PROTOCOL_VERSION
       });
     this.readinessTimeoutSeconds = options.readinessTimeoutSeconds ?? 90;
@@ -97,11 +85,6 @@ export class GatewayProcessManager {
   /** Base URL clients should call, available only once the gateway is running. */
   baseUrl(): string | null {
     return this.port === null ? null : `http://127.0.0.1:${this.port}`;
-  }
-
-  /** Bearer credential the renderer-facing clients must send to the gateway. */
-  bearerToken(): string {
-    return this.masterKey;
   }
 
   /** Starts the gateway unless this launch already owns a healthy instance. */
@@ -202,7 +185,6 @@ export class GatewayProcessManager {
       ...process.env,
       LITELLM_LOCAL_MODEL_COST_MAP: 'True',
       PYTHONDONTWRITEBYTECODE: '1',
-      AMIS_GATEWAY_MASTER_KEY: this.masterKey,
       AMIS_GATEWAY_INSTANCE_ID: this.instanceId
     };
   }

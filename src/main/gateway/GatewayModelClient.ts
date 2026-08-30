@@ -1,10 +1,14 @@
 import type { CloudApiFormat } from '../../shared/types';
 
-/** The part of the gateway supervisor this client needs to reach it. */
+/**
+ * The part of the gateway supervisor this client needs to reach it.
+ *
+ * No credential appears here: the gateway listens on loopback and authenticates
+ * nobody, so its callers have nothing to send.
+ */
 export interface GatewayEndpoint {
   startIfNeeded(): Promise<void>;
   baseUrl(): string | null;
-  bearerToken(): string;
 }
 
 /** LiteLLM call parameters for one route, before wire serialization. */
@@ -106,10 +110,7 @@ export class GatewayModelClient {
     const baseUrl = await this.resolveBaseUrl();
     const response = await this.fetcher(`${baseUrl}${routePath}`, {
       ...init,
-      headers: {
-        Authorization: `Bearer ${this.gateway.bearerToken()}`,
-        'Content-Type': 'application/json'
-      }
+      headers: { 'Content-Type': 'application/json' }
     });
     const payload: unknown = await response.json().catch(() => null);
     if (!response.ok) {

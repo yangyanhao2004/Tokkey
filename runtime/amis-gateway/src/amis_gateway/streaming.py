@@ -77,34 +77,51 @@ class GatewayStreamingMetrics:
 
 
 @dataclass(frozen=True, slots=True)
-class UpstreamProxyPolicy:
-    """Keep local model traffic direct while honoring proxies for public APIs."""
+class LocalEndpointPolicy:
+    """Classify a provider endpoint as a machine-local one or a public API.
 
-    def should_trust_environment(self, url: str) -> bool:
-        """Return whether HTTPX may use proxy settings inherited from the app."""
+    Two decisions depend on this and must never disagree: a local endpoint is
+    never reached through a user-configured desktop proxy, and it is never sent
+    a credential, because the model server answering it belongs to this machine.
+    """
+
+    def is_local(self, url: str) -> bool:
+        """Return whether the URL names a loopback, private, or `.local` host."""
         hostname = urlsplit(url).hostname
         if hostname is None:
-            # URL validation remains HTTPX's responsibility. Conservatively retain
-            # the default proxy behavior when no host can be classified here.
-            return True
+            # URL validation remains HTTPX's responsibility. An unclassifiable
+            # host is conservatively treated as public: it keeps the default
+            # proxy behavior and never drops a credential the provider needs.
+            return False
 
         normalized_hostname = hostname.rstrip(".").lower()
         if normalized_hostname == "localhost" or normalized_hostname.endswith(
             (".localhost", ".local")
         ):
-            return False
+            return True
 
         try:
             # IPv6 link-local URLs may include a zone identifier such as %en0.
             address = ipaddress.ip_address(normalized_hostname.split("%", maxsplit=1)[0])
         except ValueError:
-            # Public provider hostnames should continue honoring HTTP(S)/SOCKS
-            # proxy settings inherited from the desktop application environment.
-            return True
+            # A public provider hostname.
+            return False
 
-        # Loopback, private, link-local, reserved, and otherwise non-global model
-        # servers must never be sent through a user-configured desktop proxy.
-        return address.is_global
+        # Loopback, private, link-local, reserved, and otherwise non-global
+        # addresses all identify a model server reachable without leaving the
+        # user's own network.
+        return not address.is_global
+
+
+@dataclass(frozen=True, slots=True)
+class UpstreamProxyPolicy:
+    """Keep local model traffic direct while honoring proxies for public APIs."""
+
+    endpoints: LocalEndpointPolicy = LocalEndpointPolicy()
+
+    def should_trust_environment(self, url: str) -> bool:
+        """Return whether HTTPX may use proxy settings inherited from the app."""
+        return not self.endpoints.is_local(url)
 
 
 @dataclass(frozen=True, slots=True)
@@ -367,6 +384,7 @@ class NativeResponsesSSEProxy:
         payload: JSONMapping,
         route: ModelRoute,
         forwarded_headers: JSONMapping,
+        credential: str | None = None,
     ) -> NativeResponsesSSESession:
         """Return after upstream headers, never after the complete model response."""
         metrics = GatewayStreamingMetrics(route_name=route.model_name, sink=self._metric_sink)
@@ -380,9 +398,10 @@ class NativeResponsesSSEProxy:
             "Content-Type": "application/json",
             **{str(key): str(value) for key, value in forwarded_headers.items()},
         }
-        api_key = route.litellm_params.get("api_key")
-        if isinstance(api_key, str) and api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        # A local model server is called with no Authorization header at all;
+        # the caller decides that by passing no credential.
+        if credential:
+            headers["Authorization"] = f"Bearer {credential}"
 
         attempt = 1
         while True:

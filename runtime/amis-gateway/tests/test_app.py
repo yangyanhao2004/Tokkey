@@ -17,16 +17,15 @@ from amis_gateway.app import (
 )
 from amis_gateway.cancellation import UpstreamAborted
 
-KEY = "test-master-key"
-AUTH = {"Authorization": f"Bearer {KEY}"}
+# The gateway authenticates nobody; a caller's key is only a candidate
+# credential for the upstream provider call.
+CALLER_KEY = "caller-supplied-key"
+AUTH = {"Authorization": f"Bearer {CALLER_KEY}"}
 
 
 async def test_health_reports_launch_identity_and_runtime_protocol() -> None:
     """The supervisor can distinguish its helper from stale app builds."""
-    application = AmisGatewayApplication(
-        master_key=KEY,
-        instance_id="current-app-launch",
-    )
+    application = AmisGatewayApplication(instance_id="current-app-launch")
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application.app),
         base_url="http://gateway.test",
@@ -121,7 +120,7 @@ def model_payload() -> dict[str, Any]:
 
 async def test_management_crud_and_atomic_restore() -> None:
     """Swift's existing create/list/update/delete shapes remain compatible."""
-    application = AmisGatewayApplication(master_key=KEY)
+    application = AmisGatewayApplication()
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application.app),
         base_url="http://gateway.test",
@@ -160,7 +159,7 @@ async def test_chat_request_uses_route_credentials_and_streams_openai_sse() -> N
         captured.update(kwargs)
         return FakeAsyncStream([{"id": "chunk", "choices": []}])
 
-    application = AmisGatewayApplication(master_key=KEY, chat_call=chat_call)
+    application = AmisGatewayApplication(chat_call=chat_call)
     application._registry.create(model_payload())
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application.app),
@@ -181,6 +180,121 @@ async def test_chat_request_uses_route_credentials_and_streams_openai_sse() -> N
     await client.aclose()
 
 
+async def responses_route_credential(
+    route: dict[str, Any],
+    headers: dict[str, str],
+) -> Any:
+    """Run one Responses turn through the SDK path and report the key it used."""
+    captured: dict[str, Any] = {}
+
+    async def responses_call(**kwargs: Any) -> FakeResponse:
+        captured.update(kwargs)
+        return FakeResponse({"id": "resp"})
+
+    application = AmisGatewayApplication(responses_call=responses_call)
+    application._registry.create(route)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://gateway.test",
+    )
+
+    response = await client.post(
+        "/v1/responses",
+        headers=headers,
+        json={"model": "agent-model", "input": "hello"},
+    )
+
+    assert response.status_code == 200
+    await client.aclose()
+    return captured["api_key"]
+
+
+async def test_local_provider_route_needs_no_credential_from_anyone() -> None:
+    """A model served from this machine is called without a real key."""
+    route = model_payload()
+    route["litellm_params"]["api_base"] = "http://127.0.0.1:8080/v1"
+    del route["litellm_params"]["api_key"]
+
+    # The placeholder only exists because the provider SDK refuses to build a
+    # client without one; the loopback server ignores it.
+    assert await responses_route_credential(route, AUTH) == "local"
+
+
+async def test_stored_route_key_wins_over_the_caller_header() -> None:
+    """An agent cannot redirect a paid provider call onto its own credential."""
+    assert await responses_route_credential(model_payload(), AUTH) == "upstream-secret"
+
+
+async def test_public_route_without_a_stored_key_forwards_the_caller_header() -> None:
+    """Codex may bring its own key for a route Tokiie holds no key for."""
+    route = model_payload()
+    del route["litellm_params"]["api_key"]
+
+    assert await responses_route_credential(route, AUTH) == CALLER_KEY
+    assert await responses_route_credential(
+        route,
+        {"x-api-key": CALLER_KEY},
+    ) == CALLER_KEY
+
+
+async def test_public_route_without_any_credential_is_rejected_before_the_provider() -> None:
+    """A key nobody supplied is reported here instead of as an opaque upstream 401."""
+    async def responses_call(**_: Any) -> FakeResponse:
+        raise AssertionError("the provider must not be called without a credential")
+
+    application = AmisGatewayApplication(responses_call=responses_call)
+    route = model_payload()
+    del route["litellm_params"]["api_key"]
+    application._registry.create(route)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://gateway.test",
+    )
+
+    response = await client.post("/v1/responses", json={"model": "agent-model", "input": "hello"})
+
+    assert response.status_code == 401
+    assert "agent-model" in response.json()["error"]["message"]
+    await client.aclose()
+
+
+async def test_local_provider_stream_carries_no_authorization_header() -> None:
+    """Raw passthrough to a loopback model server sends no credential at all."""
+    captured: dict[str, Any] = {}
+
+    async def upstream(request: httpx.Request) -> httpx.Response:
+        captured["authorization"] = request.headers.get("authorization")
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            stream=httpx.ByteStream(b'data: {"type":"response.completed"}\n\n'),
+        )
+
+    from amis_gateway.streaming import NativeResponsesSSEProxy
+
+    application = AmisGatewayApplication(
+        responses_sse_proxy=NativeResponsesSSEProxy(transport=httpx.MockTransport(upstream)),
+    )
+    route = passthrough_route_payload()
+    route["litellm_params"]["api_base"] = "http://localhost:8080/v1"
+    del route["litellm_params"]["api_key"]
+    application._registry.create(route)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://gateway.test",
+    )
+
+    response = await client.post(
+        "/v1/responses",
+        headers=AUTH,
+        json={"model": "agent-model", "input": "hello", "stream": True},
+    )
+
+    assert response.status_code == 200
+    assert captured["authorization"] is None
+    await client.aclose()
+
+
 async def test_responses_registers_explicit_native_streaming_before_sdk_call() -> None:
     """Controlled runtimes bypass LiteLLM's fake stream for unknown model names."""
     real_model = "tokiie-unknown-native-streaming-model"
@@ -193,7 +307,7 @@ async def test_responses_registers_explicit_native_streaming_before_sdk_call() -
         )
         return FakeAsyncStream([{"type": "response.completed"}])
 
-    application = AmisGatewayApplication(master_key=KEY, responses_call=responses_call)
+    application = AmisGatewayApplication(responses_call=responses_call)
     route = model_payload()
     route["litellm_params"]["model"] = f"openai/{real_model}"
     route["model_info"].update({
@@ -231,7 +345,7 @@ async def test_messages_registers_explicit_native_responses_streaming_before_sdk
             [b'event: message_stop\ndata: {"type":"message_stop"}\n\n']
         )
 
-    application = AmisGatewayApplication(master_key=KEY, messages_call=messages_call)
+    application = AmisGatewayApplication(messages_call=messages_call)
     route = model_payload()
     route["litellm_params"]["model"] = f"openai/{real_model}"
     route["model_info"].update({
@@ -246,7 +360,7 @@ async def test_messages_registers_explicit_native_responses_streaming_before_sdk
 
     response = await client.post(
         "/v1/messages",
-        headers={"x-api-key": KEY},
+        headers={"x-api-key": CALLER_KEY},
         json={"model": "agent-model", "messages": [], "max_tokens": 10, "stream": True},
     )
 
@@ -267,7 +381,7 @@ async def test_responses_does_not_assume_streaming_for_unmarked_routes() -> None
         )
         return FakeAsyncStream([{"type": "response.completed"}])
 
-    application = AmisGatewayApplication(master_key=KEY, responses_call=responses_call)
+    application = AmisGatewayApplication(responses_call=responses_call)
     route = model_payload()
     route["litellm_params"]["model"] = f"openai/{real_model}"
     route["model_info"]["api_format"] = "openai_responses"
@@ -290,7 +404,7 @@ async def test_responses_does_not_assume_streaming_for_unmarked_routes() -> None
 
 async def test_deepseek_function_tools_avoid_proxy_only_mcp_imports() -> None:
     """DeepSeek function calling works without LiteLLM's full Proxy extras."""
-    application = AmisGatewayApplication(master_key=KEY)
+    application = AmisGatewayApplication()
     route = model_payload()
     route["litellm_params"]["model"] = "deepseek/deepseek-v4-pro"
     application._registry.create(route)
@@ -325,7 +439,7 @@ async def test_deepseek_function_tools_avoid_proxy_only_mcp_imports() -> None:
 
 async def test_chat_rejects_proxy_managed_mcp_tools() -> None:
     """True MCP tools fail clearly instead of importing unavailable Proxy modules."""
-    application = AmisGatewayApplication(master_key=KEY)
+    application = AmisGatewayApplication()
     application._registry.create(model_payload())
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application.app),
@@ -356,7 +470,7 @@ async def test_anthropic_messages_uses_native_error_and_event_envelopes() -> Non
             [b'event: message_start\ndata: {"type":"message_start","message":{"id":"msg"}}\n\n']
         )
 
-    application = AmisGatewayApplication(master_key=KEY, messages_call=messages_call)
+    application = AmisGatewayApplication(messages_call=messages_call)
     application._registry.create(model_payload())
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application.app),
@@ -364,7 +478,7 @@ async def test_anthropic_messages_uses_native_error_and_event_envelopes() -> Non
     )
     response = await client.post(
         "/v1/messages",
-        headers={"x-api-key": KEY, "anthropic-beta": "feature-2026-01-01"},
+        headers={"x-api-key": CALLER_KEY, "anthropic-beta": "feature-2026-01-01"},
         json={"model": "agent-model", "messages": [], "max_tokens": 10, "stream": True},
     )
 
@@ -374,7 +488,7 @@ async def test_anthropic_messages_uses_native_error_and_event_envelopes() -> Non
     assert "_skip_mcp_handler" not in captured
     missing = await client.post(
         "/v1/messages",
-        headers={"x-api-key": KEY},
+        headers={"x-api-key": CALLER_KEY},
         json={"model": "missing", "messages": [], "max_tokens": 10},
     )
     assert missing.status_code == 404
@@ -396,7 +510,7 @@ async def test_responses_returns_structured_sdk_result() -> None:
     async def responses_call(**_: Any) -> FakeResponse:
         return FakeResponse({"id": "resp", "object": "response", "status": "completed"})
 
-    application = AmisGatewayApplication(master_key=KEY, responses_call=responses_call)
+    application = AmisGatewayApplication(responses_call=responses_call)
     application._registry.create(model_payload())
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application.app),
@@ -427,7 +541,7 @@ async def test_responses_stream_ends_and_closes_iterator_at_terminal_event(
 ) -> None:
     """A semantic terminal event must finish promptly even if upstream never sends EOF."""
     stream = HangingAfterTerminalStream(terminal_type)
-    application = AmisGatewayApplication(master_key=KEY)
+    application = AmisGatewayApplication()
 
     async def collect_events() -> list[bytes]:
         return [
@@ -452,7 +566,7 @@ async def test_responses_stream_does_not_stop_at_non_terminal_delta() -> None:
             {"type": "response.output_text.delta", "delta": "ignored"},
         ]
     )
-    application = AmisGatewayApplication(master_key=KEY)
+    application = AmisGatewayApplication()
 
     events = [
         event
@@ -472,7 +586,7 @@ async def test_responses_disable_proxy_mcp_dispatch_and_preserve_provider_tools(
         captured.update(kwargs)
         return FakeResponse({"id": "resp", "object": "response", "status": "completed"})
 
-    application = AmisGatewayApplication(master_key=KEY, responses_call=responses_call)
+    application = AmisGatewayApplication(responses_call=responses_call)
     application._registry.create(model_payload())
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application.app),
@@ -519,7 +633,7 @@ async def test_deepseek_responses_to_chat_translation_skips_proxy_mcp(monkeypatc
         )
 
     monkeypatch.setattr(litellm, "acompletion", completion_call)
-    application = AmisGatewayApplication(master_key=KEY)
+    application = AmisGatewayApplication()
     route = model_payload()
     route["litellm_params"]["model"] = "deepseek/deepseek-v4-pro"
     application._registry.create(route)
@@ -643,7 +757,6 @@ async def test_native_responses_route_passthrough_streams_before_terminal_event(
     from amis_gateway.streaming import NativeResponsesSSEProxy
 
     application = AmisGatewayApplication(
-        master_key=KEY,
         responses_sse_proxy=NativeResponsesSSEProxy(
             transport=httpx.MockTransport(upstream),
         ),
@@ -659,6 +772,7 @@ async def test_native_responses_route_passthrough_streams_before_terminal_event(
         payload={"model": resolved.model_name, "input": "hello", "stream": True},
         route=resolved,
         forwarded_headers={},
+        credential="upstream-secret",
     )
     iterator = session.iter_bytes()
     first = await asyncio.wait_for(anext(iterator), timeout=0.1)
@@ -693,7 +807,6 @@ async def test_native_responses_route_preserves_raw_sse_frames_through_asgi() ->
     from amis_gateway.streaming import NativeResponsesSSEProxy
 
     application = AmisGatewayApplication(
-        master_key=KEY,
         responses_sse_proxy=NativeResponsesSSEProxy(transport=httpx.MockTransport(upstream)),
     )
     route = model_payload()
@@ -735,7 +848,6 @@ async def test_native_responses_flattens_image_tool_output_before_upstream() -> 
     from amis_gateway.streaming import NativeResponsesSSEProxy
 
     application = AmisGatewayApplication(
-        master_key=KEY,
         responses_sse_proxy=NativeResponsesSSEProxy(transport=httpx.MockTransport(upstream)),
     )
     route = model_payload()
@@ -856,7 +968,6 @@ async def test_disconnect_during_open_cancels_upstream_request() -> None:
     from amis_gateway.streaming import NativeResponsesSSEProxy
 
     application = AmisGatewayApplication(
-        master_key=KEY,
         responses_sse_proxy=NativeResponsesSSEProxy(transport=httpx.MockTransport(upstream)),
     )
     route = model_payload()
@@ -926,7 +1037,6 @@ async def test_explicit_cancel_closes_the_provider_connection_mid_stream() -> No
 
     proxy = NativeResponsesSSEProxy(transport=httpx.MockTransport(upstream))
     application = AmisGatewayApplication(
-        master_key=KEY,
         responses_sse_proxy=proxy,
     )
     resolved = application._registry.create(passthrough_route_payload())
@@ -979,7 +1089,6 @@ async def test_explicit_cancel_during_prompt_processing_aborts_the_upstream_call
     from amis_gateway.streaming import NativeResponsesSSEProxy
 
     application = AmisGatewayApplication(
-        master_key=KEY,
         responses_sse_proxy=NativeResponsesSSEProxy(transport=httpx.MockTransport(upstream)),
     )
     resolved = application._registry.create(passthrough_route_payload())
@@ -1019,9 +1128,9 @@ async def test_explicit_cancel_during_prompt_processing_aborts_the_upstream_call
     await asyncio.wait_for(upstream_cancelled.wait(), timeout=1)
 
 
-async def test_cancel_endpoint_is_idempotent_authorized_and_validated() -> None:
-    """A Stop for a finished turn is success; a bad or unauthenticated one is not."""
-    application = AmisGatewayApplication(master_key=KEY)
+async def test_cancel_endpoint_is_idempotent_and_validated() -> None:
+    """A Stop for a finished turn is success; a malformed one is not."""
+    application = AmisGatewayApplication()
     client = httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application.app),
         base_url="http://gateway",
@@ -1044,8 +1153,9 @@ async def test_cancel_endpoint_is_idempotent_authorized_and_validated() -> None:
     assert unknown.status_code == 200
     assert unknown.json()["aborted"] == 0
 
-    unauthorized = await client.post("/_amis/cancel", json={"thread_id": "private-thread"})
-    assert unauthorized.status_code == 401
+    # No credential is required by the loopback gateway itself.
+    unauthenticated = await client.post("/_amis/cancel", json={"thread_id": "never-registered"})
+    assert unauthenticated.status_code == 200
 
     invalid = await client.post("/_amis/cancel", headers=AUTH, json={"thread_id": ""})
     assert invalid.status_code == 400
@@ -1055,7 +1165,7 @@ async def test_cancel_endpoint_is_idempotent_authorized_and_validated() -> None:
 
 async def test_explicit_cancel_does_not_abort_sibling_session_on_same_model() -> None:
     """Cancellation ids isolate concurrent Codex sessions sharing one model route."""
-    application = AmisGatewayApplication(master_key=KEY)
+    application = AmisGatewayApplication()
     first = application._cancellations.register(
         route_name="shared-model",
         cancellation_id="codex-thread-one",
@@ -1079,7 +1189,7 @@ async def test_explicit_cancel_does_not_abort_sibling_session_on_same_model() ->
 
 async def test_cancel_before_inference_prevents_late_provider_start() -> None:
     """A Stop that beats Codex to the Gateway remains authoritative for that id."""
-    application = AmisGatewayApplication(master_key=KEY)
+    application = AmisGatewayApplication()
 
     aborted = await application._cancellations.abort(
         cancellation_id="codex-thread-racing-start",
@@ -1104,7 +1214,7 @@ async def test_cancel_before_inference_prevents_late_provider_start() -> None:
 
 async def test_cancelled_exchange_does_not_poison_next_turn_reusing_thread_header() -> None:
     """A resumed Codex thread may retain its provider header across later turns."""
-    application = AmisGatewayApplication(master_key=KEY)
+    application = AmisGatewayApplication()
     cancellation_id = "resumed-codex-thread"
     stopped = application._cancellations.register(
         route_name="shared-model",

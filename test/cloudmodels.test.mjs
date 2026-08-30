@@ -63,10 +63,6 @@ class FakeGateway {
   baseUrl() {
     return this.url;
   }
-
-  bearerToken() {
-    return 'sk-123456';
-  }
 }
 
 /** Builds a fetch double over a canned per-path response table. */
@@ -192,7 +188,8 @@ test('a first connect creates the route and persists the profile', async () => {
       supports_responses_sse_passthrough: false
     }
   });
-  assert.equal(create.init.headers.Authorization, 'Bearer sk-123456');
+  // The loopback gateway authenticates nobody, so management calls carry no key.
+  assert.equal(create.init.headers.Authorization, undefined);
   assert.equal(store.saves.length, 1);
   assert.deepEqual(store.saves[0].litellmLinks, [
     { modelID: 'route-uuid-1', apiFormat: 'AMIS_GATEWAY_MANAGED', modelName: ROUTE_NAME }

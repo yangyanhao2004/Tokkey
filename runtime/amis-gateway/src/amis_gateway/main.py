@@ -21,14 +21,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     """Start one loopback-only Uvicorn worker with proxy headers disabled."""
     args = parse_args()
-    master_key = os.environ.get("AMIS_GATEWAY_MASTER_KEY", "")
-    if not master_key:
-        raise SystemExit("AMIS_GATEWAY_MASTER_KEY is required")
     instance_id = os.environ.get("AMIS_GATEWAY_INSTANCE_ID", "")
     if not instance_id:
         raise SystemExit("AMIS_GATEWAY_INSTANCE_ID is required")
     uvicorn.run(
-        create_app(master_key=master_key, instance_id=instance_id),
+        create_app(instance_id=instance_id),
         host=args.host,
         port=args.port,
         proxy_headers=False,

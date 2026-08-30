@@ -84,7 +84,12 @@ npm run gateway:test           # run the Python test suite
 
 - The gateway starts after the main window, so a slow Python boot never delays
   first paint, and a startup failure leaves the rest of the app usable.
-- Each launch generates a master key and an instance id. A listener is adopted
+- The gateway itself is unauthenticated: it listens on loopback only, so a key
+  checked at its door would guard nothing the operating system does not already
+  guard. Credentials are a per-model concern instead — a local model server is
+  called with none, a route with a stored key uses that key, and a route without
+  one forwards whatever the calling agent sent.
+- Each launch generates an instance id. A listener is adopted
   only if `/health/liveness` reports that same instance id and a matching
   `runtime_protocol_version`, so an orphan from a previous launch is never
   mistaken for the current gateway.
