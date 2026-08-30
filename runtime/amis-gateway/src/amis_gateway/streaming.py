@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from time import monotonic
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 
+from .credentials import LocalEndpointPolicy, UpstreamTarget
 from .registry import ModelRoute
 
 
@@ -74,43 +73,6 @@ class GatewayStreamingMetrics:
         )
         if self.sink is not None:
             self.sink(metric)
-
-
-@dataclass(frozen=True, slots=True)
-class LocalEndpointPolicy:
-    """Classify a provider endpoint as a machine-local one or a public API.
-
-    Two decisions depend on this and must never disagree: a local endpoint is
-    never reached through a user-configured desktop proxy, and it is never sent
-    a credential, because the model server answering it belongs to this machine.
-    """
-
-    def is_local(self, url: str) -> bool:
-        """Return whether the URL names a loopback, private, or `.local` host."""
-        hostname = urlsplit(url).hostname
-        if hostname is None:
-            # URL validation remains HTTPX's responsibility. An unclassifiable
-            # host is conservatively treated as public: it keeps the default
-            # proxy behavior and never drops a credential the provider needs.
-            return False
-
-        normalized_hostname = hostname.rstrip(".").lower()
-        if normalized_hostname == "localhost" or normalized_hostname.endswith(
-            (".localhost", ".local")
-        ):
-            return True
-
-        try:
-            # IPv6 link-local URLs may include a zone identifier such as %en0.
-            address = ipaddress.ip_address(normalized_hostname.split("%", maxsplit=1)[0])
-        except ValueError:
-            # A public provider hostname.
-            return False
-
-        # Loopback, private, link-local, reserved, and otherwise non-global
-        # addresses all identify a model server reachable without leaving the
-        # user's own network.
-        return not address.is_global
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,12 +346,14 @@ class NativeResponsesSSEProxy:
         payload: JSONMapping,
         route: ModelRoute,
         forwarded_headers: JSONMapping,
-        credential: str | None = None,
+        # Required, not defaulted: the endpoint now lives here rather than on the
+        # route, so a caller that omitted it would silently lose the destination.
+        target: UpstreamTarget,
     ) -> NativeResponsesSSESession:
         """Return after upstream headers, never after the complete model response."""
         metrics = GatewayStreamingMetrics(route_name=route.model_name, sink=self._metric_sink)
         metrics.record("request.received")
-        url = self._responses_url(route)
+        url = self._responses_url(target)
         upstream_payload = dict(payload)
         upstream_payload["model"] = self._provider_model_name(route)
         upstream_payload["stream"] = True
@@ -399,9 +363,11 @@ class NativeResponsesSSEProxy:
             **{str(key): str(value) for key, value in forwarded_headers.items()},
         }
         # A local model server is called with no Authorization header at all;
-        # the caller decides that by passing no credential.
-        if credential:
-            headers["Authorization"] = f"Bearer {credential}"
+        # the caller decides that by passing no credential. The target's own
+        # headers are applied last so a forwarded one can never shadow them.
+        if target.api_key:
+            headers["Authorization"] = f"Bearer {target.api_key}"
+        headers.update({str(key): str(value) for key, value in target.headers.items()})
 
         attempt = 1
         while True:
@@ -453,10 +419,17 @@ class NativeResponsesSSEProxy:
         return model.split("/", maxsplit=1)[1] if model.startswith("openai/") else model
 
     @staticmethod
-    def _responses_url(route: ModelRoute) -> str:
-        api_base = route.litellm_params.get("api_base")
+    def _responses_url(target: UpstreamTarget) -> str:
+        """Build the Responses URL from the endpoint resolved for this call.
+
+        The resolved endpoint is used rather than the route's stored one because
+        a Codex native route stores none: which backend answers it is decided
+        per request, and each spells the path differently -- `/v1/responses` on
+        the public API, `/responses` on the ChatGPT backend, which has no `/v1`.
+        """
+        api_base = target.api_base
         if not isinstance(api_base, str) or not api_base.strip():
-            raise ValueError("native Responses SSE passthrough requires litellm_params.api_base")
+            raise ValueError("native Responses SSE passthrough requires a resolved api_base")
         base = api_base.rstrip("/")
         if base.endswith("/responses"):
             return base

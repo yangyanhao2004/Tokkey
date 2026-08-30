@@ -18,12 +18,14 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from .cancellation import UpstreamAborted, UpstreamExchange, UpstreamExchangeRegistry
-from .registry import ModelRoute, ModelRouteRegistry, RouteConflictError
-from .streaming import (
-    LocalEndpointPolicy,
-    NativeResponsesProxyError,
-    NativeResponsesSSEProxy,
+from .codex_oauth import CODEX_CLIENT_IDENTITY_HEADERS, CanonicalCodexEndpoint
+from .credentials import (
+    MissingUpstreamCredential,
+    UpstreamTarget,
+    UpstreamTargetPolicy,
 )
+from .registry import ModelRoute, ModelRouteRegistry, RouteConflictError
+from .streaming import NativeResponsesProxyError, NativeResponsesSSEProxy
 
 JSONMapping = dict[str, Any]
 AsyncCall = Callable[..., Awaitable[Any]]
@@ -348,66 +350,6 @@ class ResponsesToolOutputNormalizer:
         return f"[unsupported '{part_type}' tool output omitted]"
 
 
-class MissingUpstreamCredential(Exception):
-    """Raised when a public provider call has no credential to carry."""
-
-
-class UpstreamCredentialPolicy:
-    """Choose the credential one provider call carries, in a fixed order.
-
-    The gateway itself is unauthenticated -- it listens on loopback only, so a
-    key checked here would guard nothing the operating system does not already
-    guard. What an incoming `Authorization` header is good for is the upstream
-    call, and only when Tokiie has nothing better:
-
-    1. A local model server needs no credential and is called without one.
-    2. The key stored on the route is Tokiie's own choice for that model and
-       wins over anything a caller sends, so an agent cannot redirect a paid
-       provider call onto someone else's account.
-    3. Otherwise the caller's own header is forwarded, which is what lets an
-       agent bring its own key for a route Tokiie holds no key for.
-
-    A public route with no key anywhere fails here rather than reaching the
-    provider with a placeholder, so the caller reads why it was rejected instead
-    of an opaque upstream 401.
-    """
-
-    # LiteLLM builds a provider SDK client before the request leaves this
-    # process, and the OpenAI client refuses to be constructed without a key.
-    # A loopback server ignores whatever arrives, so this placeholder keeps the
-    # SDK path working without inventing a credential the user has to manage.
-    LOCAL_PLACEHOLDER_KEY = "local"
-
-    def __init__(self, endpoints: LocalEndpointPolicy | None = None) -> None:
-        self._endpoints = endpoints or LocalEndpointPolicy()
-
-    def resolve(self, route: ModelRoute, request: Request) -> str | None:
-        """Return the credential for this route, or None for a local provider."""
-        api_base = route.litellm_params.get("api_base")
-        if isinstance(api_base, str) and api_base.strip() and self._endpoints.is_local(api_base):
-            return None
-        stored_key = route.litellm_params.get("api_key")
-        if isinstance(stored_key, str) and stored_key.strip():
-            return stored_key
-        caller_key = self.caller_credential(request)
-        if caller_key is None:
-            raise MissingUpstreamCredential(
-                f"model '{route.model_name}' has no stored key and the request carried none"
-            )
-        return caller_key
-
-    @staticmethod
-    def caller_credential(request: Request) -> str | None:
-        """Read the caller's own key from either protocol's header form."""
-        authorization = request.headers.get("authorization", "")
-        if authorization.startswith("Bearer "):
-            bearer = authorization.removeprefix("Bearer ").strip()
-            if bearer:
-                return bearer
-        # Anthropic clients authenticate with x-api-key instead of a bearer token.
-        return request.headers.get("x-api-key", "").strip() or None
-
-
 class AmisGatewayApplication:
     """Compose route management and SDK-backed inference over a loopback listener."""
 
@@ -421,13 +363,13 @@ class AmisGatewayApplication:
         messages_call: AsyncCall | None = None,
         capability_registrar: LiteLLMModelCapabilityRegistrar | None = None,
         responses_sse_proxy: NativeResponsesSSEProxy | None = None,
-        credential_policy: UpstreamCredentialPolicy | None = None,
+        credential_policy: UpstreamTargetPolicy | None = None,
     ) -> None:
         if not instance_id:
             raise ValueError("instance_id must not be empty")
         LiteLLMSDKCompatibility.configure()
         self._instance_id = instance_id
-        self._credentials = credential_policy or UpstreamCredentialPolicy()
+        self._credentials = credential_policy or UpstreamTargetPolicy()
         self._registry = registry or ModelRouteRegistry()
         self._chat_call = chat_call or litellm.acompletion
         self._responses_call = responses_call or litellm.aresponses
@@ -588,8 +530,10 @@ class AmisGatewayApplication:
                 # it: native passthrough forwards this object to the provider, and
                 # the SDK path copies it in `_call_arguments`.
                 payload = ResponsesToolOutputNormalizer.normalize(payload)
-            forwarded_headers = self._forwarded_provider_headers(request)
-            credential = self._credentials.resolve(route, request)
+            # Resolved first: which headers may travel depends on the endpoint
+            # this call was routed to, which a native route only decides here.
+            target = await self._credentials.resolve(route, request)
+            forwarded_headers = self._forwarded_provider_headers(request, target)
             if self._uses_native_responses_sse(payload, route=route, protocol=protocol):
                 session = await self._await_unless_disconnected(
                     request,
@@ -597,7 +541,7 @@ class AmisGatewayApplication:
                         payload=payload,
                         route=route,
                         forwarded_headers=forwarded_headers,
-                        credential=credential,
+                        target=target,
                     ),
                     description="opening the provider Responses stream",
                     exchange=exchange,
@@ -619,12 +563,15 @@ class AmisGatewayApplication:
                     headers=response_headers,
                 )
 
-            arguments = self._call_arguments(payload, route, credential)
+            arguments = self._call_arguments(payload, route, target)
             if protocol == "responses":
                 arguments = ResponsesToolHistoryNormalizer.normalize(arguments)
             self._configure_sdk_tool_handling(arguments, protocol=protocol)
-            if forwarded_headers:
-                arguments["extra_headers"] = forwarded_headers
+            # The target's headers come last: they identify the account the call
+            # is billed to, and a forwarded header must never replace them.
+            extra_headers = {**forwarded_headers, **target.headers}
+            if extra_headers:
+                arguments["extra_headers"] = extra_headers
             result = await self._await_unless_disconnected(
                 request,
                 call(**arguments),
@@ -768,7 +715,7 @@ class AmisGatewayApplication:
     def _call_arguments(
         payload: JSONMapping,
         route: ModelRoute,
-        credential: str | None,
+        target: UpstreamTarget,
     ) -> JSONMapping:
         """Prevent callers from overriding the endpoint and credential selected by Tokiie."""
         arguments = dict(payload)
@@ -777,9 +724,15 @@ class AmisGatewayApplication:
         for key, value in route.litellm_params.items():
             if value is not None:
                 arguments[key] = value
-        # Last word on the credential, so a payload key, a route key, and the
-        # caller's header can never disagree about what reaches the provider.
-        arguments["api_key"] = credential or UpstreamCredentialPolicy.LOCAL_PLACEHOLDER_KEY
+        # Last word on destination and credential together, so a payload key, a
+        # route key, and the caller's header can never disagree about what
+        # reaches which provider.
+        arguments["api_key"] = target.api_key or UpstreamTargetPolicy.LOCAL_PLACEHOLDER_KEY
+        if target.api_base:
+            arguments["api_base"] = target.api_base
+        else:
+            # A route that configured no endpoint keeps using the SDK's default.
+            arguments.pop("api_base", None)
         arguments.setdefault("drop_params", True)
         return arguments
 
@@ -801,10 +754,19 @@ class AmisGatewayApplication:
             return
         arguments["_skip_mcp_handler"] = True
 
-    @staticmethod
-    def _forwarded_provider_headers(request: Request) -> JSONMapping:
+    # Protocol feature headers every route may carry. Credentials are never in
+    # this set: the gateway resolves those per route instead of relaying them.
+    _PROTOCOL_FEATURE_HEADERS = frozenset({"anthropic-beta", "anthropic-version", "openai-beta"})
+
+    @classmethod
+    def _forwarded_provider_headers(cls, request: Request, target: UpstreamTarget) -> JSONMapping:
         """Forward only protocol feature headers, never local gateway credentials."""
-        allowed = {"anthropic-beta", "anthropic-version", "openai-beta"}
+        allowed = cls._PROTOCOL_FEATURE_HEADERS
+        if CanonicalCodexEndpoint.matches(target.api_base):
+            # The ChatGPT backend reads its caller's identity and attestation
+            # headers, not just its token, so a Codex client's own set is passed
+            # through unchanged for the one destination that understands it.
+            allowed = allowed | CODEX_CLIENT_IDENTITY_HEADERS
         return {
             name: value
             for name, value in request.headers.items()

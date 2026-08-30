@@ -252,6 +252,27 @@ export interface CloudModelCard {
 }
 
 /**
+ * One model the installed Codex CLI can talk to, as its bundled catalog
+ * describes it.
+ *
+ * These carry no endpoint and no key. Which of OpenAI's two backends serves
+ * them is decided by the gateway per request: the public API when the caller
+ * brought an API key, the ChatGPT backend on the user's login when it did not.
+ */
+export interface CodexNativeModel {
+  /** The model id OpenAI accepts on the wire, e.g. `gpt-5.5`. */
+  slug: string;
+  displayName: string;
+  description: string;
+  contextWindow: number | null;
+  /**
+   * Whether the public API serves this model. False means it is reachable only
+   * through a ChatGPT login, so a caller with an API key cannot use it.
+   */
+  supportedInApi: boolean;
+}
+
+/**
  * What one connect attempt did. `alreadyConnected` means the profile and its
  * gateway route both survived, so nothing was created or written.
  */

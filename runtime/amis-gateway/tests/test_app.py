@@ -16,6 +16,7 @@ from amis_gateway.app import (
     ResponsesToolOutputNormalizer,
 )
 from amis_gateway.cancellation import UpstreamAborted
+from amis_gateway.credentials import UpstreamTarget
 
 # The gateway authenticates nobody; a caller's key is only a candidate
 # credential for the upstream provider call.
@@ -772,7 +773,10 @@ async def test_native_responses_route_passthrough_streams_before_terminal_event(
         payload={"model": resolved.model_name, "input": "hello", "stream": True},
         route=resolved,
         forwarded_headers={},
-        credential="upstream-secret",
+        target=UpstreamTarget(
+            api_base="https://provider.example/v1",
+            api_key="upstream-secret",
+        ),
     )
     iterator = session.iter_bytes()
     first = await asyncio.wait_for(anext(iterator), timeout=0.1)
@@ -996,6 +1000,7 @@ async def test_disconnect_during_open_cancels_upstream_request() -> None:
                 payload={"model": "agent-model", "input": "hello", "stream": True},
                 route=application._registry.resolve("agent-model"),
                 forwarded_headers={},
+                target=UpstreamTarget(api_base="https://provider.example/v1"),
             ),
             description="opening the provider Responses stream",
         )
@@ -1048,6 +1053,7 @@ async def test_explicit_cancel_closes_the_provider_connection_mid_stream() -> No
         payload={"model": resolved.model_name, "input": "hello", "stream": True},
         route=resolved,
         forwarded_headers={},
+        target=UpstreamTarget(api_base="https://provider.example/v1"),
     )
     await exchange.adopt(session)
     chunks = application._passthrough_stream(session, exchange=exchange)
@@ -1111,6 +1117,7 @@ async def test_explicit_cancel_during_prompt_processing_aborts_the_upstream_call
                 payload={"model": resolved.model_name, "input": "hello", "stream": True},
                 route=resolved,
                 forwarded_headers={},
+                target=UpstreamTarget(api_base="https://provider.example/v1"),
             ),
             description="opening the provider Responses stream",
             exchange=exchange,

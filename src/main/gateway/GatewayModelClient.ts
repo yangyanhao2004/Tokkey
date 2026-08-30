@@ -15,16 +15,24 @@ export interface GatewayEndpoint {
 export interface GatewayLitellmParams {
   /** Provider-qualified model, e.g. `openai/gpt-5.6-terra`. */
   model: string;
+  /** Empty when the gateway resolves the credential itself, per request. */
   apiKey: string;
   apiBase: string | null;
 }
 
 /** The durable marker the gateway stores alongside a route. */
 export interface GatewayModelMarker {
-  profileId: string;
+  /** Absent for routes with no model profile behind them, such as Codex natives. */
+  profileId?: string;
   apiFormat: CloudApiFormat;
   supportsNativeStreaming: boolean;
   supportsResponsesSsePassthrough: boolean;
+  /**
+   * Marks a route whose upstream the gateway picks per request. Only
+   * `codex_native` is understood today; an absent value means the route's own
+   * endpoint and key are used, which is how every other route behaves.
+   */
+  upstream?: 'codex_native';
 }
 
 /** One route creation request. */
@@ -79,7 +87,8 @@ export class GatewayModelClient {
         },
         model_info: {
           created_by: 'amis-wifi',
-          profile_id: request.marker.profileId,
+          ...(request.marker.profileId ? { profile_id: request.marker.profileId } : {}),
+          ...(request.marker.upstream ? { upstream: request.marker.upstream } : {}),
           api_format: request.marker.apiFormat,
           supports_native_streaming: request.marker.supportsNativeStreaming,
           supports_responses_sse_passthrough: request.marker.supportsResponsesSsePassthrough

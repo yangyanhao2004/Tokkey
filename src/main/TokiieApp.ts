@@ -3,6 +3,7 @@ import { app, BrowserWindow, shell } from 'electron';
 import IpcController from './IpcController';
 import GatewayProcessManager from './gateway/GatewayProcessManager';
 import CloudModelConnector from './models/CloudModelConnector';
+import CodexNativeModelRegistrar from './models/CodexNativeModelRegistrar';
 import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
 
 interface TokiieAppOptions {
@@ -22,6 +23,7 @@ export class TokiieApp {
   private readonly ipcController: IpcController;
   private readonly gatewayProcessManager: GatewayProcessManager;
   private readonly cloudModelConnector: CloudModelConnector;
+  private readonly codexNativeModelRegistrar: CodexNativeModelRegistrar;
   private readonly isDev: boolean;
   private readonly evidenceMode: boolean;
   private readonly evidenceCapture: RendererEvidenceCapture | null;
@@ -48,6 +50,7 @@ export class TokiieApp {
       resourcesPath: app.isPackaged ? process.resourcesPath : undefined
     });
     this.cloudModelConnector = CloudModelConnector.forGateway(this.gatewayProcessManager);
+    this.codexNativeModelRegistrar = CodexNativeModelRegistrar.forGateway(this.gatewayProcessManager);
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
       cloudModelConnector: this.cloudModelConnector
@@ -96,8 +99,12 @@ export class TokiieApp {
 
   /**
    * Boots the local gateway without blocking window creation, then rebuilds the
-   * routes of the cloud models connected in an earlier run: a fresh gateway has
-   * none of them, while the database still has their profiles.
+   * routes it serves: the cloud models connected in an earlier run, whose
+   * profiles are still in the database, and the Codex CLI's own models, which
+   * are derived fresh from its bundled catalog every launch.
+   *
+   * The two restores run together because neither depends on the other, and a
+   * slow `codex` call should not delay a cloud route the user already connected.
    *
    * A failure here is reported and left recoverable: everything in the app that
    * does not need model routing keeps working, the gateway can be started again
@@ -106,14 +113,22 @@ export class TokiieApp {
   startGateway(): void {
     this.gatewayProcessManager
       .startIfNeeded()
-      .then(() => this.cloudModelConnector.restoreConnected())
-      .then((restored) => {
+      .then(() =>
+        Promise.all([
+          this.cloudModelConnector.restoreConnected(),
+          this.codexNativeModelRegistrar.registerAll()
+        ])
+      )
+      .then(([restored, native]) => {
         if (restored.length > 0) {
           console.info(`[AmisGateway] Restored ${restored.length} cloud model route(s).`);
         }
+        if (native.length > 0) {
+          console.info(`[AmisGateway] Registered ${native.length} Codex native model route(s).`);
+        }
       })
       .catch((error: unknown) => {
-        console.error('[AmisGateway] Gateway start or cloud model restore failed:', error);
+        console.error('[AmisGateway] Gateway start or model restore failed:', error);
       });
   }
 
