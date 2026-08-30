@@ -32,7 +32,9 @@ export interface GatewayPortResolverOptions {
  * interpreter can be ours.
  */
 export class GatewayPortResolver {
-  private static readonly DEFAULT_PORT = 4000;
+  /** Where the gateway listens unless something else already holds the port. */
+  static readonly DEFAULT_PORT = 4000;
+
   private readonly preferredPort: number;
   private readonly findListener: (port: number) => PortListener | null;
   private readonly terminate: (processId: number) => boolean;

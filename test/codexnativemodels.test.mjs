@@ -7,6 +7,10 @@ import test from 'node:test';
 import { CodexNativeModelCatalog } from '../dist/main/models/CodexNativeModelCatalog.js';
 import { CodexNativeModelRegistrar } from '../dist/main/models/CodexNativeModelRegistrar.js';
 import { CodexProviderConfig } from '../dist/main/models/CodexProviderConfig.js';
+import {
+  CodexUpstreamEndpoint,
+  OpenAiModelsProbe
+} from '../dist/main/models/CodexUpstreamEndpoint.js';
 import { GatewayModelClient } from '../dist/main/gateway/GatewayModelClient.js';
 
 const CODEX_VERSION = 'codex-cli 0.151.0';
@@ -205,7 +209,26 @@ test('reads the base url of the provider codex is configured to use', async () =
     ].join('\n')
   );
 
-  assert.equal(await config.baseUrl(), 'https://api.onetokens.net');
+  assert.deepEqual(await config.read(), { baseUrl: 'https://api.onetokens.net', apiKey: null });
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('carries the key of the environment variable the provider names', async () => {
+  process.env.TOKIIE_TEST_RELAY_KEY = 'sk-relay-issued';
+  const { config, home } = providerConfigFor(
+    [
+      'model_provider = "relay"',
+      '[model_providers.relay]',
+      'base_url = "https://relay.example/v1"',
+      'env_key = "TOKIIE_TEST_RELAY_KEY"'
+    ].join('\n')
+  );
+
+  assert.deepEqual(await config.read(), {
+    baseUrl: 'https://relay.example/v1',
+    apiKey: 'sk-relay-issued'
+  });
+  delete process.env.TOKIIE_TEST_RELAY_KEY;
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -214,7 +237,7 @@ test('falls back to codex own default provider when none is named', async () => 
     ['[model_providers.openai]', 'base_url = "https://api.openai.com/v1"'].join('\n')
   );
 
-  assert.equal(await config.baseUrl(), 'https://api.openai.com/v1');
+  assert.equal((await config.read()).baseUrl, 'https://api.openai.com/v1');
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -223,7 +246,7 @@ test('reports no endpoint when the configured provider defines no base url', asy
     ['model_provider = "OpenAI"', '[model_providers.OpenAI]', 'name = "OpenAI"'].join('\n')
   );
 
-  assert.equal(await config.baseUrl(), null);
+  assert.equal(await config.read(), null);
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -233,10 +256,244 @@ test('reports no endpoint when config.toml is missing, empty, or malformed', asy
   const { config: empty } = providerConfigFor('');
   const { config: malformed } = providerConfigFor('model_provider = [unterminated');
 
-  assert.equal(await absent.baseUrl(), null);
-  assert.equal(await empty.baseUrl(), null);
-  assert.equal(await malformed.baseUrl(), null);
+  assert.equal(await absent.read(), null);
+  assert.equal(await empty.read(), null);
+  assert.equal(await malformed.read(), null);
   rmSync(home, { recursive: true, force: true });
+});
+
+// --- Remembering the endpoint across launches -------------------------------
+
+/** A config.toml stand-in, so endpoint tests state the candidate directly. */
+class StubProviderConfig {
+  constructor(endpoint = null) {
+    this.endpoint = endpoint;
+  }
+
+  async read() {
+    return this.endpoint;
+  }
+}
+
+/** A models listing that answers for one endpoint and 404s for every other. */
+function modelsProbeFor(serving = {}) {
+  const asked = [];
+  const fetcher = async (url) => {
+    asked.push(url);
+    const models = serving[url];
+    if (!models) return new Response('{}', { status: 404 });
+    return new Response(JSON.stringify({ data: models.map((id) => ({ id })) }), { status: 200 });
+  };
+  return { probe: new OpenAiModelsProbe({ fetcher }), asked };
+}
+
+/** The record file as one launch would leave it behind. */
+function recordedEndpoint(home) {
+  const file = path.join(home, '.amiswifi', 'codex-upstream-endpoint.json');
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')).baseUrl;
+  } catch {
+    return null;
+  }
+}
+
+/** A supervisor reporting the port this launch's gateway bound. */
+function gatewayOn(port) {
+  return { startIfNeeded: async () => {}, baseUrl: () => `http://127.0.0.1:${port}` };
+}
+
+function endpointFor({ home, candidate, probe, gateway }) {
+  return new CodexUpstreamEndpoint({
+    homeDirectory: home,
+    config: new StubProviderConfig(candidate),
+    probe: probe ?? modelsProbeFor().probe,
+    gateway: gateway ?? gatewayOn(4000)
+  });
+}
+
+test('records the endpoint codex was configured with on the first launch', async () => {
+  const home = makeHome();
+
+  const resolved = await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://api.onetokens.net/', apiKey: null }
+  }).resolve();
+
+  // The trailing slash is dropped so the next launch recognizes the same URL.
+  assert.equal(resolved, 'https://api.onetokens.net');
+  assert.equal(recordedEndpoint(home), 'https://api.onetokens.net');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('keeps the recorded endpoint when codex has been pointed at the gateway', async () => {
+  const home = makeHome();
+  await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
+  }).resolve();
+
+  const resolved = await endpointFor({
+    home,
+    candidate: { baseUrl: 'http://localhost:4000/v1', apiKey: null }
+  }).resolve();
+
+  assert.equal(resolved, 'https://api.onetokens.net');
+  assert.equal(recordedEndpoint(home), 'https://api.onetokens.net');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('never records the gateway itself, even with nothing recorded yet', async () => {
+  const home = makeHome();
+
+  const resolved = await endpointFor({
+    home,
+    candidate: { baseUrl: 'http://127.0.0.1:4000/v1', apiKey: null }
+  }).resolve();
+
+  assert.equal(resolved, null);
+  assert.equal(recordedEndpoint(home), null);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('refuses the gateway on a fallback port as well as the default one', async () => {
+  const home = makeHome();
+
+  const resolved = await endpointFor({
+    home,
+    candidate: { baseUrl: 'http://localhost:51234/v1', apiKey: null },
+    gateway: gatewayOn(51234)
+  }).resolve();
+
+  assert.equal(resolved, null);
+  assert.equal(recordedEndpoint(home), null);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('adopts another local server that serves gpt models', async () => {
+  const home = makeHome();
+  await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
+  }).resolve();
+  const { probe } = modelsProbeFor({
+    'http://localhost:1234/v1/models': ['gpt-oss-120b']
+  });
+
+  const resolved = await endpointFor({
+    home,
+    candidate: { baseUrl: 'http://localhost:1234/v1', apiKey: null },
+    probe
+  }).resolve();
+
+  // A relay a user runs on this machine is still a relay; only the gateway's
+  // own address is refused.
+  assert.equal(resolved, 'http://localhost:1234/v1');
+  assert.equal(recordedEndpoint(home), 'http://localhost:1234/v1');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('follows a move to another relay that serves gpt models', async () => {
+  const home = makeHome();
+  await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
+  }).resolve();
+  const { probe, asked } = modelsProbeFor({
+    'https://relay.example/v1/models': ['gpt-5.5', 'claude-opus-5']
+  });
+
+  const resolved = await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://relay.example/v1', apiKey: 'sk-relay' },
+    probe
+  }).resolve();
+
+  assert.equal(resolved, 'https://relay.example/v1');
+  assert.equal(recordedEndpoint(home), 'https://relay.example/v1');
+  assert.deepEqual(asked, ['https://relay.example/v1/models']);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('keeps the recorded endpoint when the new one serves no gpt models', async () => {
+  const home = makeHome();
+  await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
+  }).resolve();
+  const { probe, asked } = modelsProbeFor({
+    'https://ollama.example/v1/models': ['llama-4', 'qwen-3']
+  });
+
+  const resolved = await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://ollama.example', apiKey: null },
+    probe
+  }).resolve();
+
+  assert.equal(resolved, 'https://api.onetokens.net');
+  assert.equal(recordedEndpoint(home), 'https://api.onetokens.net');
+  // Both path shapes are tried before the candidate is turned down.
+  assert.deepEqual(asked, ['https://ollama.example/models', 'https://ollama.example/v1/models']);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('keeps the recorded endpoint when the new one cannot be reached', async () => {
+  const home = makeHome();
+  await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
+  }).resolve();
+  const offline = new OpenAiModelsProbe({
+    fetcher: async () => {
+      throw new Error('getaddrinfo ENOTFOUND relay.example');
+    }
+  });
+
+  const resolved = await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://relay.example/v1', apiKey: null },
+    probe: offline
+  }).resolve();
+
+  assert.equal(resolved, 'https://api.onetokens.net');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('does not probe an unchanged endpoint', async () => {
+  const home = makeHome();
+  await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
+  }).resolve();
+  const { probe, asked } = modelsProbeFor();
+
+  const resolved = await endpointFor({
+    home,
+    candidate: { baseUrl: 'https://api.onetokens.net/', apiKey: null },
+    probe
+  }).resolve();
+
+  assert.equal(resolved, 'https://api.onetokens.net');
+  assert.deepEqual(asked, []);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('sends the provider key when probing an endpoint that needs one', async () => {
+  const seen = [];
+  const probe = new OpenAiModelsProbe({
+    fetcher: async (url, init) => {
+      seen.push(init.headers.Authorization);
+      return new Response(JSON.stringify({ data: [{ id: 'gpt-5.5' }] }), { status: 200 });
+    }
+  });
+
+  const served = await probe.servesGptModels({
+    baseUrl: 'https://relay.example/v1',
+    apiKey: 'sk-relay'
+  });
+
+  assert.equal(served, true);
+  assert.deepEqual(seen, ['Bearer sk-relay']);
 });
 
 /** A catalog stub so registrar tests do not touch the shell or the disk. */
@@ -282,13 +539,13 @@ const MODEL = {
   supportedInApi: true
 };
 
-/** A `config.toml` stand-in, so registrar tests never read the real one. */
-class StubProviderConfig {
+/** A resolved-endpoint stand-in, so registrar tests never read the real files. */
+class StubUpstreamEndpoint {
   constructor(url = null) {
     this.url = url;
   }
 
-  async baseUrl() {
+  async resolve() {
     return this.url;
   }
 }
@@ -298,7 +555,7 @@ test('registers a native route with the codex endpoint, no key, and the native m
 
   const registered = await new CodexNativeModelRegistrar({
     catalog: new StubCatalog([MODEL]),
-    providerConfig: new StubProviderConfig('https://api.onetokens.net'),
+    upstream: new StubUpstreamEndpoint('https://api.onetokens.net'),
     client
   }).registerAll();
 
@@ -319,7 +576,7 @@ test('leaves the endpoint unset when codex configures none', async () => {
 
   await new CodexNativeModelRegistrar({
     catalog: new StubCatalog([MODEL]),
-    providerConfig: new StubProviderConfig(),
+    upstream: new StubUpstreamEndpoint(),
     client
   }).registerAll();
 
@@ -331,7 +588,7 @@ test('adopts a route that already exists instead of recreating it', async () => 
 
   const registered = await new CodexNativeModelRegistrar({
     catalog: new StubCatalog([MODEL]),
-    providerConfig: new StubProviderConfig(),
+    upstream: new StubUpstreamEndpoint(),
     client
   }).registerAll();
 
@@ -345,7 +602,7 @@ test('one rejected model does not cost the others their routes', async () => {
 
   const registered = await new CodexNativeModelRegistrar({
     catalog: new StubCatalog([MODEL, other]),
-    providerConfig: new StubProviderConfig(),
+    upstream: new StubUpstreamEndpoint(),
     client
   }).registerAll();
 
@@ -367,7 +624,7 @@ test('does not touch the gateway when no codex models were discovered', async ()
 
   const registered = await new CodexNativeModelRegistrar({
     catalog: new StubCatalog([]),
-    providerConfig: new StubProviderConfig(),
+    upstream: new StubUpstreamEndpoint(),
     client
   }).registerAll();
 

@@ -4,7 +4,7 @@ import GatewayModelClient, {
   type GatewayModelRoute
 } from '../gateway/GatewayModelClient';
 import CodexNativeModelCatalog from './CodexNativeModelCatalog';
-import CodexProviderConfig from './CodexProviderConfig';
+import CodexUpstreamEndpoint from './CodexUpstreamEndpoint';
 
 /** Codex models speak the OpenAI Responses wire, which the gateway forwards natively. */
 const CODEX_NATIVE_API_FORMAT = 'openai_responses';
@@ -15,10 +15,9 @@ const OPENAI_PREFIX = 'openai';
 /**
  * Registers the Codex CLI's own models as gateway routes.
  *
- * Unlike a cloud card, these have nothing to persist: the route is derived
- * entirely from the CLI's own configuration — the bundled catalog for the
- * models, `config.toml` for the endpoint — and the gateway holds it in memory,
- * so every launch simply rebuilds the same set.
+ * The route is derived from the CLI's own configuration — the bundled catalog
+ * for the models, the remembered provider endpoint for where they are served
+ * from — and the gateway holds it in memory, so every launch rebuilds the set.
  *
  * The route carries the endpoint Codex itself would call and no key at all.
  * That split is deliberate: the endpoint is a durable fact about this machine,
@@ -33,22 +32,27 @@ const OPENAI_PREFIX = 'openai';
  */
 export class CodexNativeModelRegistrar {
   private readonly catalog: CodexNativeModelCatalog;
-  private readonly providerConfig: CodexProviderConfig;
+  private readonly upstream: CodexUpstreamEndpoint;
   private readonly client: GatewayModelClient;
 
   constructor(options: {
     catalog?: CodexNativeModelCatalog;
-    providerConfig?: CodexProviderConfig;
+    upstream?: CodexUpstreamEndpoint;
     client: GatewayModelClient;
   }) {
     this.catalog = options.catalog ?? new CodexNativeModelCatalog();
-    this.providerConfig = options.providerConfig ?? new CodexProviderConfig();
+    this.upstream = options.upstream ?? new CodexUpstreamEndpoint();
     this.client = options.client;
   }
 
   /** Builds the default wiring around one gateway supervisor. */
   static forGateway(gateway: GatewayEndpoint): CodexNativeModelRegistrar {
-    return new CodexNativeModelRegistrar({ client: new GatewayModelClient({ gateway }) });
+    return new CodexNativeModelRegistrar({
+      client: new GatewayModelClient({ gateway }),
+      // The endpoint resolver needs the same supervisor: the one address it
+      // must never adopt is that gateway's own.
+      upstream: new CodexUpstreamEndpoint({ gateway })
+    });
   }
 
   /**
@@ -64,10 +68,10 @@ export class CodexNativeModelRegistrar {
     const models = await this.catalog.list();
     if (models.length === 0) return [];
 
-    const [existing, apiBase] = await Promise.all([
-      this.client.listModels(),
-      this.providerConfig.baseUrl()
-    ]);
+    // Listing first is what starts the gateway, and the resolver reads the port
+    // it bound to recognize its own address.
+    const existing = await this.client.listModels();
+    const apiBase = await this.upstream.resolve();
     const registered: CodexNativeModel[] = [];
     for (const model of models) {
       if (await this.register(model, existing, apiBase)) {

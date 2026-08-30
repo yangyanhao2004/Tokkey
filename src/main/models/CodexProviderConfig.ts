@@ -6,6 +6,17 @@ import { parse as parseToml } from '@iarna/toml';
 /** The provider Codex uses when `config.toml` names none. */
 const DEFAULT_PROVIDER_ID = 'openai';
 
+/** One provider as `config.toml` describes it, reduced to what Tokiie routes on. */
+export interface CodexProviderEndpoint {
+  baseUrl: string;
+  /**
+   * The key held by the environment variable the provider names, when that
+   * variable is set. Only a probe of the endpoint uses it — the gateway picks
+   * the credential a real turn spends.
+   */
+  apiKey: string | null;
+}
+
 /**
  * Reads the endpoint the Codex CLI itself would call, from `~/.codex/config.toml`.
  *
@@ -14,10 +25,9 @@ const DEFAULT_PROVIDER_ID = 'openai';
  * the CLI reads. Tokiie serves the same models from the same place rather than
  * asking again, so a model that works in `codex` works here.
  *
- * Only the active provider's `base_url` is read. Everything else in that file —
- * credentials, wire protocol, retry policy — belongs to the CLI: the gateway
- * decides per request which credential a Codex native route spends, and reading
- * a second opinion from here would only let the two disagree.
+ * This reads the file and nothing more: whether the endpoint it names is one
+ * Tokiie should adopt is `CodexUpstreamEndpoint`'s decision, because the file
+ * is writable by anything on this machine — including Tokiie itself.
  *
  * Every failure path yields null, which means "no endpoint configured" and
  * leaves the gateway on its own defaults. The file belongs to another program
@@ -26,7 +36,7 @@ const DEFAULT_PROVIDER_ID = 'openai';
 export class CodexProviderConfig {
   private readonly filePath: string;
   /** Shared by every caller during one launch, so the file is read at most once. */
-  private lookup: Promise<string | null> | null = null;
+  private lookup: Promise<CodexProviderEndpoint | null> | null = null;
 
   constructor(options: { homeDirectory?: string; filePath?: string } = {}) {
     this.filePath = options.filePath ?? CodexProviderConfig.defaultPath(options.homeDirectory);
@@ -41,14 +51,14 @@ export class CodexProviderConfig {
     return path.join(homeDirectory ?? os.homedir(), '.codex', 'config.toml');
   }
 
-  /** The active provider's base URL, or null when the file names none. */
-  baseUrl(): Promise<string | null> {
-    this.lookup ??= this.readBaseUrl();
+  /** The active provider, or null when the file names none Tokiie can use. */
+  read(): Promise<CodexProviderEndpoint | null> {
+    this.lookup ??= this.readProvider();
     return this.lookup;
   }
 
   /** Resolves `model_provider` against the `model_providers` table. */
-  private async readBaseUrl(): Promise<string | null> {
+  private async readProvider(): Promise<CodexProviderEndpoint | null> {
     const document = await this.readDocument();
     if (!document) return null;
 
@@ -64,7 +74,15 @@ export class CodexProviderConfig {
       console.error(`[CodexModels] config.toml names provider '${providerId}', which it does not define.`);
       return null;
     }
-    return this.stringOrNull(provider.base_url);
+    const baseUrl = this.stringOrNull(provider.base_url);
+    if (baseUrl === null) return null;
+    return { baseUrl, apiKey: this.environmentKey(provider.env_key) };
+  }
+
+  /** Reads the key from the environment variable the provider names, if any. */
+  private environmentKey(envKey: unknown): string | null {
+    const name = this.stringOrNull(envKey);
+    return name === null ? null : this.stringOrNull(process.env[name]);
   }
 
   /** The parsed file, or null when it is absent or unparseable. */
