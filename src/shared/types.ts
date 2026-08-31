@@ -192,6 +192,10 @@ export interface TokiieApi {
   deployLocalModel(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
   listInstalledLocalModels(): Promise<InstalledLocalModel[]>;
   removeInstalledLocalModel(modelId: string): Promise<InstalledLocalModel[]>;
+  getLocalModelRuntimeState(): Promise<LocalModelRuntimeState>;
+  startInstalledLocalModel(modelId: string): Promise<LocalModelRuntimeState>;
+  stopLocalModelRuntime(): Promise<LocalModelRuntimeState>;
+  onLocalModelRuntimeStateChanged(listener: (state: LocalModelRuntimeState) => void): () => void;
   listCloudModelCards(): Promise<CloudModelCard[]>;
   connectCloudModel(cardId: string): Promise<CloudModelConnection>;
   restoreCloudModels(): Promise<CloudModelConnection[]>;
@@ -341,6 +345,25 @@ export interface InstalledLocalModel {
   /** Unix milliseconds at which the download completed. */
   downloadedAt: number;
   filePath: string;
+}
+
+/** The supported USB Dongle and the concrete serial endpoint it exposes. */
+export interface TokenHubDevice {
+  identity: string;
+  calloutPath: string;
+  serialNumber: string | null;
+  location: string | null;
+}
+
+/** User-visible lifecycle of the single Dongle-guarded local model process. */
+export type LocalModelRuntimePhase = 'idle' | 'starting' | 'running' | 'failed';
+
+export interface LocalModelRuntimeState {
+  phase: LocalModelRuntimePhase;
+  modelId: string | null;
+  endpoint: string | null;
+  error: string | null;
+  device: TokenHubDevice | null;
 }
 
 /** Local machine capability used for download gates and runtime display. */

@@ -6,6 +6,9 @@ import CloudModelConnector from './models/CloudModelConnector';
 import CodexNativeModelRegistrar from './models/CodexNativeModelRegistrar';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
+import HubModelConnector from './models/HubModelConnector';
+import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
+import TokenHubRuntimeLocator from './models/tokenhub/TokenHubRuntimeLocator';
 
 interface TokiieAppOptions {
   width?: number;
@@ -26,6 +29,7 @@ export class TokiieApp {
   private readonly cloudModelConnector: CloudModelConnector;
   private readonly codexNativeModelRegistrar: CodexNativeModelRegistrar;
   private readonly codexGatewayIntegration: CodexGatewayIntegration;
+  private readonly tokenHubRuntime: TokenHubRuntime;
   private readonly isDev: boolean;
   private readonly evidenceMode: boolean;
   private readonly evidenceCapture: RendererEvidenceCapture | null;
@@ -56,10 +60,18 @@ export class TokiieApp {
     this.codexGatewayIntegration = new CodexGatewayIntegration({
       gateway: this.gatewayProcessManager
     });
+    this.tokenHubRuntime = new TokenHubRuntime({
+      runtimeLocator: new TokenHubRuntimeLocator({
+        resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
+        appPath: app.getAppPath()
+      }),
+      profileConnector: HubModelConnector.forGateway(this.gatewayProcessManager)
+    });
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
       cloudModelConnector: this.cloudModelConnector,
-      codexGatewayIntegration: this.codexGatewayIntegration
+      codexGatewayIntegration: this.codexGatewayIntegration,
+      tokenHubRuntime: this.tokenHubRuntime
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
     this.isDev = TokiieApp.shouldOpenDevTools(this.evidenceMode, process.argv);
@@ -97,6 +109,7 @@ export class TokiieApp {
   /** Creates the first window once Electron has finished initialising. */
   onReady(): void {
     this.ipcController.attachModelDownloadSession();
+    this.tokenHubRuntime.startMonitoring();
     this.createMainWindow();
     if (!this.evidenceMode) {
       // Before anything reads Codex's config.toml: a run that was killed left
@@ -115,6 +128,7 @@ export class TokiieApp {
    * stops answering the moment the gateway below it goes down.
    */
   onWillQuit(): void {
+    this.tokenHubRuntime.shutdownNow();
     this.codexGatewayIntegration.deactivate();
     this.gatewayProcessManager.stop('application quit');
   }

@@ -1,4 +1,4 @@
-import { app, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type {
   AgentInstallation,
   AppInfo,
@@ -48,6 +48,7 @@ import LocalModelManager from './models/LocalModelManager';
 import CloudModelConnector from './models/CloudModelConnector';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import HostSnapshotService from './host/HostSnapshotService';
+import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 
 type IpcHandler = (...args: unknown[]) => unknown;
 
@@ -61,6 +62,7 @@ export interface IpcControllerOptions {
   mcpCatalogScanner?: LocalMcpCatalogScanner;
   mcpConfigurationApplier?: McpConfigurationApplying;
   localModelManager?: LocalModelManager;
+  tokenHubRuntime?: TokenHubRuntime;
   hostSnapshotService?: HostSnapshotService;
   agentManager?: AgentManager;
   /** Owns the gateway subprocess, so only the app that supervises it can supply this. */
@@ -83,6 +85,7 @@ export default class IpcController {
   private readonly mcpCatalogScanner: LocalMcpCatalogScanner;
   private readonly mcpConfigurationApplier: McpConfigurationApplying;
   private readonly localModelManager: LocalModelManager;
+  private readonly tokenHubRuntime: TokenHubRuntime;
   private readonly hostSnapshotService: HostSnapshotService;
   private readonly agentManager: AgentManager;
   private readonly cloudModelConnector: CloudModelConnector | null;
@@ -112,6 +115,12 @@ export default class IpcController {
     this.mcpConfigurationApplier =
       options.mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
     this.localModelManager = options.localModelManager ?? new LocalModelManager();
+    this.tokenHubRuntime = options.tokenHubRuntime ?? new TokenHubRuntime();
+    this.tokenHubRuntime.subscribe((state) => {
+      BrowserWindow.getAllWindows().forEach((window) => {
+        if (!window.isDestroyed()) window.webContents.send('models:runtime-state-changed', state);
+      });
+    });
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     this.codexGatewayIntegration = options.codexGatewayIntegration ?? null;
@@ -177,6 +186,10 @@ export default class IpcController {
       'models:list-installed': () => this.listInstalledLocalModels(),
       'models:remove-installed': (modelId: unknown) =>
         this.removeInstalledLocalModel(this.requireModelId(modelId)),
+      'models:runtime-state': () => this.getLocalModelRuntimeState(),
+      'models:start-installed': (modelId: unknown) =>
+        this.startInstalledLocalModel(this.requireModelId(modelId)),
+      'models:stop-runtime': () => this.stopLocalModelRuntime(),
       'models:cloud-cards': () => this.listCloudModelCards(),
       'models:restore-cloud': () => this.restoreCloudModels(),
       'models:connect-cloud': (cardId: unknown) =>
@@ -340,8 +353,36 @@ export default class IpcController {
   }
 
   /** Deletes one downloaded model and returns the installed list that remains. */
-  removeInstalledLocalModel(modelId: string): Promise<InstalledLocalModel[]> {
+  async removeInstalledLocalModel(modelId: string): Promise<InstalledLocalModel[]> {
+    const runtime = await this.tokenHubRuntime.getState();
+    if (
+      runtime.modelId === modelId &&
+      (runtime.phase === 'starting' || runtime.phase === 'running')
+    ) {
+      throw new Error('Stop the running local model before removing it.');
+    }
     return this.localModelManager.removeInstalled(modelId);
+  }
+
+  /** Current USB presence and the one guarded local-server lifecycle. */
+  getLocalModelRuntimeState() {
+    return this.tokenHubRuntime.getState();
+  }
+
+  /** Starts the exact recursively-discovered GGUF selected on the Tokiie page. */
+  async startInstalledLocalModel(modelId: string) {
+    const model = (await this.localModelManager.listInstalled()).find(
+      (candidate) => candidate.id === modelId
+    );
+    if (!model) throw new Error(`Installed local model not found: ${modelId}`);
+    const state = await this.tokenHubRuntime.startModel(model);
+    await this.syncCodexCatalog();
+    return state;
+  }
+
+  /** Stops the single Dongle-guarded local model process. */
+  stopLocalModelRuntime() {
+    return this.tokenHubRuntime.stopModel();
   }
 
   /** Lists the hardcoded cloud model cards the renderer can connect to. */

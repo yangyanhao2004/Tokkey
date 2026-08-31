@@ -115,6 +115,20 @@ export class GatewayModelClient {
     });
   }
 
+  /** Repoints one existing route without changing its stable gateway id or alias. */
+  async updateModel(modelId: string, params: GatewayLitellmParams): Promise<void> {
+    await this.send(`/model/${encodeURIComponent(modelId)}/update`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        litellm_params: {
+          model: params.model,
+          api_key: params.apiKey,
+          api_base: params.apiBase
+        }
+      })
+    });
+  }
+
   private async send(routePath: string, init: RequestInit): Promise<unknown> {
     const baseUrl = await this.resolveBaseUrl();
     const response = await this.fetcher(`${baseUrl}${routePath}`, {

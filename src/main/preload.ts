@@ -1,5 +1,5 @@
-import { contextBridge, ipcRenderer } from 'electron';
-import type { TokiieApi } from '../shared/types';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { LocalModelRuntimeState, TokiieApi } from '../shared/types';
 
 /**
  * The only bridge between renderer and main process. It exposes a small,
@@ -45,6 +45,14 @@ class PreloadBridge {
       deployLocalModel: (modelId, request) => ipcRenderer.invoke('models:deploy', modelId, request),
       listInstalledLocalModels: () => ipcRenderer.invoke('models:list-installed'),
       removeInstalledLocalModel: (modelId) => ipcRenderer.invoke('models:remove-installed', modelId),
+      getLocalModelRuntimeState: () => ipcRenderer.invoke('models:runtime-state'),
+      startInstalledLocalModel: (modelId) => ipcRenderer.invoke('models:start-installed', modelId),
+      stopLocalModelRuntime: () => ipcRenderer.invoke('models:stop-runtime'),
+      onLocalModelRuntimeStateChanged: (listener) => {
+        const handler = (_event: IpcRendererEvent, state: LocalModelRuntimeState) => listener(state);
+        ipcRenderer.on('models:runtime-state-changed', handler);
+        return () => ipcRenderer.removeListener('models:runtime-state-changed', handler);
+      },
       listCloudModelCards: () => ipcRenderer.invoke('models:cloud-cards'),
       connectCloudModel: (cardId) => ipcRenderer.invoke('models:connect-cloud', cardId),
       restoreCloudModels: () => ipcRenderer.invoke('models:restore-cloud')
