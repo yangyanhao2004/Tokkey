@@ -1,59 +1,7 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import type { CloudModelCard } from '../../shared/types';
 
 /** The variable holding the key the cloud cards authenticate with. */
 const CLOUD_API_KEY_VARIABLE = 'TOK_API_KEY';
-
-/**
- * Reads `KEY=value` lines out of a dotenv file.
- *
- * The app is normally launched from Finder, which gives it none of the shell's
- * environment, so the key has to come off disk. A missing file or missing
- * variable reads as empty rather than throwing: an unconfigured machine should
- * still show its cards.
- */
-export class EnvFile {
-  private readonly filePath: string;
-
-  constructor(filePath: string = path.join(os.homedir(), '.env')) {
-    this.filePath = filePath;
-  }
-
-  /** The value of one variable, or an empty string when it is not set. */
-  read(name: string): string {
-    for (const line of this.lines()) {
-      const separatorIndex = line.indexOf('=');
-      if (separatorIndex === -1) continue;
-      if (line.slice(0, separatorIndex).trim() !== name) continue;
-      return this.unquote(line.slice(separatorIndex + 1).trim());
-    }
-    return '';
-  }
-
-  /** The file's assignment lines, skipping blanks and `#` comments. */
-  private lines(): string[] {
-    try {
-      return fs
-        .readFileSync(this.filePath, 'utf8')
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !line.startsWith('#'));
-    } catch {
-      return [];
-    }
-  }
-
-  /** Drops the matching quotes a dotenv value may be wrapped in. */
-  private unquote(value: string): string {
-    const isQuoted =
-      value.length >= 2 &&
-      (value.startsWith('"') || value.startsWith("'")) &&
-      value.endsWith(value.charAt(0));
-    return isQuoted ? value.slice(1, -1) : value;
-  }
-}
 
 /**
  * The cloud offerings this build can connect to.
@@ -83,15 +31,10 @@ const CLOUD_MODEL_CARDS: readonly Omit<CloudModelCard, 'apiKey'>[] = [
 /** Serves the in-memory cloud model cards and resolves them by id. */
 export class CloudModelCatalog {
   private readonly cards: readonly Omit<CloudModelCard, 'apiKey'>[];
-  private readonly envFile: EnvFile;
 
-  constructor(
-    cards: readonly Omit<CloudModelCard, 'apiKey'>[] = CLOUD_MODEL_CARDS,
-    envFile: EnvFile = new EnvFile()
-  ) {
+  constructor(cards: readonly Omit<CloudModelCard, 'apiKey'>[] = CLOUD_MODEL_CARDS) {
     // Copied so no caller can mutate the shipped catalog through a returned card.
     this.cards = cards.map((card) => ({ ...card }));
-    this.envFile = envFile;
   }
 
   /** Every connectable card, in display order. */
@@ -112,13 +55,12 @@ export class CloudModelCatalog {
   /**
    * The key every card authenticates with.
    *
-   * Read per call rather than cached, so a key written to `~/.env` after launch
-   * takes effect on the next connect instead of requiring a restart. A real
-   * environment variable wins, which is what makes the key overridable when the
-   * app is started from a shell.
+   * Read per call rather than cached so a process-level override is reflected
+   * immediately. An absent key stays empty, allowing the gateway to use the
+   * caller's request credential instead of a credential read from disk.
    */
   private apiKey(): string {
-    return process.env[CLOUD_API_KEY_VARIABLE] ?? this.envFile.read(CLOUD_API_KEY_VARIABLE);
+    return process.env[CLOUD_API_KEY_VARIABLE] ?? '';
   }
 }
 

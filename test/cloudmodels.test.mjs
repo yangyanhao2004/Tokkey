@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import test from 'node:test';
 
-import { CloudModelCatalog, EnvFile } from '../dist/main/models/CloudModelCatalog.js';
+import { CloudModelCatalog } from '../dist/main/models/CloudModelCatalog.js';
 import { CloudModelConnector } from '../dist/main/models/CloudModelConnector.js';
 import {
   GatewayModelClient,
@@ -21,15 +18,12 @@ const CARD = {
 
 const ROUTE_NAME = 'custom-gpt-5.6-terra-openai-c05442';
 
-// The key is read from the environment, so the connect tests are pinned to a
-// file that does not exist and a cleared variable: nothing here may depend on
-// whatever the developer happens to have in `~/.env`.
+// Connect tests must not depend on a key inherited from the developer's shell.
 delete process.env.TOK_API_KEY;
-const NO_ENV_FILE = new EnvFile(path.join(tmpdir(), 'tokiie-absent.env'));
 
 /** A catalog over the given cards that resolves no API key. */
 function buildCatalog(cards = [CARD]) {
-  return new CloudModelCatalog(cards, NO_ENV_FILE);
+  return new CloudModelCatalog(cards);
 }
 
 /** An in-memory stand-in for the SQLite-backed profile store. */
@@ -114,55 +108,33 @@ test('requiring an unknown card fails with the requested id', () => {
   assert.throws(() => catalog.require('missing'), /Cloud model card not found: missing/);
 });
 
-test('a card with no key configured anywhere is still served', () => {
+test('a card with no process environment key is still served', () => {
   assert.equal(buildCatalog().list()[0].apiKey, '');
   assert.equal(buildCatalog().require(CARD.id).apiKey, '');
 });
 
-test('every served card carries the key written in the env file', () => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-env-'));
-  const envPath = path.join(directory, '.env');
+test('every served card carries the process environment key', () => {
   try {
-    writeFileSync(
-      envPath,
-      ['# a comment', '', 'DEEPSEEK_API_KEY=other', 'TOK_API_KEY = "sk-from-file" '].join('\n')
-    );
-    const catalog = new CloudModelCatalog([CARD], new EnvFile(envPath));
+    process.env.TOK_API_KEY = 'sk-from-shell';
+    const catalog = new CloudModelCatalog([CARD]);
 
-    assert.equal(catalog.list()[0].apiKey, 'sk-from-file');
-    assert.equal(catalog.require(CARD.id).apiKey, 'sk-from-file');
+    assert.equal(catalog.list()[0].apiKey, 'sk-from-shell');
+    assert.equal(catalog.require(CARD.id).apiKey, 'sk-from-shell');
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    delete process.env.TOK_API_KEY;
   }
 });
 
-test('a real environment variable overrides the env file', () => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-env-'));
-  const envPath = path.join(directory, '.env');
+test('a process environment key added after startup is picked up without a restart', () => {
+  const catalog = new CloudModelCatalog([CARD]);
   try {
-    writeFileSync(envPath, 'TOK_API_KEY=sk-from-file\n');
+    assert.equal(catalog.list()[0].apiKey, '');
+
     process.env.TOK_API_KEY = 'sk-from-shell';
-    const catalog = new CloudModelCatalog([CARD], new EnvFile(envPath));
 
     assert.equal(catalog.list()[0].apiKey, 'sk-from-shell');
   } finally {
     delete process.env.TOK_API_KEY;
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test('a key added to the env file after startup is picked up without a restart', () => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-env-'));
-  const envPath = path.join(directory, '.env');
-  try {
-    const catalog = new CloudModelCatalog([CARD], new EnvFile(envPath));
-    assert.equal(catalog.list()[0].apiKey, '');
-
-    writeFileSync(envPath, 'TOK_API_KEY=sk-written-later\n');
-
-    assert.equal(catalog.list()[0].apiKey, 'sk-written-later');
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
   }
 });
 
