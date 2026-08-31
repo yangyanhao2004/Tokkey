@@ -326,7 +326,7 @@ export interface LocalModelRow extends LocalModelDescriptor {
 }
 
 /**
- * A model whose bytes are on this Mac, read from its manifest in
+ * A GGUF whose bytes are on this Mac, found recursively under
  * `~/.amiswifi/models`. Independent of the remote catalog, so the Tokiie page
  * can list what is installed while offline.
  */

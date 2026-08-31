@@ -73,8 +73,13 @@ export class NativeModelDownloadManager {
   async listInstalled(): Promise<InstalledLocalModel[]> {
     await this.persistenceReady;
     const unfinished = new Set([...this.persisted.keys()].map((modelId) => this.safeId(modelId)));
+    const unfinishedFilePaths = new Set(
+      [...this.persisted.values()].map((download) => path.resolve(download.path))
+    );
     const installed = await this.store.listInstalled();
-    return installed.filter((model) => !unfinished.has(this.safeId(model.id)));
+    return installed.filter(
+      (model) => !unfinished.has(this.safeId(model.id)) && !unfinishedFilePaths.has(path.resolve(model.filePath))
+    );
   }
 
   /** Deletes a downloaded model and answers with the list that survived it. */
