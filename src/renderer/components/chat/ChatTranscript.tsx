@@ -46,7 +46,7 @@ function UserMessage({ message }: { message: ChatMessage }) {
         <div className="break-words rounded-2xl bg-chat-user-bubble px-3 py-1.5 text-[12px] leading-4 text-white">
           {message.content}
         </div>
-        <span className="-ml-[7px] block h-[15.949px] w-[13.198px] shrink-0" aria-hidden="true">
+        <span className="-ml-[7px] block h-[15.949px] w-[13.198px] shrink-0 -scale-y-100 rotate-180" aria-hidden="true">
           <img className="block size-full max-w-none" src={`${ICON_BASE_PATH}/chat-message-tail.svg`} alt="" />
         </span>
       </div>
@@ -71,6 +71,11 @@ function AssistantMessage({
     await onCopy();
     setIsCopying(false);
   };
+  const copyLabel = copyState === 'copied'
+    ? 'Assistant response copied'
+    : copyState === 'error'
+      ? 'Copy assistant response failed'
+      : 'Copy assistant response';
 
   return (
     <article className="flex flex-col gap-3" data-testid="chat-assistant-message">
@@ -78,21 +83,21 @@ function AssistantMessage({
       <p className="whitespace-pre-wrap break-words py-1 text-[12px] leading-[1.8] text-white">
         {message.content || 'Thinking…'}
       </p>
-      <div className="relative flex items-center gap-2 py-2 pr-9 text-[10px] text-chat-tertiary-text">
+      <div className="relative flex items-center gap-2 px-1 py-2 text-[10px] text-chat-tertiary-text">
         <button
           type="button"
-          className="flex items-center gap-1 rounded px-1 py-1 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white"
+          className="flex size-4 items-center justify-center rounded hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white"
           onClick={() => void handleCopy()}
           disabled={isCopying || !message.content}
-          aria-label="Copy assistant response"
+          aria-label={copyLabel}
+          title={copyLabel}
           data-testid={`chat-copy-${message.id}`}
         >
           <img className="block size-4 max-w-none" src={`${ICON_BASE_PATH}/chat-copy.svg`} alt="" />
-          <span>{copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy failed' : 'Copy'}</span>
         </button>
         <button
           type="button"
-          className="flex size-6 items-center justify-center rounded hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white"
+          className="flex size-4 items-center justify-center rounded hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white"
           onClick={() => setUsageIsOpen((isOpen) => !isOpen)}
           aria-label="Show token usage"
           aria-expanded={usageIsOpen}

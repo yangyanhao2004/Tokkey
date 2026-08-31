@@ -10,12 +10,8 @@ interface ChatHistoryPopoverProps {
   query: string;
   browseGroups: { label: 'Today' | '7Days' | 'Earlier'; items: ChatSessionSummary[] }[];
   searchResults: ChatSessionSummary[];
-  earlierPage: number;
-  earlierPageItems: ChatSessionSummary[];
-  hasEarlierPage: boolean;
   onQueryChange: (query: string) => void;
   onSelectSession: (sessionId: string) => void;
-  onChangeEarlierPage: (page: number) => void;
   onClose: () => void;
   onRestoreFocus: () => void;
 }
@@ -55,12 +51,8 @@ export function ChatHistoryPopover({
   query,
   browseGroups,
   searchResults,
-  earlierPage,
-  earlierPageItems,
-  hasEarlierPage,
   onQueryChange,
   onSelectSession,
-  onChangeEarlierPage,
   onClose,
   onRestoreFocus
 }: ChatHistoryPopoverProps) {
@@ -115,7 +107,7 @@ export function ChatHistoryPopover({
   return (
     <div
       ref={popoverRef}
-      className={`app-no-drag absolute right-0 top-[38px] z-30 flex w-[240px] flex-col gap-4 overflow-hidden rounded-[13px] border border-white/10 bg-chat-glass p-3 shadow-[0_0_2px_rgba(0,0,0,0.1),0_0_25px_rgba(0,0,0,0.16)] backdrop-blur-xl ${isSearching ? 'h-[112px]' : 'h-[289px]'}`}
+      className={`app-no-drag absolute right-0 top-[38px] z-30 flex w-[240px] flex-col gap-4 overflow-hidden rounded-[13px] border border-white/10 bg-chat-glass p-3 shadow-[0_0_2px_rgba(0,0,0,0.1),0_0_25px_rgba(0,0,0,0.16)] backdrop-blur-xl ${isSearching ? 'h-[112px]' : 'h-[252px]'}`}
       role="dialog"
       aria-label="Private chat history"
       onKeyDown={handleKeyDown}
@@ -169,12 +161,6 @@ export function ChatHistoryPopover({
             </div>
           ))}
           {visibleGroups.length === 0 && <p className="px-1.5 py-2 text-[12px] text-white/75">No conversations yet</p>}
-          {(earlierPage > 0 || hasEarlierPage) && (
-            <div className="app-no-drag mt-2 flex items-center justify-end gap-2 border-t border-white/20 pt-2">
-              <button type="button" className="rounded px-2 py-1 text-[10px] text-white disabled:text-white/30" disabled={earlierPage === 0} onClick={() => onChangeEarlierPage(earlierPage - 1)}>Previous</button>
-              <button type="button" className="rounded px-2 py-1 text-[10px] text-white disabled:text-white/30" disabled={!hasEarlierPage} onClick={() => onChangeEarlierPage(earlierPage + 1)}>More</button>
-            </div>
-          )}
         </div>
       )}
     </div>

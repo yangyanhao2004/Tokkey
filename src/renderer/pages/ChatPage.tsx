@@ -24,16 +24,12 @@ export function ChatPage() {
           historyQuery={chat.historyQuery}
           historyGroups={chat.historyGroups}
           historyResults={chat.historyResults}
-          earlierPage={chat.earlierPage}
-          earlierPageItems={chat.earlierPageItems}
-          hasEarlierPage={chat.hasEarlierPage}
           onSelectSession={chat.selectSession}
           onCloseSession={chat.closeSession}
           onCreateChat={chat.createNewChat}
           onOpenHistory={chat.openHistory}
           onCloseHistory={chat.closeHistory}
           onHistoryQueryChange={chat.setHistoryQuery}
-          onChangeEarlierPage={chat.setEarlierPage}
         />
         <section className="min-h-0 flex-1 overflow-y-auto bg-chat-surface" data-testid="chat-body">
           <ChatTranscript
