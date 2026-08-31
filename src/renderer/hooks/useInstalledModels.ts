@@ -14,8 +14,8 @@ export interface InstalledModels {
 }
 
 /**
- * The models stored under `~/.amiswifi/models`, as the Tokiie page's "Installed"
- * list draws them.
+ * The GGUF files found recursively under `~/.amiswifi/models`, as the Tokiie
+ * page's "Installed" list draws them.
  *
  * The main process answers every call with the complete list, so a removal's
  * result replaces the rows outright and there is no local copy to drift. The

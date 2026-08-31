@@ -327,6 +327,36 @@ test('a model folder with no manifest is still listed, named after its artifact'
   assert.equal(installed.sizeBytes, 4096);
 });
 
+test('GGUF files are discovered at the models root and in every nested directory', async () => {
+  const home = createHomeDirectory();
+  const modelsRoot = path.join(home, '.amiswifi', 'models');
+  const nestedDirectory = path.join(modelsRoot, 'imports', 'qwen', 'weights');
+  mkdirSync(nestedDirectory, { recursive: true });
+  writeFileSync(path.join(modelsRoot, 'root-model.gguf'), Buffer.alloc(1024));
+  writeFileSync(path.join(nestedDirectory, 'nested-model.GGUF'), Buffer.alloc(2048));
+  writeFileSync(path.join(nestedDirectory, 'tokenizer.json'), Buffer.alloc(4096));
+
+  const installed = await new DownloadedModelStore({ homeDirectory: home }).listInstalled();
+
+  assert.deepEqual(installed.map((model) => model.name).sort(), ['nested-model.GGUF', 'root-model.gguf']);
+  assert.deepEqual(installed.map((model) => model.sizeBytes).sort((left, right) => left - right), [1024, 2048]);
+});
+
+test('a manifest still describes a GGUF nested inside its model directory', async () => {
+  const home = createHomeDirectory();
+  const store = new DownloadedModelStore({ homeDirectory: home });
+  const nestedArtifact = { ...ARTIFACT, fileName: 'weights/qwen3-8b-q4_k_m.gguf' };
+  mkdirSync(path.dirname(store.fileFor(nestedArtifact)), { recursive: true });
+  writeFileSync(store.fileFor(nestedArtifact), Buffer.alloc(4096));
+
+  await store.writeManifest(nestedArtifact);
+  const [installed] = await store.listInstalled();
+
+  assert.equal(installed.id, ARTIFACT.id);
+  assert.equal(installed.name, ARTIFACT.name);
+  assert.equal(installed.filePath, store.fileFor(nestedArtifact));
+});
+
 test('an emptied model folder drops out of the installed list', async () => {
   const home = createHomeDirectory();
   const store = new DownloadedModelStore({ homeDirectory: home });
@@ -349,6 +379,30 @@ test('a half-transferred file is not offered as an installed model', async () =>
   writeFileSync(
     path.join(home, '.amiswifi', 'model_downloads.json'),
     JSON.stringify([{ modelId: ARTIFACT.id, path: 'x', urlChain: ['https://huggingface.co/example.gguf'], offset: 4096, length: 9999 }]),
+    'utf8'
+  );
+
+  const installed = await new NativeModelDownloadManager({ homeDirectory: home }).listInstalled();
+
+  assert.deepEqual(installed, []);
+});
+
+test('a half-transferred GGUF is hidden before its manifest exists', async () => {
+  const home = createHomeDirectory();
+  const store = new DownloadedModelStore({ homeDirectory: home });
+  writeModelFile(home, 4096);
+  mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
+  writeFileSync(
+    path.join(home, '.amiswifi', 'model_downloads.json'),
+    JSON.stringify([
+      {
+        modelId: ARTIFACT.id,
+        path: store.fileFor(ARTIFACT),
+        urlChain: ['https://huggingface.co/example.gguf'],
+        offset: 4096,
+        length: 9999
+      }
+    ]),
     'utf8'
   );
 

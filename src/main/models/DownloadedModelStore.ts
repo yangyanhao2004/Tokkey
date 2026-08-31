@@ -5,6 +5,24 @@ import type { InstalledLocalModel, LocalModelDescriptor } from '../../shared/typ
 
 /** Written beside the artifact so an installed model can be described offline. */
 const MANIFEST_FILE_NAME = 'model.json';
+const GGUF_EXTENSION = '.gguf';
+const DISCOVERED_MODEL_ID_PREFIX = 'local-file:';
+
+interface MeasuredArtifact {
+  filePath: string;
+  sizeBytes: number;
+  modifiedAt: number;
+}
+
+interface ModelTreeScan {
+  artifactPaths: string[];
+  manifestDirectories: string[];
+}
+
+interface LocatedManifest {
+  directory: string;
+  model: InstalledLocalModel;
+}
 
 /**
  * Owns `~/.amiswifi/models`: where a model's bytes land, whether they are all
@@ -12,8 +30,8 @@ const MANIFEST_FILE_NAME = 'model.json';
  *
  * The Tokiie page lists installed models on launch, long before — and often
  * without — a catalog fetch, so a completed download leaves a manifest next to
- * its artifact. The directory is then the whole truth: a model exists here
- * exactly when its folder holds both the manifest and a non-empty file.
+ * its artifact. Hand-placed GGUF files count too, wherever they are nested
+ * under the models root.
  */
 export class DownloadedModelStore {
   readonly root: string;
@@ -60,88 +78,106 @@ export class DownloadedModelStore {
     await writeFile(path.join(this.directoryFor(descriptor.id), MANIFEST_FILE_NAME), JSON.stringify(manifest), 'utf8');
   }
 
-  /** Drops a model's folder, manifest and artifact together. */
+  /** Drops a downloaded folder, or just the hand-placed GGUF that was discovered. */
   async remove(modelId: string): Promise<void> {
+    if (modelId.startsWith(DISCOVERED_MODEL_ID_PREFIX)) {
+      const discoveredFilePath = this.filePathForDiscoveredId(modelId);
+      if (discoveredFilePath) await rm(discoveredFilePath, { force: true });
+      return;
+    }
     await rm(this.directoryFor(modelId), { recursive: true, force: true });
   }
 
   /**
    * Every model whose artifact is still on disk, newest download first.
    *
-   * A folder holding a non-empty file counts as installed even when its
-   * manifest is missing, so models fetched before manifests existed — or
-   * dropped in by hand — are still listed. A folder whose artifact was deleted
-   * from Finder is skipped: the list has to match what can actually be started.
+   * Every non-empty GGUF under the root counts as installed, including files at
+   * the root itself and files nested more than one directory deep. A matching
+   * manifest supplies catalog metadata; otherwise the file describes itself.
    */
   async listInstalled(): Promise<InstalledLocalModel[]> {
-    const described = await Promise.all(
-      (await this.readModelDirectories()).map((directory) => this.describeDirectory(directory))
-    );
-    return described
-      .filter((model): model is InstalledLocalModel => model !== null)
+    const scan = await this.scanModelTree(this.root);
+    const [measuredArtifacts, manifests] = await Promise.all([
+      Promise.all(scan.artifactPaths.map((filePath) => this.measure(filePath))),
+      Promise.all(scan.manifestDirectories.map((directory) => this.readLocatedManifest(directory)))
+    ]);
+    const validManifests = manifests.filter((manifest): manifest is LocatedManifest => manifest !== null);
+
+    return measuredArtifacts
+      .filter((artifact): artifact is MeasuredArtifact => artifact !== null)
+      .map((artifact) => this.describeArtifact(artifact, validManifests))
       .sort((left, right) => right.downloadedAt - left.downloadedAt || left.name.localeCompare(right.name));
   }
 
-  private async readModelDirectories(): Promise<string[]> {
+  private async scanModelTree(directory: string): Promise<ModelTreeScan> {
+    let entries;
     try {
-      const entries = await readdir(this.root, { withFileTypes: true });
-      return entries.filter((entry) => entry.isDirectory()).map((entry) => path.join(this.root, entry.name));
+      entries = await readdir(directory, { withFileTypes: true });
     } catch {
-      // No models root yet is the normal state before the first download.
-      return [];
+      // A missing root or an unreadable nested directory contributes no models.
+      return { artifactPaths: [], manifestDirectories: [] };
+    }
+
+    const childScans = await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => this.scanModelTree(path.join(directory, entry.name)))
+    );
+    const artifactPaths = entries
+      .filter((entry) => !entry.isDirectory() && path.extname(entry.name).toLowerCase() === GGUF_EXTENSION)
+      .map((entry) => path.join(directory, entry.name));
+    const hasManifest = entries.some((entry) => entry.isFile() && entry.name === MANIFEST_FILE_NAME);
+
+    return {
+      artifactPaths: [...artifactPaths, ...childScans.flatMap((scan) => scan.artifactPaths)],
+      manifestDirectories: [
+        ...(hasManifest ? [directory] : []),
+        ...childScans.flatMap((scan) => scan.manifestDirectories)
+      ]
+    };
+  }
+
+  private async readLocatedManifest(directory: string): Promise<LocatedManifest | null> {
+    try {
+      const model = JSON.parse(await readFile(path.join(directory, MANIFEST_FILE_NAME), 'utf8')) as InstalledLocalModel;
+      return typeof model?.id === 'string' && typeof model.name === 'string'
+        ? { directory, model }
+        : null;
+    } catch {
+      return null;
     }
   }
 
-  private async describeDirectory(directory: string): Promise<InstalledLocalModel | null> {
-    const manifest = await this.readManifest(directory);
-    const artifact = await this.findArtifact(directory, manifest?.filePath);
-    if (!artifact) return null;
-    if (manifest) return { ...manifest, filePath: artifact.filePath, sizeBytes: artifact.sizeBytes };
+  private describeArtifact(artifact: MeasuredArtifact, manifests: LocatedManifest[]): InstalledLocalModel {
+    const locatedManifest = manifests.find(({ directory, model }) => {
+      if (typeof model.filePath !== 'string') return false;
+      const manifestFilePath = path.isAbsolute(model.filePath)
+        ? model.filePath
+        : path.resolve(directory, model.filePath);
+      return path.resolve(manifestFilePath) === path.resolve(artifact.filePath);
+    });
+    if (locatedManifest) {
+      return {
+        ...locatedManifest.model,
+        filePath: artifact.filePath,
+        sizeBytes: artifact.sizeBytes
+      };
+    }
+
+    const fileName = path.basename(artifact.filePath);
     return {
-      id: path.basename(directory),
-      name: path.basename(artifact.filePath),
+      id: this.discoveredIdFor(artifact.filePath),
+      name: fileName,
       provider: 'Local',
       series: '',
-      fileName: path.basename(artifact.filePath),
+      fileName,
       sizeBytes: artifact.sizeBytes,
       downloadedAt: artifact.modifiedAt,
       filePath: artifact.filePath
     };
   }
 
-  private async readManifest(directory: string): Promise<InstalledLocalModel | null> {
-    try {
-      const manifest = JSON.parse(await readFile(path.join(directory, MANIFEST_FILE_NAME), 'utf8')) as InstalledLocalModel;
-      return typeof manifest?.id === 'string' && typeof manifest.name === 'string' ? manifest : null;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * The manifest's own path when it still resolves, otherwise the largest file
-   * in the folder — the artifact, next to whatever small sidecars sit with it.
-   */
-  private async findArtifact(
-    directory: string,
-    manifestPath?: string
-  ): Promise<{ filePath: string; sizeBytes: number; modifiedAt: number } | null> {
-    const candidates = manifestPath ? [manifestPath] : [];
-    try {
-      const entries = await readdir(directory, { withFileTypes: true });
-      entries
-        .filter((entry) => entry.isFile() && entry.name !== MANIFEST_FILE_NAME)
-        .forEach((entry) => candidates.push(path.join(directory, entry.name)));
-    } catch {
-      return null;
-    }
-    const measured = await Promise.all(candidates.map((filePath) => this.measure(filePath)));
-    return measured
-      .filter((file): file is { filePath: string; sizeBytes: number; modifiedAt: number } => file !== null)
-      .sort((left, right) => right.sizeBytes - left.sizeBytes)[0] ?? null;
-  }
-
-  private async measure(filePath: string): Promise<{ filePath: string; sizeBytes: number; modifiedAt: number } | null> {
+  private async measure(filePath: string): Promise<MeasuredArtifact | null> {
     try {
       const metadata = await stat(filePath);
       return metadata.isFile() && metadata.size > 0
@@ -170,6 +206,24 @@ export class DownloadedModelStore {
   private safeRelativePath(value: string): string {
     const parts = value.split(/[\\/]+/).filter((part) => part.length > 0 && part !== '.' && part !== '..');
     return parts.map((part) => part.replace(/[^a-zA-Z0-9._-]+/g, '_')).join(path.sep) || 'model.bin';
+  }
+
+  private discoveredIdFor(filePath: string): string {
+    const relativePath = path.relative(this.root, filePath).split(path.sep).join('/');
+    return `${DISCOVERED_MODEL_ID_PREFIX}${encodeURIComponent(relativePath)}`;
+  }
+
+  private filePathForDiscoveredId(modelId: string): string | null {
+    try {
+      const encodedRelativePath = modelId.slice(DISCOVERED_MODEL_ID_PREFIX.length);
+      const relativePath = decodeURIComponent(encodedRelativePath).split('/').join(path.sep);
+      const filePath = path.resolve(this.root, relativePath);
+      const pathFromRoot = path.relative(this.root, filePath);
+      const isInsideRoot = pathFromRoot.length > 0 && !pathFromRoot.startsWith(`..${path.sep}`) && !path.isAbsolute(pathFromRoot);
+      return isInsideRoot && path.extname(filePath).toLowerCase() === GGUF_EXTENSION ? filePath : null;
+    } catch {
+      return null;
+    }
   }
 }
 
