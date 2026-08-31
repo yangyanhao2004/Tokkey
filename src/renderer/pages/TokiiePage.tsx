@@ -1,5 +1,4 @@
 import {
-  CONNECTED_DEVICE,
   ICON_BASE_PATH,
   INSTALLED_EMPTY_MESSAGE,
   INSTALLED_LOADING_MESSAGE,
@@ -14,9 +13,23 @@ import { useNavigation } from '../components/NavigationProvider';
 import { PageShell } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
 import { TitleBlock } from '../components/TitleBlock';
+import type { InstalledModels } from '../hooks/useInstalledModels';
 
-/** "Tokii CDEF is connected" summary card. */
-function DeviceCard() {
+interface DeviceCardProps {
+  runtime: InstalledModels['runtime'];
+}
+
+/** Live USB Dongle summary, including the serial suffix used by Token Hub. */
+function DeviceCard({ runtime }: DeviceCardProps) {
+  const suffix = runtime.device?.serialNumber?.slice(-4).toUpperCase();
+  const isConnected = runtime.device !== null;
+  const name = isConnected
+    ? `Tokii${suffix ? ` ${suffix}` : ''} is connected`
+    : 'No Tokii connected';
+  const detail = isConnected
+    ? 'Connected via USB-C · local runtime available to supported clients'
+    : 'Connect Tokii via USB-C to start a local model';
+
   return (
     <section
       className="flex w-full items-center justify-between overflow-hidden rounded-[12px] border border-surface-card-border bg-surface-card p-4"
@@ -24,17 +37,23 @@ function DeviceCard() {
     >
       <div className="flex min-w-0 items-center gap-2">
         <IconTile src={`${ICON_BASE_PATH}/main-device-thumb.png`} desaturate />
-        <TitleBlock title={CONNECTED_DEVICE.name} subtitle={CONNECTED_DEVICE.detail} />
+        <TitleBlock title={name} subtitle={detail} />
       </div>
 
-      <span className="flex min-h-[19.114px] shrink-0 items-center gap-1 rounded-full bg-status-ok-bg px-2 py-1">
-        <img
-          className="block size-[13.296px] max-w-none"
-          src={`${ICON_BASE_PATH}/main-badge-connected.svg`}
-          alt=""
-        />
-        <span className="text-[8.31px] leading-[10px] font-bold tracking-[0.0997px] text-status-ok-text">
-          {CONNECTED_DEVICE.status}
+      <span className={`flex min-h-[19.114px] shrink-0 items-center gap-1 rounded-full px-2 py-1 ${
+        isConnected ? 'bg-status-ok-bg' : 'bg-fill-tile'
+      }`}>
+        {isConnected && (
+          <img
+            className="block size-[13.296px] max-w-none"
+            src={`${ICON_BASE_PATH}/main-badge-connected.svg`}
+            alt=""
+          />
+        )}
+        <span className={`text-[8.31px] leading-[10px] font-bold tracking-[0.0997px] ${
+          isConnected ? 'text-status-ok-text' : 'text-text-secondary'
+        }`}>
+          {isConnected ? 'Connected' : 'Not connected'}
         </span>
       </span>
     </section>
@@ -43,13 +62,19 @@ function DeviceCard() {
 
 interface ModelRowProps {
   model: InstalledModel;
-  /** True while this row's own removal is still running in the main process. */
-  isBusy: boolean;
+  installed: InstalledModels;
+  onStart: (modelId: string) => void;
   onRemove: (modelId: string) => void;
 }
 
 /** One installed model with its start/remove actions. */
-function ModelRow({ model, isBusy, onRemove }: ModelRowProps) {
+function ModelRow({ model, installed, onStart, onRemove }: ModelRowProps) {
+  const isStarting = installed.runtime.phase === 'starting' && installed.runtime.modelId === model.id;
+  const isRunning = installed.runtime.phase === 'running' && installed.runtime.modelId === model.id;
+  const runtimeIsBusy = installed.runtime.phase === 'starting' || installed.runtime.phase === 'running';
+  const isRemoving = installed.busyModelId === model.id;
+  const startLabel = isStarting ? 'Starting' : isRunning ? 'Running' : 'Start';
+
   return (
     <div
       className="flex w-full items-center justify-between border-t border-separator p-4"
@@ -61,13 +86,17 @@ function ModelRow({ model, isBusy, onRemove }: ModelRowProps) {
       </div>
 
       <div className="flex shrink-0 items-center justify-end gap-2">
-        <PushButton disabled={isBusy} testId={`model-start-${model.id}`}>
-          Start
+        <PushButton
+          onClick={() => onStart(model.id)}
+          disabled={!installed.runtime.device || runtimeIsBusy || isRemoving}
+          testId={`model-start-${model.id}`}
+        >
+          {startLabel}
         </PushButton>
         <PushButton
           variant="plain"
           onClick={() => onRemove(model.id)}
-          disabled={isBusy}
+          disabled={runtimeIsBusy || isRemoving}
           testId={`model-remove-${model.id}`}
         >
           Remove
@@ -96,11 +125,11 @@ function InstalledNotice({ message }: InstalledNoticeProps) {
 interface LocalModelsCardProps {
   /** Opens the Add Model panel. */
   onAddModel: () => void;
+  installed: InstalledModels;
 }
 
 /** "Local Models" card: heading, installed list, and the single-runtime note. */
-function LocalModelsCard({ onAddModel }: LocalModelsCardProps) {
-  const installed = useInstalledModels();
+function LocalModelsCard({ onAddModel, installed }: LocalModelsCardProps) {
   const models = installed.models ?? [];
   const emptyMessage = installed.isLoading ? INSTALLED_LOADING_MESSAGE : INSTALLED_EMPTY_MESSAGE;
 
@@ -139,7 +168,8 @@ function LocalModelsCard({ onAddModel }: LocalModelsCardProps) {
           <ModelRow
             key={model.id}
             model={describeInstalledModel(model)}
-            isBusy={installed.busyModelId === model.id}
+            installed={installed}
+            onStart={installed.start}
             onRemove={installed.remove}
           />
         ))}
@@ -168,11 +198,12 @@ function LocalModelsCard({ onAddModel }: LocalModelsCardProps) {
  */
 export function TokiiePage() {
   const { navigate } = useNavigation();
+  const installed = useInstalledModels();
 
   return (
     <PageShell title="Tokiie" subtitle="Connect Tokii and manage your local models." testId="tokiie">
-      <DeviceCard />
-      <LocalModelsCard onAddModel={() => navigate('add-model')} />
+      <DeviceCard runtime={installed.runtime} />
+      <LocalModelsCard installed={installed} onAddModel={() => navigate('add-model')} />
     </PageShell>
   );
 }

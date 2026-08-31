@@ -3,8 +3,7 @@
  * (192:2507). Kept apart from the components so copy and rows can change
  * without touching markup.
  *
- * The device card is still the design's reference value. The installed list is
- * live: it comes from `useInstalledModels`, and this module owns the
+ * The installed list comes from `useInstalledModels`; this module owns the
  * translation from those main-process records into the strings the card draws,
  * so the components never see bytes or timestamps.
  */
@@ -14,19 +13,6 @@ import { formatFileSize } from '../../shared/byteFormatting';
 
 /** Shared with the sidebar so both pages resolve assets from one place. */
 export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
-
-/** The connected Tokii device shown above the model list. */
-export interface ConnectedDevice {
-  readonly name: string;
-  readonly detail: string;
-  readonly status: string;
-}
-
-export const CONNECTED_DEVICE: ConnectedDevice = {
-  name: 'Tokii CDEF is connected',
-  detail: 'Connected via USB-C · local runtime available to supported clients',
-  status: 'Connected'
-};
 
 /** A model listed under the "Installed" heading. */
 export interface InstalledModel {
