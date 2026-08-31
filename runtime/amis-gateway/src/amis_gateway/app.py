@@ -350,6 +350,126 @@ class ResponsesToolOutputNormalizer:
         return f"[unsupported '{part_type}' tool output omitted]"
 
 
+class ModelDiscoveryCatalog:
+    """Answer `/v1/models` for clients that build their model picker from a gateway.
+
+    This is the read-only public face of the same routes `/model/info` reports.
+    The two are deliberately not one endpoint: `/model/info` is Tokiie's own
+    management view and returns the endpoint and marker behind each route, which
+    an inference caller has no business seeing.
+
+    Claude Code reads only `id` and the optional `display_name`, and filters out
+    any id that contains neither "claude" nor "anthropic", so the whole route set
+    is offered here and the client keeps what it recognizes. The remaining fields
+    are what an OpenAI-format client needs to parse the entry at all.
+    """
+
+    # Claude Code requests `?limit=1000`. The cap is its own value rather than a
+    # larger one so a caller cannot ask this process to build an unbounded list.
+    DEFAULT_LIMIT = 1000
+    MAX_LIMIT = 1000
+
+    @classmethod
+    def payload(cls, routes: list[ModelRoute], *, limit: int) -> JSONMapping:
+        """Return the discovery document for the routes this gateway serves."""
+        return {
+            "object": "list",
+            "data": [cls._entry(route) for route in routes[:limit]],
+        }
+
+    @classmethod
+    def read_limit(cls, request: Request) -> int:
+        """Read `?limit=`, ignoring an absent or unusable value.
+
+        Discovery is a picker populating itself, not a paging client, so a
+        malformed limit falls back to the default instead of failing the request
+        and leaving the caller with no models at all.
+        """
+        try:
+            limit = int(request.query_params.get("limit", cls.DEFAULT_LIMIT))
+        except (TypeError, ValueError):
+            return cls.DEFAULT_LIMIT
+        return min(limit, cls.MAX_LIMIT) if limit > 0 else cls.DEFAULT_LIMIT
+
+    @staticmethod
+    def _entry(route: ModelRoute) -> JSONMapping:
+        """Describe one route as both protocols' model listings expect it."""
+        entry: JSONMapping = {
+            "id": route.model_name,
+            "object": "model",
+            # Anthropic's own listing types its entries; OpenAI's uses `object`.
+            "type": "model",
+            "owned_by": "amis-gateway",
+        }
+        display_name = route.model_info.get("display_name")
+        # Omitted rather than defaulted to the id: the client already falls back
+        # to the id, and a duplicated value would only look like a real label.
+        if isinstance(display_name, str) and display_name.strip():
+            entry["display_name"] = display_name.strip()
+        return entry
+
+
+class UnregisteredClaudeRoute:
+    """Serve a Claude model the caller named that no route was seeded for.
+
+    Tokiie seeds a route per Claude model from a list this build ships with, so
+    that list is stale the day Anthropic releases a model. Without this, the
+    release reaches the user as a local 404 for a model their own client just
+    offered them, which reads as Tokiie being broken rather than behind.
+
+    The synthesized route is exactly what the seeding registrar would have
+    created -- `anthropic/<alias>`, no key, no endpoint -- and is never stored.
+    Discovery keeps listing seeded routes only, so this widens what the gateway
+    will *serve* without widening what it *advertises*: a mistyped alias is
+    refused by Anthropic, which knows its own model list, instead of becoming a
+    permanent phantom entry in the picker.
+
+    Two things are fixed here rather than taken from the request, and both are
+    load-bearing. Only Anthropic-shaped aliases qualify, and the endpoint is
+    always Anthropic's own. Together they keep this from being an open relay: an
+    unregistered alias cannot be used to aim the caller's credential at a host
+    of its choosing. Everything else about the credential is unchanged -- with
+    no key on the route, `UpstreamTargetPolicy` still requires the caller to
+    bring their own, and still refuses the call by name when they bring none.
+    """
+
+    # The prefix LiteLLM reads to select Anthropic, and the one Anthropic's
+    # model ids have always carried.
+    PROVIDER_PREFIX = "anthropic/"
+    MODEL_PREFIX = "claude-"
+
+    @classmethod
+    def build(cls, alias: str) -> ModelRoute | None:
+        """Return a transient route for a Claude alias, or None for anything else."""
+        model = cls._provider_qualified(alias)
+        if model is None:
+            return None
+        return ModelRoute.from_management_payload(
+            {
+                "model_name": alias,
+                # No key and no endpoint, both deliberate; see the class comment.
+                "litellm_params": {"model": model},
+                "model_info": {
+                    "created_by": "amis-gateway",
+                    "api_format": "anthropic",
+                    # Marks the route as one nobody registered, so a log line or
+                    # an error naming it is not mistaken for seeded state.
+                    "unregistered": True,
+                },
+            },
+            model_id=f"unregistered:{alias}",
+        )
+
+    @classmethod
+    def _provider_qualified(cls, alias: str) -> str | None:
+        """Qualify a Claude alias for LiteLLM, rejecting every other name."""
+        if alias.startswith(cls.PROVIDER_PREFIX):
+            # Already qualified by the caller; prefixing again would name a
+            # model no provider has.
+            return alias if alias[len(cls.PROVIDER_PREFIX):].startswith(cls.MODEL_PREFIX) else None
+        return f"{cls.PROVIDER_PREFIX}{alias}" if alias.startswith(cls.MODEL_PREFIX) else None
+
+
 class AmisGatewayApplication:
     """Compose route management and SDK-backed inference over a loopback listener."""
 
@@ -385,6 +505,8 @@ class AmisGatewayApplication:
                 Route("/model/{model_id:str}/update", self.update_model, methods=["PATCH"]),
                 Route("/model/delete", self.delete_model, methods=["POST"]),
                 Route("/model/info", self.list_models, methods=["GET"]),
+                Route("/v1/models", self.discover_models, methods=["GET"]),
+                Route("/models", self.discover_models, methods=["GET"]),
                 Route("/_amis/models", self.replace_models, methods=["PUT"]),
                 Route("/_amis/cancel", self.cancel_inflight, methods=["POST"]),
                 Route("/v1/chat/completions", self.chat_completions, methods=["POST"]),
@@ -444,6 +566,15 @@ class AmisGatewayApplication:
     async def list_models(self, request: Request) -> Response:
         """List routes in the response shape already decoded by the Swift client."""
         return JSONResponse({"data": [route.management_payload() for route in self._registry.list()]})
+
+    async def discover_models(self, request: Request) -> Response:
+        """List the routes an inference caller may ask for, for its model picker."""
+        return JSONResponse(
+            ModelDiscoveryCatalog.payload(
+                self._registry.list(),
+                limit=ModelDiscoveryCatalog.read_limit(request),
+            )
+        )
 
     async def replace_models(self, request: Request) -> Response:
         """Atomically restore all routes from the host application's stored profiles."""
@@ -513,7 +644,7 @@ class AmisGatewayApplication:
             alias = payload.get("model")
             if not isinstance(alias, str) or not alias:
                 return self._protocol_error(protocol, 400, "model must be a non-empty string")
-            route = self._registry.resolve(alias)
+            route = self._resolve_route(alias)
             # Track before any provider work starts, so a cancel arriving while
             # the prompt is still being processed has something to stop.
             exchange = self._cancellations.register(
@@ -610,6 +741,22 @@ class AmisGatewayApplication:
         finally:
             if exchange is not None and not stream_owns_exchange:
                 exchange.release()
+
+    def _resolve_route(self, alias: str) -> ModelRoute:
+        """Resolve an alias, falling back to a transient route for a Claude model.
+
+        The registry stays the only source of seeded routes; this just stops an
+        unseeded Claude model from being refused locally. A `KeyError` still
+        leaves here for every other alias, so the 404 path is unchanged.
+        """
+        try:
+            return self._registry.resolve(alias)
+        except KeyError:
+            route = UnregisteredClaudeRoute.build(alias)
+            if route is None:
+                raise
+            LOGGER.info("Serving unregistered Claude model '%s' through Anthropic.", alias)
+            return route
 
     async def _passthrough_stream(
         self,

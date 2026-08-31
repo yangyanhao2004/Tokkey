@@ -4,6 +4,7 @@ import IpcController from './IpcController';
 import GatewayProcessManager from './gateway/GatewayProcessManager';
 import CloudModelConnector from './models/CloudModelConnector';
 import CodexNativeModelRegistrar from './models/CodexNativeModelRegistrar';
+import ClaudeNativeModelRegistrar from './models/ClaudeNativeModelRegistrar';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
 import HubModelConnector from './models/HubModelConnector';
@@ -28,6 +29,7 @@ export class TokiieApp {
   private readonly gatewayProcessManager: GatewayProcessManager;
   private readonly cloudModelConnector: CloudModelConnector;
   private readonly codexNativeModelRegistrar: CodexNativeModelRegistrar;
+  private readonly claudeNativeModelRegistrar: ClaudeNativeModelRegistrar;
   private readonly codexGatewayIntegration: CodexGatewayIntegration;
   private readonly tokenHubRuntime: TokenHubRuntime;
   private readonly isDev: boolean;
@@ -57,6 +59,7 @@ export class TokiieApp {
     });
     this.cloudModelConnector = CloudModelConnector.forGateway(this.gatewayProcessManager);
     this.codexNativeModelRegistrar = CodexNativeModelRegistrar.forGateway(this.gatewayProcessManager);
+    this.claudeNativeModelRegistrar = ClaudeNativeModelRegistrar.forGateway(this.gatewayProcessManager);
     this.codexGatewayIntegration = new CodexGatewayIntegration({
       gateway: this.gatewayProcessManager
     });
@@ -136,12 +139,13 @@ export class TokiieApp {
   /**
    * Boots the local gateway without blocking window creation, then rebuilds the
    * routes it serves: the cloud models connected in an earlier run, whose
-   * profiles are still in the database, and the Codex CLI's own models, which
-   * are derived fresh from its bundled catalog every launch.
+   * profiles are still in the database, the Codex CLI's own models, which are
+   * derived fresh from its bundled catalog every launch, and Anthropic's models,
+   * which a Claude Code client pointed at this gateway resolves against.
    *
-   * The two restores run together because neither depends on the other, and a
+   * The three restores run together because none depends on the others, and a
    * slow `codex` call should not delay a cloud route the user already connected.
-   * Once both are in, the Codex CLI is pointed at the finished set.
+   * Once all are in, the Codex CLI is pointed at the finished set.
    *
    * A failure here is reported and left recoverable: everything in the app that
    * does not need model routing keeps working, the gateway can be started again
@@ -153,15 +157,19 @@ export class TokiieApp {
       .then(() =>
         Promise.all([
           this.cloudModelConnector.restoreConnected(),
-          this.codexNativeModelRegistrar.registerAll()
+          this.codexNativeModelRegistrar.registerAll(),
+          this.claudeNativeModelRegistrar.registerAll()
         ])
       )
-      .then(([restored, native]) => {
+      .then(([restored, native, claude]) => {
         if (restored.length > 0) {
           console.info(`[AmisGateway] Restored ${restored.length} cloud model route(s).`);
         }
         if (native.length > 0) {
           console.info(`[AmisGateway] Registered ${native.length} Codex native model route(s).`);
+        }
+        if (claude.length > 0) {
+          console.info(`[AmisGateway] Registered ${claude.length} Claude model route(s).`);
         }
         // Last, and only now: the catalog is built from the routes that exist,
         // and taking over config.toml any earlier would hide the user's own

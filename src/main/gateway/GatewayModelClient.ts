@@ -25,6 +25,11 @@ export interface GatewayModelMarker {
   /** Absent for routes with no model profile behind them, such as Codex natives. */
   profileId?: string;
   apiFormat: CloudApiFormat;
+  /**
+   * Human-readable label for this route, served by the gateway's `/v1/models`.
+   * Absent when the alias is already the best name the picker could show.
+   */
+  displayName?: string;
   supportsNativeStreaming: boolean;
   supportsResponsesSsePassthrough: boolean;
   /**
@@ -89,6 +94,7 @@ export class GatewayModelClient {
           created_by: 'amis-wifi',
           ...(request.marker.profileId ? { profile_id: request.marker.profileId } : {}),
           ...(request.marker.upstream ? { upstream: request.marker.upstream } : {}),
+          ...(request.marker.displayName ? { display_name: request.marker.displayName } : {}),
           api_format: request.marker.apiFormat,
           supports_native_streaming: request.marker.supportsNativeStreaming,
           supports_responses_sse_passthrough: request.marker.supportsResponsesSsePassthrough

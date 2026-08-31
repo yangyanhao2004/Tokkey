@@ -119,6 +119,128 @@ def model_payload() -> dict[str, Any]:
     }
 
 
+async def test_model_discovery_lists_routes_without_leaking_credentials() -> None:
+    """A client's model picker sees the aliases, never the keys behind them."""
+    application = AmisGatewayApplication()
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://gateway.test",
+    )
+
+    labelled = model_payload()
+    labelled["model_name"] = "claude-opus-5"
+    labelled["model_info"] = {**labelled["model_info"], "display_name": "Claude Opus 5"}
+    await client.post("/model/new", headers=AUTH, json=labelled)
+    await client.post("/model/new", headers=AUTH, json=model_payload())
+
+    response = await client.get("/v1/models?limit=1000", headers=AUTH)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["object"] == "list"
+    # Alias-sorted, matching the registry's own stable ordering.
+    assert [entry["id"] for entry in body["data"]] == ["agent-model", "claude-opus-5"]
+    assert body["data"][1]["display_name"] == "Claude Opus 5"
+    # A route with no label omits the field rather than echoing its id.
+    assert "display_name" not in body["data"][0]
+    # The upstream endpoint and key stay in the management view alone.
+    assert "upstream-secret" not in response.text
+    assert "provider.example" not in response.text
+
+    # `/models` serves OpenAI-format callers the identical document.
+    assert (await client.get("/models", headers=AUTH)).json() == body
+    await client.aclose()
+
+
+async def test_model_discovery_survives_an_unusable_limit() -> None:
+    """A malformed limit yields the full picker instead of an empty one."""
+    application = AmisGatewayApplication()
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://gateway.test",
+    )
+    await client.post("/model/new", headers=AUTH, json=model_payload())
+
+    for query in ("?limit=not-a-number", "?limit=0", "?limit=-5", ""):
+        response = await client.get(f"/v1/models{query}", headers=AUTH)
+        assert response.status_code == 200, query
+        assert [entry["id"] for entry in response.json()["data"]] == ["agent-model"], query
+
+    await client.aclose()
+
+
+async def messages_turn(alias: str, *, headers: dict[str, str] | None = None) -> Any:
+    """Run one Messages turn against a gateway holding no route at all."""
+    captured: dict[str, Any] = {}
+
+    async def messages_call(**kwargs: Any) -> FakeResponse:
+        captured.update(kwargs)
+        return FakeResponse({"id": "msg"})
+
+    application = AmisGatewayApplication(messages_call=messages_call)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://gateway.test",
+    )
+    response = await client.post(
+        "/v1/messages",
+        headers=AUTH if headers is None else headers,
+        json={"model": alias, "messages": [], "max_tokens": 10},
+    )
+    await client.aclose()
+    return response, captured
+
+
+async def test_unseeded_claude_model_is_served_instead_of_refused() -> None:
+    """A model newer than this build's catalog still reaches Anthropic."""
+    response, captured = await messages_turn("claude-opus-6")
+
+    assert response.status_code == 200
+    # Provider-qualified so LiteLLM picks Anthropic, and no endpoint, so the
+    # caller's subscription token can only ever travel to Anthropic itself.
+    assert captured["model"] == "anthropic/claude-opus-6"
+    assert captured["api_key"] == CALLER_KEY
+    assert "api_base" not in captured
+
+
+async def test_unseeded_claude_model_is_served_without_being_registered() -> None:
+    """Serving an unknown alias must not grow the set the picker advertises."""
+    async def messages_call(**_: Any) -> FakeResponse:
+        return FakeResponse({"id": "msg"})
+
+    application = AmisGatewayApplication(messages_call=messages_call)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://gateway.test",
+    )
+    await client.post(
+        "/v1/messages",
+        headers=AUTH,
+        json={"model": "claude-opus-6", "messages": [], "max_tokens": 10},
+    )
+
+    # A typo would otherwise become a permanent phantom entry in the picker.
+    assert (await client.get("/v1/models", headers=AUTH)).json()["data"] == []
+    assert (await client.get("/model/info", headers=AUTH)).json()["data"] == []
+    await client.aclose()
+
+
+async def test_unseeded_claude_model_still_requires_the_caller_to_bring_a_key() -> None:
+    """The fallback widens routing, never the credential rules."""
+    response, _ = await messages_turn("claude-opus-6", headers={})
+
+    assert response.status_code == 401
+    assert "claude-opus-6" in response.json()["error"]["message"]
+
+
+async def test_fallback_refuses_to_relay_a_non_anthropic_alias() -> None:
+    """An unregistered alias cannot aim the caller's key at another provider."""
+    for alias in ("openai/gpt-5", "gpt-5", "anthropic/gpt-5", "sonnet", "anthropic/"):
+        response, captured = await messages_turn(alias)
+        assert response.status_code == 404, alias
+        assert captured == {}, alias
+
+
 async def test_management_crud_and_atomic_restore() -> None:
     """Swift's existing create/list/update/delete shapes remain compatible."""
     application = AmisGatewayApplication()
