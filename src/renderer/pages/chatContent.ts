@@ -12,6 +12,7 @@ export interface ChatMessage {
   createdAt: number;
   durationLabel: string | null;
   status: ChatMessageStatus;
+  tokenUsage: ChatTokenUsage | null;
 }
 
 export interface ChatSession {
@@ -29,7 +30,7 @@ export interface ChatSessionSummary {
   preview: string | null;
 }
 
-export interface TokenUsageFixture {
+export interface ChatTokenUsage {
   usedContextTokens: number;
   inputTokens: number;
   outputTokens: number;
@@ -37,7 +38,7 @@ export interface TokenUsageFixture {
   contextWindowTokens: number;
 }
 
-export const TOKEN_USAGE_FIXTURE: TokenUsageFixture = {
+export const TOKEN_USAGE_FIXTURE: ChatTokenUsage = {
   usedContextTokens: 12,
   inputTokens: 100,
   outputTokens: 10,
@@ -59,13 +60,6 @@ export interface ChatHistoryGroup {
 
 export const ICON_BASE_PATH = './assets/icons';
 export const FIXTURE_NOW = new Date(2026, 7, 16, 12, 48, 0).getTime();
-export const CHAT_MODEL: ChatModelOption = {
-  id: 'qwen-3.5-9b-local',
-  label: 'Qwen 3.5 9B · Local',
-  source: 'local',
-  isAvailable: true
-};
-
 export const ASSISTANT_FIXTURE =
   'This example creates a very simple, abstract life system simulation using C++.\n' +
   'It focuses on basic concepts like needs, actions, and state changes within a discrete time step loop.\n\n' +
@@ -80,7 +74,15 @@ function message(
   createdAt: number,
   durationLabel: string | null = null
 ): ChatMessage {
-  return { id, role, content, createdAt, durationLabel, status: 'complete' };
+  return {
+    id,
+    role,
+    content,
+    createdAt,
+    durationLabel,
+    status: 'complete',
+    tokenUsage: role === 'assistant' ? TOKEN_USAGE_FIXTURE : null
+  };
 }
 
 function conversation(

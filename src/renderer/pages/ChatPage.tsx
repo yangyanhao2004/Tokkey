@@ -44,6 +44,7 @@ export function ChatPage() {
           modelState={chat.modelState}
           requestState={chat.requestState}
           onSend={chat.sendMessage}
+          onStop={chat.stopStreaming}
         />
       </div>
     </main>

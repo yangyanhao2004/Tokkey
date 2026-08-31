@@ -9,6 +9,9 @@ import type {
   HostSnapshot,
   McpConfigurationDraft,
   McpConfigurationPreparation,
+  LocalChatRuntimeState,
+  LocalChatTurnRequest,
+  LocalChatTurnStarted,
   SkillsShCardState,
   SkillsShInstallRequest,
   SkillsShInstallResult,
@@ -44,6 +47,12 @@ import LocalMcpConfigurationApplier, {
 } from './mcp/McpConfigurationApplier';
 import AgentManager, { type AgentState } from './agents/AgentManager';
 import InstalledAgentGate from './agents/InstalledAgentGate';
+import LocalChatTurnExecutor from './chat/LocalChatTurnExecutor';
+import {
+  validateLocalChatTurnId,
+  validateLocalChatTurnRequest
+} from './chat/LocalChatTurnRequestValidator';
+import LocalInferenceProcessManager from './local-inference/LocalInferenceProcessManager';
 import LocalModelManager from './models/LocalModelManager';
 import CloudModelConnector from './models/CloudModelConnector';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
@@ -64,6 +73,9 @@ export interface IpcControllerOptions {
   mcpConfigurationApplier?: McpConfigurationApplying;
   localModelManager?: LocalModelManager;
   tokenHubRuntime?: TokenHubRuntime;
+  /** Shared with model deployment so Chat always reaches the deployed process. */
+  localInferenceProcessManager?: LocalInferenceProcessManager;
+  localChatTurnExecutor?: LocalChatTurnExecutor;
   hostSnapshotService?: HostSnapshotService;
   agentManager?: AgentManager;
   /** Owns the gateway subprocess, so only the app that supervises it can supply this. */
@@ -89,6 +101,8 @@ export default class IpcController {
   private readonly mcpConfigurationApplier: McpConfigurationApplying;
   private readonly localModelManager: LocalModelManager;
   private readonly tokenHubRuntime: TokenHubRuntime;
+  private readonly localInferenceProcessManager: LocalInferenceProcessManager;
+  private readonly localChatTurnExecutor: LocalChatTurnExecutor;
   private readonly hostSnapshotService: HostSnapshotService;
   private readonly agentManager: AgentManager;
   private readonly cloudModelConnector: CloudModelConnector | null;
@@ -118,7 +132,14 @@ export default class IpcController {
     this.mcpCatalogScanner = options.mcpCatalogScanner ?? new LocalMcpCatalogScanner({ agentGate });
     this.mcpConfigurationApplier =
       options.mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
-    this.localModelManager = options.localModelManager ?? new LocalModelManager();
+    this.localInferenceProcessManager =
+      options.localInferenceProcessManager ?? new LocalInferenceProcessManager();
+    this.localModelManager = options.localModelManager ?? new LocalModelManager({
+      localInference: this.localInferenceProcessManager
+    });
+    this.localChatTurnExecutor = options.localChatTurnExecutor ?? new LocalChatTurnExecutor({
+      runtime: this.localInferenceProcessManager
+    });
     this.tokenHubRuntime = options.tokenHubRuntime ?? new TokenHubRuntime();
     this.tokenHubRuntime.subscribe((state) => {
       BrowserWindow.getAllWindows().forEach((window) => {
@@ -195,6 +216,7 @@ export default class IpcController {
       'models:start-installed': (modelId: unknown) =>
         this.startInstalledLocalModel(this.requireModelId(modelId)),
       'models:stop-runtime': () => this.stopLocalModelRuntime(),
+      'chat:get-runtime-state': () => this.getLocalChatRuntimeState(),
       'models:cloud-cards': () => this.listCloudModelCards(),
       'models:restore-cloud': () => this.restoreCloudModels(),
       'models:connect-cloud': (cardId: unknown) =>
@@ -216,6 +238,12 @@ export default class IpcController {
     ipcMain.on('mcps:prepare-configuration', (event, draft: unknown) => {
       event.returnValue = this.prepareMcpConfiguration(draft as McpConfigurationDraft);
     });
+    ipcMain.handle('chat:start-turn', (event: IpcMainInvokeEvent, request: unknown) =>
+      this.startLocalChatTurn(event, validateLocalChatTurnRequest(request))
+    );
+    ipcMain.handle('chat:cancel-turn', (_event: IpcMainInvokeEvent, turnId: unknown) =>
+      this.cancelLocalChatTurn(validateLocalChatTurnId(turnId))
+    );
   }
 
   /**
@@ -350,6 +378,25 @@ export default class IpcController {
   /** Marks a downloaded model as deployed for the local target. */
   deployLocalModel(modelId: string, request: LocalModelCatalogRequest = {}) {
     return this.localModelManager.deployModel(modelId, request);
+  }
+
+  /** Returns only renderer-safe availability for the app-owned local model. */
+  getLocalChatRuntimeState(): LocalChatRuntimeState {
+    return this.localInferenceProcessManager.getState();
+  }
+
+  /** Starts one local-only SSE turn and returns stream events to its caller alone. */
+  startLocalChatTurn(event: IpcMainInvokeEvent, request: LocalChatTurnRequest): LocalChatTurnStarted {
+    return this.localChatTurnExecutor.startTurn(request, (streamEvent) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('chat:event', streamEvent);
+      }
+    });
+  }
+
+  /** Stops a local stream by its accepted opaque turn ID. */
+  cancelLocalChatTurn(turnId: string): void {
+    this.localChatTurnExecutor.cancelTurn(turnId);
   }
 
   /** Lists the models already stored under ~/.amiswifi/models. */

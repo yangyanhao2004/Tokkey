@@ -7,17 +7,19 @@ interface ChatComposerProps {
   modelState: ChatModelState;
   requestState: 'idle' | 'sending' | 'error';
   onSend: (message: string) => void;
+  onStop: () => void;
 }
 
 const EMPTY_TEXTAREA_HEIGHT = 80;
 const CONVERSATION_TEXTAREA_HEIGHT = 60;
 const MAX_TEXTAREA_HEIGHT = 120;
 
-export function ChatComposer({ isEmpty, model, modelState, requestState, onSend }: ChatComposerProps) {
+export function ChatComposer({ isEmpty, model, modelState, requestState, onSend, onStop }: ChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [draft, setDraft] = useState('');
   const baseTextareaHeight = isEmpty ? EMPTY_TEXTAREA_HEIGHT : CONVERSATION_TEXTAREA_HEIGHT;
   const canSend = Boolean(draft.trim()) && Boolean(model?.isAvailable) && modelState === 'available' && requestState !== 'sending';
+  const canStop = requestState === 'sending';
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -85,12 +87,17 @@ export function ChatComposer({ isEmpty, model, modelState, requestState, onSend 
             <button
               type="button"
               className="flex size-[30px] items-center justify-center rounded-[9px] bg-chat-send text-black disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-white"
-              disabled={!canSend}
-              onClick={submit}
-              aria-label={requestState === 'sending' ? 'Sending message' : 'Send message'}
-              data-testid="chat-send"
+              disabled={!canSend && !canStop}
+              onClick={canStop ? onStop : submit}
+              aria-label={canStop ? 'Stop generating' : 'Send message'}
+              title={canStop ? 'Stop generating' : 'Send message'}
+              data-testid={canStop ? 'chat-stop' : 'chat-send'}
             >
-              <img className="block size-[14px] max-w-none" src={`${ICON_BASE_PATH}/chat-send.svg`} alt="" />
+              {canStop ? (
+                <span className="size-3 rounded-[2px] bg-black" aria-hidden="true" />
+              ) : (
+                <img className="block size-[14px] max-w-none" src={`${ICON_BASE_PATH}/chat-send.svg`} alt="" />
+              )}
             </button>
           </div>
         </div>

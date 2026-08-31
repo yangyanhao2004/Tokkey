@@ -2,7 +2,6 @@ import { useState } from 'react';
 import {
   formatConversationDate,
   ICON_BASE_PATH,
-  TOKEN_USAGE_FIXTURE,
   type ChatMessage,
   type ChatSession
 } from '../../pages/chatContent';
@@ -95,18 +94,22 @@ function AssistantMessage({
         >
           <img className="block size-4 max-w-none" src={`${ICON_BASE_PATH}/chat-copy.svg`} alt="" />
         </button>
-        <button
-          type="button"
-          className="flex size-4 items-center justify-center rounded hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white"
-          onClick={() => setUsageIsOpen((isOpen) => !isOpen)}
-          aria-label="Show token usage"
-          aria-expanded={usageIsOpen}
-          data-testid={`chat-token-usage-trigger-${message.id}`}
-        >
-          <img className="block size-4 max-w-none" src={`${ICON_BASE_PATH}/chat-response-timer.svg`} alt="" />
-        </button>
+        {message.tokenUsage && (
+          <button
+            type="button"
+            className="flex size-4 items-center justify-center rounded hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white"
+            onClick={() => setUsageIsOpen((isOpen) => !isOpen)}
+            aria-label="Show token usage"
+            aria-expanded={usageIsOpen}
+            data-testid={`chat-token-usage-trigger-${message.id}`}
+          >
+            <img className="block size-4 max-w-none" src={`${ICON_BASE_PATH}/chat-response-timer.svg`} alt="" />
+          </button>
+        )}
         {message.durationLabel && <span aria-label={`Response time ${message.durationLabel}`}>{message.durationLabel}</span>}
-        {usageIsOpen && <TokenUsagePopover usage={TOKEN_USAGE_FIXTURE} onClose={() => setUsageIsOpen(false)} />}
+        {usageIsOpen && message.tokenUsage && (
+          <TokenUsagePopover usage={message.tokenUsage} onClose={() => setUsageIsOpen(false)} />
+        )}
       </div>
     </article>
   );

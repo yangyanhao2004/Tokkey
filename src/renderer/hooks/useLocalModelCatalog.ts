@@ -111,6 +111,7 @@ export function useLocalModelCatalog(): LocalModelCatalog {
       const calls: Record<CatalogActionKind, () => Promise<LocalModelCatalogScan>> = {
         download: () => window.tokiie.startLocalModelDownload(modelId, request),
         cancel: () => window.tokiie.cancelLocalModelDownload(modelId, request),
+        deploy: () => window.tokiie.deployLocalModel(modelId, request),
         remove: () => window.tokiie.deleteLocalModel(modelId, request)
       };
       void run(calls[kind], modelId);

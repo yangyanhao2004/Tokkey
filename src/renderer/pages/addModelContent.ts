@@ -39,7 +39,7 @@ export const HOST_MACHINE: HostMachine = {
 };
 
 /** What the row's single button does when pressed. */
-export type CatalogActionKind = 'download' | 'cancel' | 'remove';
+export type CatalogActionKind = 'download' | 'cancel' | 'deploy' | 'remove';
 
 /**
  * The one action a row offers, or `null` when the row is not actionable.
@@ -109,8 +109,9 @@ export function describeEmptyCatalog(isLoading: boolean, query: string): string 
 
 const DOWNLOAD_ACTION: CatalogModelAction = { kind: 'download', label: 'Download', variant: 'filled' };
 const CANCEL_ACTION: CatalogModelAction = { kind: 'cancel', label: 'Cancel', variant: 'progress' };
-const REMOVE_ACTION: CatalogModelAction = { kind: 'remove', label: 'Remove', variant: 'tinted' };
+const START_ACTION: CatalogModelAction = { kind: 'deploy', label: 'Start', variant: 'filled' };
 const RETRY_ACTION: CatalogModelAction = { kind: 'download', label: 'Retry', variant: 'filled' };
+const RETRY_START_ACTION: CatalogModelAction = { kind: 'deploy', label: 'Retry start', variant: 'filled' };
 
 /**
  * A row with no source, or one this Mac cannot hold, offers no button at all:
@@ -125,12 +126,12 @@ const LIFECYCLE_ACTIONS: Record<LocalModelLifecycle, CatalogModelAction | null> 
   downloadable: DOWNLOAD_ACTION,
   pendingArtifact: null,
   downloading: CANCEL_ACTION,
-  downloaded: null,
+  downloaded: START_ACTION,
   downloadFailed: RETRY_ACTION,
   deployPreparing: null,
   deployed: null,
   deployStopping: null,
-  deployFailed: REMOVE_ACTION,
+  deployFailed: RETRY_START_ACTION,
   unsupported: null
 };
 

@@ -199,7 +199,84 @@ export interface TokiieApi {
   listCloudModelCards(): Promise<CloudModelCard[]>;
   connectCloudModel(cardId: string): Promise<CloudModelConnection>;
   restoreCloudModels(): Promise<CloudModelConnection[]>;
+  getLocalChatRuntimeState(): Promise<LocalChatRuntimeState>;
+  startLocalChatTurn(request: LocalChatTurnRequest): Promise<LocalChatTurnStarted>;
+  cancelLocalChatTurn(turnId: string): Promise<void>;
+  onLocalChatEvent(listener: LocalChatEventListener): () => void;
 }
+
+/** The only message roles the local text-chat runtime accepts in phase one. */
+export type LocalChatMessageRole = 'user' | 'assistant';
+
+/** One already-visible transcript item sent to the local model. */
+export interface LocalChatMessageInput {
+  role: LocalChatMessageRole;
+  content: string;
+}
+
+/** Immutable renderer-to-main request for one local-model chat turn. */
+export interface LocalChatTurnRequest {
+  turnId: string;
+  sessionId: string;
+  assistantMessageId: string;
+  modelId: string;
+  messages: LocalChatMessageInput[];
+}
+
+/** Immediate acknowledgement that the main process accepted a chat turn. */
+export interface LocalChatTurnStarted {
+  turnId: string;
+}
+
+/** Small renderer-safe description of the model currently loaded in memory. */
+export interface LocalChatRuntimeModel {
+  id: string;
+  label: string;
+}
+
+/** The local inference runtime's current availability, without exposing its endpoint. */
+export interface LocalChatRuntimeState {
+  status: 'unavailable' | 'starting' | 'ready' | 'error';
+  model: LocalChatRuntimeModel | null;
+  /** Actual context size passed to the local runtime, when one is selected. */
+  contextWindowTokens: number | null;
+  error: string | null;
+}
+
+/** Stream events normalized from the local runtime's OpenAI-compatible SSE response. */
+export type LocalChatEvent =
+  | {
+      type: 'textDelta';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+      text: string;
+    }
+  | {
+      type: 'usage';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+      inputTokens: number | null;
+      outputTokens: number | null;
+    }
+  | {
+      type: 'completed' | 'cancelled';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+    }
+  | {
+      type: 'error';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+      message: string;
+      retryable: boolean;
+    };
+
+/** Removes the IPC listener installed by `onLocalChatEvent`. */
+export type LocalChatEventListener = (event: LocalChatEvent) => void;
 
 /**
  * Upstream routing mode persisted in `model_profiles.supported_api_formats`.

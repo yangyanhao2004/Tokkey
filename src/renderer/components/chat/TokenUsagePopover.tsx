@@ -1,12 +1,12 @@
 import { useEffect, useRef } from 'react';
-import { type TokenUsageFixture } from '../../pages/chatContent';
+import { type ChatTokenUsage } from '../../pages/chatContent';
 
 interface TokenUsagePopoverProps {
-  usage: TokenUsageFixture;
+  usage: ChatTokenUsage;
   onClose: () => void;
 }
 
-/** Static renderer fixture for the Figma Token Usage menu; it has no billing logic. */
+/** Displays token counts reported by the local inference runtime for one response. */
 export function TokenUsagePopover({ usage, onClose }: TokenUsagePopoverProps) {
   const popoverRef = useRef<HTMLDivElement>(null);
 

@@ -8,6 +8,9 @@ import ClaudeNativeModelRegistrar from './models/ClaudeNativeModelRegistrar';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
+import LocalChatTurnExecutor from './chat/LocalChatTurnExecutor';
+import LocalInferenceProcessManager from './local-inference/LocalInferenceProcessManager';
+import LocalModelManager from './models/LocalModelManager';
 import HubModelConnector from './models/HubModelConnector';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 import TokenHubRuntimeLocator from './models/tokenhub/TokenHubRuntimeLocator';
@@ -28,6 +31,9 @@ export class TokiieApp {
   private readonly height: number;
   private readonly ipcController: IpcController;
   private readonly gatewayProcessManager: GatewayProcessManager;
+  private readonly localInferenceProcessManager: LocalInferenceProcessManager;
+  private readonly localModelManager: LocalModelManager;
+  private readonly localChatTurnExecutor: LocalChatTurnExecutor;
   private readonly cloudModelConnector: CloudModelConnector;
   private readonly codexNativeModelRegistrar: CodexNativeModelRegistrar;
   private readonly claudeNativeModelRegistrar: ClaudeNativeModelRegistrar;
@@ -59,6 +65,17 @@ export class TokiieApp {
     this.gatewayProcessManager = new GatewayProcessManager({
       resourcesPath: app.isPackaged ? process.resourcesPath : undefined
     });
+    // Chat has its own local-only runtime. It deliberately is not registered
+    // with the generic gateway, which also owns cloud and Codex routes.
+    this.localInferenceProcessManager = new LocalInferenceProcessManager({
+      resourcesPath: app.isPackaged ? process.resourcesPath : undefined
+    });
+    this.localModelManager = new LocalModelManager({
+      localInference: this.localInferenceProcessManager
+    });
+    this.localChatTurnExecutor = new LocalChatTurnExecutor({
+      runtime: this.localInferenceProcessManager
+    });
     this.cloudModelConnector = CloudModelConnector.forGateway(this.gatewayProcessManager);
     this.codexNativeModelRegistrar = CodexNativeModelRegistrar.forGateway(this.gatewayProcessManager);
     this.claudeNativeModelRegistrar = ClaudeNativeModelRegistrar.forGateway(this.gatewayProcessManager);
@@ -80,6 +97,9 @@ export class TokiieApp {
       cloudModelConnector: this.cloudModelConnector,
       codexGatewayIntegration: this.codexGatewayIntegration,
       claudeGatewayIntegration: this.claudeGatewayIntegration,
+      localModelManager: this.localModelManager,
+      localInferenceProcessManager: this.localInferenceProcessManager,
+      localChatTurnExecutor: this.localChatTurnExecutor,
       tokenHubRuntime: this.tokenHubRuntime
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
@@ -144,6 +164,7 @@ export class TokiieApp {
     this.codexGatewayIntegration.deactivate();
     this.claudeGatewayIntegration.deactivate();
     this.gatewayProcessManager.stop('application quit');
+    void this.localInferenceProcessManager.stop('application quit');
   }
 
   /**
