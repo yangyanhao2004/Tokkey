@@ -1,7 +1,6 @@
 import { readFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { parse as parseToml } from '@iarna/toml';
+import CodexHome from '../codex/CodexHome';
 
 /** The provider Codex uses when `config.toml` names none. */
 const DEFAULT_PROVIDER_ID = 'openai';
@@ -44,11 +43,7 @@ export class CodexProviderConfig {
 
   /** Locates `config.toml` the way the Codex CLI does, honoring `CODEX_HOME`. */
   static defaultPath(homeDirectory?: string): string {
-    const codexHome = process.env.CODEX_HOME?.trim();
-    if (codexHome) {
-      return path.join(codexHome, 'config.toml');
-    }
-    return path.join(homeDirectory ?? os.homedir(), '.codex', 'config.toml');
+    return new CodexHome({ homeDirectory }).configPath;
   }
 
   /** The active provider, or null when the file names none Tokiie can use. */

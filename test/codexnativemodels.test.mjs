@@ -82,10 +82,18 @@ test('keeps only listed models and drops the instruction blobs', async () => {
   );
   assert.equal(models[0].displayName, 'GPT-5.6-SOL');
   assert.equal(models[0].contextWindow, 400000);
-  // The projection is the point: the cache must not carry the prompt templates.
-  const cached = readFileSync(path.join(home, '.amiswifi', 'codex-native-models.json'), 'utf8');
-  assert.ok(!cached.includes('instructions_template'));
-  assert.ok(cached.length < 2000);
+  // The projection is the point: the Router page never sees the prompt blobs.
+  assert.deepEqual(Object.keys(models[0]).sort(), [
+    'contextWindow',
+    'description',
+    'displayName',
+    'slug',
+    'supportedInApi'
+  ]);
+  // The cache behind it keeps the rows whole, because the catalog Tokiie
+  // generates for Codex is built by cloning one of them.
+  const cached = readFileSync(path.join(home, '.amiswifi', 'codex-bundled-catalog.json'), 'utf8');
+  assert.ok(cached.includes('instructions_template'));
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -93,11 +101,8 @@ test('reuses the cache when the installed codex version is unchanged', async () 
   const home = makeHome();
   mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
   writeFileSync(
-    path.join(home, '.amiswifi', 'codex-native-models.json'),
-    JSON.stringify({
-      codexVersion: CODEX_VERSION,
-      models: [{ slug: 'gpt-5.5', displayName: 'GPT-5.5', description: '', contextWindow: null, supportedInApi: true }]
-    })
+    path.join(home, '.amiswifi', 'codex-bundled-catalog.json'),
+    JSON.stringify({ codexVersion: CODEX_VERSION, models: [catalogEntry('gpt-5.5')] })
   );
   const runner = new FakeShellRunner({ catalog: [catalogJson([catalogEntry('gpt-5.6-sol')])] });
 
@@ -113,7 +118,7 @@ test('refreshes the cache when codex has been upgraded', async () => {
   const home = makeHome();
   mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
   writeFileSync(
-    path.join(home, '.amiswifi', 'codex-native-models.json'),
+    path.join(home, '.amiswifi', 'codex-bundled-catalog.json'),
     JSON.stringify({ codexVersion: 'codex-cli 0.1.0', models: [] })
   );
   const runner = new FakeShellRunner({ catalog: [catalogJson([catalogEntry('gpt-5.5')])] });
@@ -128,11 +133,8 @@ test('falls back to the cached list when codex cannot be run', async () => {
   const home = makeHome();
   mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
   writeFileSync(
-    path.join(home, '.amiswifi', 'codex-native-models.json'),
-    JSON.stringify({
-      codexVersion: CODEX_VERSION,
-      models: [{ slug: 'gpt-5.5', displayName: 'GPT-5.5', description: '', contextWindow: null, supportedInApi: true }]
-    })
+    path.join(home, '.amiswifi', 'codex-bundled-catalog.json'),
+    JSON.stringify({ codexVersion: CODEX_VERSION, models: [catalogEntry('gpt-5.5')] })
   );
   const runner = new FakeShellRunner({ failing: true });
 

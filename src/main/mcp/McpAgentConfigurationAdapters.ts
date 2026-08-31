@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { parse as parseToml } from '@iarna/toml';
 import type { McpAgent, McpServerConfiguration } from '../../shared/types';
+import CodexTomlDocument from '../codex/CodexTomlDocument';
 
 /** Renders one canonical server into an agent's existing user configuration. */
 export interface McpAgentConfigurationAdapter {
@@ -126,82 +127,9 @@ export class ClaudeCodeMcpConfigurationAdapter implements McpAgentConfigurationA
   }
 }
 
-/**
- * Deletes one `[mcp_servers.<name>]` table, and any subtable of it, from Codex
- * TOML text.
- *
- * The whole file is never re-serialized: Codex's config.toml is hand-written
- * and holds settings and comments Tokiie knows nothing about, so lines are
- * dropped rather than the document being rebuilt. A table runs from its header
- * to the next header, which is what makes that safe to do line by line.
- */
-class CodexTomlTableRemover {
-  remove(existingText: string, serverName: string): string {
-    let isDroppingTable = false;
-    const keptLines = existingText.split('\n').filter((line) => {
-      const headerPath = this.readHeaderPath(line);
-      if (headerPath) {
-        isDroppingTable = this.belongsToServer(headerPath, serverName);
-      }
-      return !isDroppingTable;
-    });
-    // Dropping the last table leaves the blank lines that separated it behind.
-    const remainingText = keptLines.join('\n').replace(/\s+$/, '');
-    return remainingText.length === 0 ? '' : `${remainingText}\n`;
-  }
-
-  /** Whether a header names the server's own table or one nested under it. */
-  private belongsToServer(headerPath: readonly string[], serverName: string): boolean {
-    return headerPath.length >= 2 && headerPath[0] === 'mcp_servers' && headerPath[1] === serverName;
-  }
-
-  /** The dotted key a `[table]` or `[[table]]` line opens, or null for any other line. */
-  private readHeaderPath(line: string): string[] | null {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) {
-      return null;
-    }
-    const inner = trimmed.startsWith('[[') && trimmed.endsWith(']]')
-      ? trimmed.slice(2, -2)
-      : trimmed.slice(1, -1);
-    return this.splitKeyPath(inner);
-  }
-
-  /** Splits a dotted key into segments, so a quoted name may hold dots itself. */
-  private splitKeyPath(inner: string): string[] | null {
-    let segments: string[] = [];
-    let current = '';
-    let openQuote: '"' | '\'' | null = null;
-    for (let index = 0; index < inner.length; index += 1) {
-      const character = inner[index];
-      if (openQuote === null && (character === '"' || character === '\'')) {
-        openQuote = character;
-      } else if (openQuote !== null && character === openQuote) {
-        openQuote = null;
-      } else if (openQuote === '"' && character === '\\') {
-        // Only the following character is consumed; escapes stay as written,
-        // which is enough to compare a name against the scanner's reading.
-        current += inner[index + 1] ?? '';
-        index += 1;
-      } else if (openQuote === null && character === '.') {
-        segments = [...segments, current.trim()];
-        current = '';
-      } else {
-        current += character;
-      }
-    }
-    if (openQuote !== null) {
-      return null;
-    }
-    segments = [...segments, current.trim()];
-    return segments.every((segment) => segment.length > 0) ? segments : null;
-  }
-}
-
 /** Appends one official mcp_servers table without rewriting unrelated Codex TOML. */
 export class CodexMcpConfigurationAdapter implements McpAgentConfigurationAdapter {
   private readonly support = new McpRenderingSupport();
-  private readonly remover = new CodexTomlTableRemover();
 
   agent(): McpAgent {
     return 'codex';
@@ -235,8 +163,12 @@ export class CodexMcpConfigurationAdapter implements McpAgentConfigurationAdapte
     return `${existingText}${separator}${renderedTable}`;
   }
 
+  /**
+   * Drops one `[mcp_servers.<name>]` table, and any subtable of it, without
+   * rewriting the rest of a file Codex and the user also own.
+   */
   remove(existingText: string, serverName: string): string {
-    return this.remover.remove(existingText, serverName);
+    return new CodexTomlDocument(existingText).removeTable(['mcp_servers', serverName]).toString();
   }
 
   private renderStdioTable(configuration: McpServerConfiguration): string {

@@ -73,6 +73,15 @@ class StubCatalogFetcher {
   }
 }
 
+/** Polls a condition the code under test satisfies off the event it fired on. */
+async function waitFor(condition, attempts = 100) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Timed out waiting for the condition to hold.');
+}
+
 function createHomeDirectory() {
   const home = mkdtempSync(path.join(tmpdir(), 'tokiie-models-'));
   test.after(() => rmSync(home, { recursive: true, force: true }));
@@ -466,8 +475,9 @@ test('a finished transfer records the manifest and reports the model as download
   writeModelFile(home, 4096);
   item.receivedBytes = 4096;
   item.emit('done', 'completed');
-  // The manifest is written without blocking the event; let it land.
-  await new Promise((resolve) => setImmediate(resolve));
+  // The manifest is written without blocking the event, and writing it stats
+  // the file first, so a single tick is not enough to be sure it has landed.
+  await waitFor(async () => (await manager.listInstalled()).length > 0);
 
   const [row] = await manager.projectRows([ARTIFACT], NO_LIMITS);
   assert.equal(row.lifecycle, 'downloaded');

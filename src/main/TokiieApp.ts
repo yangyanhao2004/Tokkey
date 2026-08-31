@@ -4,6 +4,7 @@ import IpcController from './IpcController';
 import GatewayProcessManager from './gateway/GatewayProcessManager';
 import CloudModelConnector from './models/CloudModelConnector';
 import CodexNativeModelRegistrar from './models/CodexNativeModelRegistrar';
+import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
 
 interface TokiieAppOptions {
@@ -24,6 +25,7 @@ export class TokiieApp {
   private readonly gatewayProcessManager: GatewayProcessManager;
   private readonly cloudModelConnector: CloudModelConnector;
   private readonly codexNativeModelRegistrar: CodexNativeModelRegistrar;
+  private readonly codexGatewayIntegration: CodexGatewayIntegration;
   private readonly isDev: boolean;
   private readonly evidenceMode: boolean;
   private readonly evidenceCapture: RendererEvidenceCapture | null;
@@ -51,9 +53,13 @@ export class TokiieApp {
     });
     this.cloudModelConnector = CloudModelConnector.forGateway(this.gatewayProcessManager);
     this.codexNativeModelRegistrar = CodexNativeModelRegistrar.forGateway(this.gatewayProcessManager);
+    this.codexGatewayIntegration = new CodexGatewayIntegration({
+      gateway: this.gatewayProcessManager
+    });
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
-      cloudModelConnector: this.cloudModelConnector
+      cloudModelConnector: this.cloudModelConnector,
+      codexGatewayIntegration: this.codexGatewayIntegration
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
     this.isDev = TokiieApp.shouldOpenDevTools(this.evidenceMode, process.argv);
@@ -85,7 +91,7 @@ export class TokiieApp {
     app.whenReady().then(() => this.onReady());
     app.on('activate', () => this.onActivate());
     app.on('window-all-closed', () => this.onWindowAllClosed());
-    app.on('will-quit', () => this.gatewayProcessManager.stop('application quit'));
+    app.on('will-quit', () => this.onWillQuit());
   }
 
   /** Creates the first window once Electron has finished initialising. */
@@ -93,8 +99,24 @@ export class TokiieApp {
     this.ipcController.attachModelDownloadSession();
     this.createMainWindow();
     if (!this.evidenceMode) {
+      // Before anything reads Codex's config.toml: a run that was killed left
+      // Tokiie's own configuration in that file, and every reader downstream —
+      // the upstream endpoint resolver above all — must see the user's instead.
+      this.codexGatewayIntegration.recoverInterruptedSession();
       this.startGateway();
     }
+  }
+
+  /**
+   * Hands Codex back its own `config.toml` and stops the gateway.
+   *
+   * Both are synchronous because Electron does not wait for a promise here, and
+   * the restore is the half that must not be skipped: the address it removes
+   * stops answering the moment the gateway below it goes down.
+   */
+  onWillQuit(): void {
+    this.codexGatewayIntegration.deactivate();
+    this.gatewayProcessManager.stop('application quit');
   }
 
   /**
@@ -105,6 +127,7 @@ export class TokiieApp {
    *
    * The two restores run together because neither depends on the other, and a
    * slow `codex` call should not delay a cloud route the user already connected.
+   * Once both are in, the Codex CLI is pointed at the finished set.
    *
    * A failure here is reported and left recoverable: everything in the app that
    * does not need model routing keeps working, the gateway can be started again
@@ -126,6 +149,10 @@ export class TokiieApp {
         if (native.length > 0) {
           console.info(`[AmisGateway] Registered ${native.length} Codex native model route(s).`);
         }
+        // Last, and only now: the catalog is built from the routes that exist,
+        // and taking over config.toml any earlier would hide the user's own
+        // upstream from the registrar that just read it.
+        return this.codexGatewayIntegration.activate();
       })
       .catch((error: unknown) => {
         console.error('[AmisGateway] Gateway start or model restore failed:', error);

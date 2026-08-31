@@ -101,7 +101,7 @@ export class CloudModelConnector {
     const card = this.catalog.require(cardId);
     const savedProfile = await this.store.find(card.id);
     const profile = savedProfile ?? this.buildProfile(card);
-    const routeName = this.routeName(card, profile.id);
+    const routeName = CloudModelConnector.routeNameFor(card);
     const routes = await this.client.listModels();
 
     if (this.findLiveLink(profile, routes)) {
@@ -180,9 +180,16 @@ export class CloudModelConnector {
     });
   }
 
-  /** `<provider>-<model_name>-<prefix>-<first six characters of the profile id>`. */
-  private routeName(card: CloudModelCard, profileId: string): string {
-    const suffix = profileId.slice(0, ROUTE_NAME_ID_LENGTH).toLocaleLowerCase();
+  /**
+   * `<provider>-<model_name>-<prefix>-<first six characters of the card id>`.
+   *
+   * Static because the route name is a pure function of the card: a profile
+   * always carries its card's id, so anything holding the card can work out
+   * which gateway route serves it without going through the database. The
+   * Codex catalog is built from exactly that.
+   */
+  static routeNameFor(card: CloudModelCard): string {
+    const suffix = card.id.slice(0, ROUTE_NAME_ID_LENGTH).toLocaleLowerCase();
     return `${card.provider}-${card.modelName}-${card.prefix}-${suffix}`;
   }
 

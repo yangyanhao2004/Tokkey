@@ -46,6 +46,7 @@ import AgentManager, { type AgentState } from './agents/AgentManager';
 import InstalledAgentGate from './agents/InstalledAgentGate';
 import LocalModelManager from './models/LocalModelManager';
 import CloudModelConnector from './models/CloudModelConnector';
+import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import HostSnapshotService from './host/HostSnapshotService';
 
 type IpcHandler = (...args: unknown[]) => unknown;
@@ -64,6 +65,8 @@ export interface IpcControllerOptions {
   agentManager?: AgentManager;
   /** Owns the gateway subprocess, so only the app that supervises it can supply this. */
   cloudModelConnector?: CloudModelConnector;
+  /** Keeps the Codex CLI's model catalog in step with the gateway's routes. */
+  codexGatewayIntegration?: CodexGatewayIntegration;
 }
 
 /**
@@ -83,6 +86,7 @@ export default class IpcController {
   private readonly hostSnapshotService: HostSnapshotService;
   private readonly agentManager: AgentManager;
   private readonly cloudModelConnector: CloudModelConnector | null;
+  private readonly codexGatewayIntegration: CodexGatewayIntegration | null;
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
   constructor(options: IpcControllerOptions = {}) {
@@ -110,6 +114,7 @@ export default class IpcController {
     this.localModelManager = options.localModelManager ?? new LocalModelManager();
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
     this.cloudModelConnector = options.cloudModelConnector ?? null;
+    this.codexGatewayIntegration = options.codexGatewayIntegration ?? null;
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
@@ -344,14 +349,36 @@ export default class IpcController {
     return this.requireCloudModelConnector().listCards();
   }
 
-  /** Creates the gateway route for one card and persists its model profile. */
-  connectCloudModel(cardId: string): Promise<CloudModelConnection> {
-    return this.requireCloudModelConnector().connect(cardId);
+  /**
+   * Creates the gateway route for one card, persists its model profile, and
+   * republishes the Codex catalog so the model appears in the CLI's picker.
+   */
+  async connectCloudModel(cardId: string): Promise<CloudModelConnection> {
+    const connection = await this.requireCloudModelConnector().connect(cardId);
+    await this.syncCodexCatalog();
+    return connection;
   }
 
   /** Rebuilds the gateway routes for the cards saved by an earlier run. */
-  restoreCloudModels(): Promise<CloudModelConnection[]> {
-    return this.requireCloudModelConnector().restoreConnected();
+  async restoreCloudModels(): Promise<CloudModelConnection[]> {
+    const restored = await this.requireCloudModelConnector().restoreConnected();
+    await this.syncCodexCatalog();
+    return restored;
+  }
+
+  /**
+   * Republishes the Codex catalog, best effort.
+   *
+   * A connect that reached the gateway succeeded, whatever the CLI on this
+   * machine does or does not do with it, so a catalog failure is reported and
+   * swallowed rather than turned into a failed connection.
+   */
+  private async syncCodexCatalog(): Promise<void> {
+    try {
+      await this.codexGatewayIntegration?.syncCatalog();
+    } catch (error: unknown) {
+      console.error('[CodexCatalog] Could not republish the catalog after a connect:', error);
+    }
   }
 
   /**
