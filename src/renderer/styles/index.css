@@ -45,6 +45,30 @@
   /* Icons */
   --color-icon-primary: #343432;
 
+  /* Chat uses a closed, renderer-local dark surface. */
+  --color-chat-surface: #363736;
+  --color-chat-frame-border: #6c6c6c;
+  --color-chat-sidebar: #383938;
+  --color-chat-border: #50514f;
+  --color-chat-tab-bar: #484947;
+  --color-chat-tab-active: #363736;
+  --color-chat-tab-inactive: #484947;
+  --color-chat-input: #4a4b49;
+  --color-chat-input-border: #5b5c59;
+  --color-chat-model: #515250;
+  --color-chat-model-border: #60615e;
+  --color-chat-user-bubble: #686968;
+  --color-chat-empty-tile: #4d4e4c;
+  --color-chat-send: #f1f1ee;
+  --color-chat-placeholder: #aaa9a4;
+  --color-chat-footnote: #b7b7b2;
+  --color-chat-secondary-text: #c6c6c1;
+  --color-chat-tertiary-text: #a0a3a7;
+  --color-chat-heading: #f2f2ef;
+  --color-chat-model-label: #d2d2cd;
+  --color-chat-live: #34c759;
+  --color-chat-glass: rgb(84 84 84 / 67%);
+
   /*
     The Tokiie page's values are raw fills in Figma rather than published
     variables, so they are named here instead of being repeated per element.
@@ -146,6 +170,12 @@ body {
   /* Desktop chrome, not a document: no rubber-band scroll or text selection. */
   margin: 0;
   overflow: hidden;
+  background-color: #ececec;
   user-select: none;
   -webkit-font-smoothing: antialiased;
+}
+
+/* The app padding and inter-panel gap belong to the active page surface too. */
+body:has(.app-theme-chat) {
+  background-color: var(--color-chat-frame-border);
 }

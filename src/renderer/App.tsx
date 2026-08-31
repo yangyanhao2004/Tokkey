@@ -9,6 +9,7 @@ import { AgentHubPage } from './pages/AgentHubPage';
 import { DiscoverSkillsPage } from './pages/DiscoverSkillsPage';
 import { RouterPage } from './pages/RouterPage';
 import { TokiiePage } from './pages/TokiiePage';
+import { ChatPage } from './pages/ChatPage';
 import { UnbuiltPage } from './pages/UnbuiltPage';
 
 /**
@@ -19,6 +20,7 @@ const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
   tokiie: TokiiePage,
   router: RouterPage,
   'agent-hub': AgentHubPage,
+  chat: ChatPage,
   'add-model': AddModelPage,
   'discover-skills': DiscoverSkillsPage
 };
@@ -30,15 +32,20 @@ const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
 function AppFrame() {
   const { route, navigate } = useNavigation();
   const ActivePage = PAGE_BY_ROUTE[route];
+  const isChatActive = route === 'chat';
 
   return (
-    <>
+    <div
+      className={isChatActive ? 'app-theme-chat contents' : 'app-theme-light contents'}
+      data-theme={isChatActive ? 'chat' : 'light'}
+    >
       <Sidebar
         activeItemId={navItemIdForRoute(route)}
+        isDarkTheme={isChatActive}
         onSelect={(id: NavItemId) => navigate(id)}
       />
       {ActivePage ? <ActivePage /> : <UnbuiltPage navItemId={navItemIdForRoute(route)} />}
-    </>
+    </div>
   );
 }
 
