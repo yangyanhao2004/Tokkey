@@ -1,14 +1,6 @@
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  statSync,
-  unlinkSync,
-  writeFileSync
-} from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import BackedUpConfigFile from '../config/BackedUpConfigFile';
 import CodexHome from './CodexHome';
 import CodexTomlDocument from './CodexTomlDocument';
 
@@ -24,43 +16,36 @@ const MODEL_CATALOG_KEY = 'model_catalog_json';
  *
  * Codex reads one file, `~/.codex/config.toml`, and that file is the user's:
  * hand-written, full of comments, and shared with every other tool that
- * configures Codex. So the takeover is a loan, not a migration. The original is
- * copied aside before the first edit and copied back when the app quits, which
- * makes "Tokiie is running" the only window in which Codex talks to the
- * gateway, and leaves a machine where Tokiie has never run indistinguishable
- * from one where it has.
+ * configures Codex. The borrow-and-return contract that makes editing it
+ * acceptable — backup, crash recovery, byte-for-byte restore — lives in
+ * {@link BackedUpConfigFile}, which `ClaudeConfigTakeover` shares.
  *
- * A crash is the case the backup really exists for. Nothing runs at quit time
- * when the process is killed, so the backup outlives the session, and the next
- * launch restores it before anything else reads the file. That ordering matters
- * beyond tidiness: `CodexUpstreamEndpoint` learns the user's real upstream from
- * this same file, and reading it while Tokiie's own address is still in there
- * would teach it that the gateway is its own upstream.
- *
- * Caveat, by design: the restore puts the file back byte for byte, so an edit
- * made to `config.toml` by anything else during the session — including
- * Tokiie's own MCP writer — is discarded at quit.
+ * Restoring before anything reads the file matters here beyond tidiness:
+ * `CodexUpstreamEndpoint` learns the user's real upstream from this same file,
+ * and reading it while Tokiie's own address is still in there would teach it
+ * that the gateway is its own upstream.
  */
 export class CodexConfigTakeover {
-  private readonly home: CodexHome;
-  private readonly backupPath: string;
-  /** True once this launch has rewritten the file and owes it a restore. */
-  private isActive = false;
+  private readonly file: BackedUpConfigFile;
 
   constructor(options: { home?: CodexHome; homeDirectory?: string; backupPath?: string } = {}) {
-    this.home = options.home ?? new CodexHome(options);
-    this.backupPath =
-      options.backupPath ??
-      path.join(options.homeDirectory ?? os.homedir(), '.amiswifi', 'codex-config-backup.toml');
+    const home = options.home ?? new CodexHome(options);
+    this.file = new BackedUpConfigFile({
+      filePath: home.configPath,
+      backupPath:
+        options.backupPath ??
+        path.join(options.homeDirectory ?? os.homedir(), '.amiswifi', 'codex-config-backup.toml'),
+      label: 'CodexConfig'
+    });
   }
 
   get configPath(): string {
-    return this.home.configPath;
+    return this.file.configPath;
   }
 
   /** Where the user's own file is held while the takeover is in force. */
   get backupFilePath(): string {
-    return this.backupPath;
+    return this.file.backupFilePath;
   }
 
   /**
@@ -72,11 +57,7 @@ export class CodexConfigTakeover {
    * @returns whether a leftover backup was found and restored
    */
   recoverInterruptedSession(): boolean {
-    if (this.isActive || !existsSync(this.backupPath)) {
-      return false;
-    }
-    console.info('[CodexConfig] Restoring config.toml left behind by an interrupted session.');
-    return this.restoreFromBackup();
+    return this.file.recoverInterruptedSession();
   }
 
   /**
@@ -88,21 +69,13 @@ export class CodexConfigTakeover {
    * @returns whether the file was taken over
    */
   activate(gatewayBaseUrl: string, catalogPath: string | null): boolean {
-    this.recoverInterruptedSession();
-    try {
-      const original = this.readConfig();
-      this.writeBackup(original);
-      writeFileSync(this.configPath, this.rewrite(original, gatewayBaseUrl, catalogPath), 'utf8');
-      this.isActive = true;
+    const taken = this.file.activate((original) =>
+      this.rewrite(original, gatewayBaseUrl, catalogPath)
+    );
+    if (taken) {
       console.info(`[CodexConfig] Codex now routes through ${this.providerBaseUrl(gatewayBaseUrl)}.`);
-      return true;
-    } catch (error: unknown) {
-      // Codex keeps working with the user's own configuration; only the
-      // convenience of routing through the gateway is lost.
-      console.error('[CodexConfig] Could not point Codex at the gateway:', error);
-      this.discardBackup();
-      return false;
     }
+    return taken;
   }
 
   /**
@@ -112,12 +85,7 @@ export class CodexConfigTakeover {
    * @returns whether a restore happened
    */
   restore(): boolean {
-    if (!this.isActive) {
-      return false;
-    }
-    const restored = this.restoreFromBackup();
-    this.isActive = false;
-    return restored;
+    return this.file.restore();
   }
 
   /** The document Codex should see while Tokiie is running. */
@@ -150,61 +118,6 @@ export class CodexConfigTakeover {
   /** The gateway's OpenAI-compatible prefix, which is what Codex appends paths to. */
   private providerBaseUrl(gatewayBaseUrl: string): string {
     return `${gatewayBaseUrl.replace(/\/+$/, '')}/v1`;
-  }
-
-  /** The current file, or an empty document when Codex has never written one. */
-  private readConfig(): string {
-    try {
-      return readFileSync(this.configPath, 'utf8');
-    } catch {
-      return '';
-    }
-  }
-
-  private writeBackup(original: string): void {
-    mkdirSync(path.dirname(this.backupPath), { recursive: true });
-    writeFileSync(this.backupPath, original, 'utf8');
-  }
-
-  /**
-   * Copies the backup over `config.toml` and drops it.
-   *
-   * An empty backup means there was no `config.toml` before the takeover, so
-   * the file is removed rather than left behind as an empty one — Codex reads a
-   * missing file and an empty file the same way, but only one of them is the
-   * state the user actually had.
-   */
-  private restoreFromBackup(): boolean {
-    try {
-      if (statSync(this.backupPath).size === 0) {
-        this.removeConfig();
-      } else {
-        copyFileSync(this.backupPath, this.configPath);
-      }
-      this.discardBackup();
-      return true;
-    } catch (error: unknown) {
-      // The backup is deliberately left in place: the next launch retries the
-      // restore, which is the only path back to the user's own configuration.
-      console.error('[CodexConfig] Could not restore the original config.toml:', error);
-      return false;
-    }
-  }
-
-  private removeConfig(): void {
-    try {
-      unlinkSync(this.configPath);
-    } catch {
-      // Already gone, which is the state the restore was aiming for.
-    }
-  }
-
-  private discardBackup(): void {
-    try {
-      unlinkSync(this.backupPath);
-    } catch {
-      // Nothing to discard.
-    }
   }
 }
 

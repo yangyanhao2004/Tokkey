@@ -6,6 +6,7 @@ import CloudModelConnector from './models/CloudModelConnector';
 import CodexNativeModelRegistrar from './models/CodexNativeModelRegistrar';
 import ClaudeNativeModelRegistrar from './models/ClaudeNativeModelRegistrar';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
+import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
 import HubModelConnector from './models/HubModelConnector';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
@@ -31,6 +32,7 @@ export class TokiieApp {
   private readonly codexNativeModelRegistrar: CodexNativeModelRegistrar;
   private readonly claudeNativeModelRegistrar: ClaudeNativeModelRegistrar;
   private readonly codexGatewayIntegration: CodexGatewayIntegration;
+  private readonly claudeGatewayIntegration: ClaudeGatewayIntegration;
   private readonly tokenHubRuntime: TokenHubRuntime;
   private readonly isDev: boolean;
   private readonly evidenceMode: boolean;
@@ -63,6 +65,9 @@ export class TokiieApp {
     this.codexGatewayIntegration = new CodexGatewayIntegration({
       gateway: this.gatewayProcessManager
     });
+    this.claudeGatewayIntegration = new ClaudeGatewayIntegration({
+      gateway: this.gatewayProcessManager
+    });
     this.tokenHubRuntime = new TokenHubRuntime({
       runtimeLocator: new TokenHubRuntimeLocator({
         resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
@@ -74,6 +79,7 @@ export class TokiieApp {
     this.ipcController = new IpcController({
       cloudModelConnector: this.cloudModelConnector,
       codexGatewayIntegration: this.codexGatewayIntegration,
+      claudeGatewayIntegration: this.claudeGatewayIntegration,
       tokenHubRuntime: this.tokenHubRuntime
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
@@ -115,24 +121,28 @@ export class TokiieApp {
     this.tokenHubRuntime.startMonitoring();
     this.createMainWindow();
     if (!this.evidenceMode) {
-      // Before anything reads Codex's config.toml: a run that was killed left
-      // Tokiie's own configuration in that file, and every reader downstream —
-      // the upstream endpoint resolver above all — must see the user's instead.
+      // Before anything reads Codex's config.toml or Claude's settings.json: a
+      // run that was killed left Tokiie's own configuration in those files, and
+      // every reader downstream — the upstream endpoint resolver above all —
+      // must see the user's instead.
       this.codexGatewayIntegration.recoverInterruptedSession();
+      this.claudeGatewayIntegration.recoverInterruptedSession();
       this.startGateway();
     }
   }
 
   /**
-   * Hands Codex back its own `config.toml` and stops the gateway.
+   * Hands Codex and Claude Code back their own configuration and stops the
+   * gateway.
    *
-   * Both are synchronous because Electron does not wait for a promise here, and
-   * the restore is the half that must not be skipped: the address it removes
-   * stops answering the moment the gateway below it goes down.
+   * All of it is synchronous because Electron does not wait for a promise here,
+   * and the restores are the half that must not be skipped: the address they
+   * remove stops answering the moment the gateway below it goes down.
    */
   onWillQuit(): void {
     this.tokenHubRuntime.shutdownNow();
     this.codexGatewayIntegration.deactivate();
+    this.claudeGatewayIntegration.deactivate();
     this.gatewayProcessManager.stop('application quit');
   }
 
@@ -171,10 +181,15 @@ export class TokiieApp {
         if (claude.length > 0) {
           console.info(`[AmisGateway] Registered ${claude.length} Claude model route(s).`);
         }
-        // Last, and only now: the catalog is built from the routes that exist,
-        // and taking over config.toml any earlier would hide the user's own
-        // upstream from the registrar that just read it.
-        return this.codexGatewayIntegration.activate();
+        // Last, and only now: both CLIs are configured from the routes that
+        // exist, and taking over config.toml any earlier would hide the user's
+        // own upstream from the registrar that just read it. Claude's settings
+        // are taken over in the same breath — its routes are in by this point,
+        // and the base URL it gets carries the port this launch actually bound.
+        return Promise.all([
+          this.codexGatewayIntegration.activate(),
+          this.claudeGatewayIntegration.activate()
+        ]);
       })
       .catch((error: unknown) => {
         console.error('[AmisGateway] Gateway start or model restore failed:', error);

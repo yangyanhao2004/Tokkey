@@ -47,6 +47,7 @@ import InstalledAgentGate from './agents/InstalledAgentGate';
 import LocalModelManager from './models/LocalModelManager';
 import CloudModelConnector from './models/CloudModelConnector';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
+import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import HostSnapshotService from './host/HostSnapshotService';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 
@@ -69,6 +70,8 @@ export interface IpcControllerOptions {
   cloudModelConnector?: CloudModelConnector;
   /** Keeps the Codex CLI's model catalog in step with the gateway's routes. */
   codexGatewayIntegration?: CodexGatewayIntegration;
+  /** Keeps Claude Code's model settings in step with the gateway's routes. */
+  claudeGatewayIntegration?: ClaudeGatewayIntegration;
 }
 
 /**
@@ -90,6 +93,7 @@ export default class IpcController {
   private readonly agentManager: AgentManager;
   private readonly cloudModelConnector: CloudModelConnector | null;
   private readonly codexGatewayIntegration: CodexGatewayIntegration | null;
+  private readonly claudeGatewayIntegration: ClaudeGatewayIntegration | null;
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
   constructor(options: IpcControllerOptions = {}) {
@@ -124,6 +128,7 @@ export default class IpcController {
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     this.codexGatewayIntegration = options.codexGatewayIntegration ?? null;
+    this.claudeGatewayIntegration = options.claudeGatewayIntegration ?? null;
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
@@ -376,7 +381,7 @@ export default class IpcController {
     );
     if (!model) throw new Error(`Installed local model not found: ${modelId}`);
     const state = await this.tokenHubRuntime.startModel(model);
-    await this.syncCodexCatalog();
+    await this.syncAgentModels();
     return state;
   }
 
@@ -392,33 +397,43 @@ export default class IpcController {
 
   /**
    * Creates the gateway route for one card, persists its model profile, and
-   * republishes the Codex catalog so the model appears in the CLI's picker.
+   * republishes both CLIs' model configuration so the model appears in their
+   * pickers.
    */
   async connectCloudModel(cardId: string): Promise<CloudModelConnection> {
     const connection = await this.requireCloudModelConnector().connect(cardId);
-    await this.syncCodexCatalog();
+    await this.syncAgentModels();
     return connection;
   }
 
   /** Rebuilds the gateway routes for the cards saved by an earlier run. */
   async restoreCloudModels(): Promise<CloudModelConnection[]> {
     const restored = await this.requireCloudModelConnector().restoreConnected();
-    await this.syncCodexCatalog();
+    await this.syncAgentModels();
     return restored;
   }
 
   /**
-   * Republishes the Codex catalog, best effort.
+   * Republishes the Codex catalog and Claude Code's settings, best effort.
    *
-   * A connect that reached the gateway succeeded, whatever the CLI on this
-   * machine does or does not do with it, so a catalog failure is reported and
-   * swallowed rather than turned into a failed connection.
+   * A connect that reached the gateway succeeded, whatever the CLIs on this
+   * machine do or do not do with it, so a failure on either side is reported
+   * and swallowed rather than turned into a failed connection. They are
+   * independent files, so one failing must not cost the other its update.
    */
-  private async syncCodexCatalog(): Promise<void> {
+  private async syncAgentModels(): Promise<void> {
+    await Promise.all([
+      this.syncQuietly('CodexCatalog', () => this.codexGatewayIntegration?.syncCatalog()),
+      this.syncQuietly('ClaudeConfig', () => this.claudeGatewayIntegration?.syncSettings())
+    ]);
+  }
+
+  /** Runs one republish, reporting a failure instead of raising it. */
+  private async syncQuietly(label: string, sync: () => Promise<unknown> | undefined): Promise<void> {
     try {
-      await this.codexGatewayIntegration?.syncCatalog();
+      await sync();
     } catch (error: unknown) {
-      console.error('[CodexCatalog] Could not republish the catalog after a connect:', error);
+      console.error(`[${label}] Could not republish after a connect:`, error);
     }
   }
 
