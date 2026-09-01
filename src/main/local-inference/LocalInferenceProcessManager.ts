@@ -211,7 +211,10 @@ export class LocalInferenceProcessManager implements LocalInferenceRuntimeServin
           '--host', '127.0.0.1',
           '--port', String(port),
           '--ctx-size', String(this.contextWindowTokens),
-          '--no-webui'
+          '--no-webui',
+          // Keep reasoning enabled so reasoning-capable local models can emit
+          // activity events while the transcript remains focused on the reply.
+          '--reasoning', 'on'
         ],
         {
           stdio: ['ignore', 'ignore', 'pipe'],

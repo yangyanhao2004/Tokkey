@@ -69,12 +69,8 @@ interface ModelRowProps {
 
 /** One installed model with its start/remove actions. */
 function ModelRow({ model, installed, onStart, onRemove }: ModelRowProps) {
-  const isStarting = installed.runtime.phase === 'starting' && installed.runtime.modelId === model.id;
-  const isRunning = installed.runtime.phase === 'running' && installed.runtime.modelId === model.id;
-  const runtimeIsBusy = installed.runtime.phase === 'starting' || installed.runtime.phase === 'running';
-  const isRemoving = installed.busyModelId === model.id;
-  const startLabel = isStarting ? 'Starting' : isRunning ? 'Running' : 'Start';
-
+  const isBusy = installed.busyModelId === model.id;
+  const isRunning = installed.runningModelId === model.id;
   return (
     <div
       className="flex w-full items-center justify-between border-t border-separator p-4"
@@ -88,15 +84,15 @@ function ModelRow({ model, installed, onStart, onRemove }: ModelRowProps) {
       <div className="flex shrink-0 items-center justify-end gap-2">
         <PushButton
           onClick={() => onStart(model.id)}
-          disabled={!installed.runtime.device || runtimeIsBusy || isRemoving}
+          disabled={isBusy || isRunning}
           testId={`model-start-${model.id}`}
         >
-          {startLabel}
+          {isRunning ? 'Running' : 'Start'}
         </PushButton>
         <PushButton
           variant="plain"
           onClick={() => onRemove(model.id)}
-          disabled={runtimeIsBusy || isRemoving}
+          disabled={isBusy}
           testId={`model-remove-${model.id}`}
         >
           Remove

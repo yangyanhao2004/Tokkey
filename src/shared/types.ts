@@ -191,14 +191,18 @@ export interface TokiieApi {
   deleteLocalModel(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
   deployLocalModel(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
   listInstalledLocalModels(): Promise<InstalledLocalModel[]>;
+  startInstalledLocalModel(modelId: string): Promise<LocalChatRuntimeState>;
   removeInstalledLocalModel(modelId: string): Promise<InstalledLocalModel[]>;
   getLocalModelRuntimeState(): Promise<LocalModelRuntimeState>;
-  startInstalledLocalModel(modelId: string): Promise<LocalModelRuntimeState>;
   stopLocalModelRuntime(): Promise<LocalModelRuntimeState>;
   onLocalModelRuntimeStateChanged(listener: (state: LocalModelRuntimeState) => void): () => void;
   listCloudModelCards(): Promise<CloudModelCard[]>;
   connectCloudModel(cardId: string): Promise<CloudModelConnection>;
   restoreCloudModels(): Promise<CloudModelConnection[]>;
+  loadLocalChatWorkspace(): Promise<LocalChatWorkspace>;
+  createLocalChatSession(): Promise<LocalChatWorkspace>;
+  openLocalChatSession(sessionId: string): Promise<LocalChatWorkspace>;
+  closeLocalChatSession(sessionId: string): Promise<LocalChatWorkspace>;
   getLocalChatRuntimeState(): Promise<LocalChatRuntimeState>;
   startLocalChatTurn(request: LocalChatTurnRequest): Promise<LocalChatTurnStarted>;
   cancelLocalChatTurn(turnId: string): Promise<void>;
@@ -218,8 +222,10 @@ export interface LocalChatMessageInput {
 export interface LocalChatTurnRequest {
   turnId: string;
   sessionId: string;
+  userMessageId: string;
   assistantMessageId: string;
   modelId: string;
+  createdAt: number;
   messages: LocalChatMessageInput[];
 }
 
@@ -253,6 +259,13 @@ export type LocalChatEvent =
       text: string;
     }
   | {
+      type: 'reasoningDelta';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+      text: string;
+    }
+  | {
       type: 'usage';
       turnId: string;
       sessionId: string;
@@ -262,6 +275,12 @@ export type LocalChatEvent =
     }
   | {
       type: 'completed' | 'cancelled';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+    }
+  | {
+      type: 'watchdogTerminated';
       turnId: string;
       sessionId: string;
       assistantMessageId: string;
@@ -277,6 +296,56 @@ export type LocalChatEvent =
 
 /** Removes the IPC listener installed by `onLocalChatEvent`. */
 export type LocalChatEventListener = (event: LocalChatEvent) => void;
+
+/** Durable state assigned to a transcript message by the local Chat store. */
+export type LocalChatMessageStatus = 'complete' | 'streaming' | 'error' | 'incomplete';
+
+/** Lifecycle of one persisted local-model turn. */
+export type LocalChatTurnStatus =
+  | 'streaming'
+  | 'completed'
+  | 'cancelled'
+  | 'error'
+  | 'watchdogTerminated'
+  | 'incomplete';
+
+/** Token measurements the local runtime supplied for one assistant response. */
+export interface LocalChatTokenUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  contextWindowTokens: number | null;
+}
+
+/** One message restored from the local Chat database. */
+export interface LocalChatStoredMessage {
+  id: string;
+  role: LocalChatMessageRole;
+  content: string;
+  reasoningContent: string;
+  createdAt: number;
+  durationMs: number | null;
+  status: LocalChatMessageStatus;
+  tokenUsage: LocalChatTokenUsage | null;
+}
+
+/** One durable Chat session, including its transcript and selected model metadata. */
+export interface LocalChatStoredSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  modelId: string | null;
+  modelLabel: string | null;
+  closed: boolean;
+  messages: LocalChatStoredMessage[];
+}
+
+/** Restored workspace state for the history panel, open tabs, and current session. */
+export interface LocalChatWorkspace {
+  sessions: LocalChatStoredSession[];
+  openSessionIds: string[];
+  activeSessionId: string;
+}
 
 /**
  * Upstream routing mode persisted in `model_profiles.supported_api_formats`.
@@ -316,7 +385,7 @@ export interface ModelProfile {
   type: ModelProfileType;
   supportedApiFormats: CloudApiFormat[];
   litellmLinks: LiteLlmModelLink[];
-  /** Unix timestamp in seconds, stored as SQLite REAL for exact roundtrips. */
+  /** Unix timestamp in seconds exposed to model code; SQLite stores local ISO time plus a sortable epoch value. */
   createdAt: number;
 }
 

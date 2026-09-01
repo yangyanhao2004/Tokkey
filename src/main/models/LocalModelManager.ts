@@ -1,4 +1,5 @@
 import type {
+  LocalChatRuntimeState,
   InstalledLocalModel,
   LocalModelCatalogRequest,
   LocalModelCatalogScan,
@@ -97,6 +98,27 @@ export class LocalModelManager {
    */
   listInstalled(): Promise<InstalledLocalModel[]> {
     return this.downloader.listInstalled();
+  }
+
+  /** Starts one discovered GGUF file without requiring a matching catalog row. */
+  startInstalledModel(modelId: string): Promise<LocalChatRuntimeState> {
+    return this.queueRuntimeOperation(async () => {
+      const installedModel = (await this.downloader.listInstalled())
+        .find((candidate) => candidate.id === modelId);
+      if (!installedModel) {
+        throw new Error(`Installed local model not found: ${modelId}`);
+      }
+
+      const previousModelId = this.localInference.getState().model?.id;
+      if (previousModelId && previousModelId !== installedModel.id) {
+        this.downloader.markDeploymentStopped(previousModelId);
+      }
+      return this.localInference.start({
+        id: installedModel.id,
+        label: installedModel.name,
+        filePath: installedModel.filePath
+      });
+    });
   }
 
   /** Removes a downloaded model and answers with the remaining installed list. */

@@ -129,7 +129,7 @@ export class CloudModelConnector {
       modelName: card.modelName,
       type: 'cloud',
       supportedApiFormats: [CLOUD_CARD_API_FORMAT],
-      // Seconds, matching how the shared database stores every other timestamp.
+      // Seconds remain the model-layer contract; the SQLite store converts this to local time.
       createdAt: Date.now() / 1000,
       litellmLinks: []
     };

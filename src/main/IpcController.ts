@@ -12,6 +12,7 @@ import type {
   LocalChatRuntimeState,
   LocalChatTurnRequest,
   LocalChatTurnStarted,
+  LocalChatWorkspace,
   SkillsShCardState,
   SkillsShInstallRequest,
   SkillsShInstallResult,
@@ -48,7 +49,9 @@ import LocalMcpConfigurationApplier, {
 import AgentManager, { type AgentState } from './agents/AgentManager';
 import InstalledAgentGate from './agents/InstalledAgentGate';
 import LocalChatTurnExecutor from './chat/LocalChatTurnExecutor';
+import ChatSessionStore from './chat/ChatSessionStore';
 import {
+  validateLocalChatSessionId,
   validateLocalChatTurnId,
   validateLocalChatTurnRequest
 } from './chat/LocalChatTurnRequestValidator';
@@ -76,6 +79,7 @@ export interface IpcControllerOptions {
   /** Shared with model deployment so Chat always reaches the deployed process. */
   localInferenceProcessManager?: LocalInferenceProcessManager;
   localChatTurnExecutor?: LocalChatTurnExecutor;
+  chatSessionStore?: ChatSessionStore;
   hostSnapshotService?: HostSnapshotService;
   agentManager?: AgentManager;
   /** Owns the gateway subprocess, so only the app that supervises it can supply this. */
@@ -103,6 +107,7 @@ export default class IpcController {
   private readonly tokenHubRuntime: TokenHubRuntime;
   private readonly localInferenceProcessManager: LocalInferenceProcessManager;
   private readonly localChatTurnExecutor: LocalChatTurnExecutor;
+  private readonly chatSessionStore: ChatSessionStore;
   private readonly hostSnapshotService: HostSnapshotService;
   private readonly agentManager: AgentManager;
   private readonly cloudModelConnector: CloudModelConnector | null;
@@ -146,6 +151,7 @@ export default class IpcController {
         if (!window.isDestroyed()) window.webContents.send('models:runtime-state-changed', state);
       });
     });
+    this.chatSessionStore = options.chatSessionStore ?? new ChatSessionStore();
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     this.codexGatewayIntegration = options.codexGatewayIntegration ?? null;
@@ -210,12 +216,18 @@ export default class IpcController {
       'models:deploy': (modelId: unknown, request: unknown) =>
         this.deployLocalModel(this.requireModelId(modelId), this.requireModelRequest(request)),
       'models:list-installed': () => this.listInstalledLocalModels(),
+      'models:start-installed': (modelId: unknown) =>
+        this.startInstalledLocalModel(this.requireModelId(modelId)),
       'models:remove-installed': (modelId: unknown) =>
         this.removeInstalledLocalModel(this.requireModelId(modelId)),
       'models:runtime-state': () => this.getLocalModelRuntimeState(),
-      'models:start-installed': (modelId: unknown) =>
-        this.startInstalledLocalModel(this.requireModelId(modelId)),
       'models:stop-runtime': () => this.stopLocalModelRuntime(),
+      'chat:load-workspace': () => this.loadLocalChatWorkspace(),
+      'chat:create-session': () => this.createLocalChatSession(),
+      'chat:open-session': (sessionId: unknown) =>
+        this.openLocalChatSession(validateLocalChatSessionId(sessionId)),
+      'chat:close-session': (sessionId: unknown) =>
+        this.closeLocalChatSession(validateLocalChatSessionId(sessionId)),
       'chat:get-runtime-state': () => this.getLocalChatRuntimeState(),
       'models:cloud-cards': () => this.listCloudModelCards(),
       'models:restore-cloud': () => this.restoreCloudModels(),
@@ -385,13 +397,51 @@ export default class IpcController {
     return this.localInferenceProcessManager.getState();
   }
 
+  /** Restores persisted local Chat history, tabs, and the current session. */
+  loadLocalChatWorkspace(): LocalChatWorkspace {
+    return this.chatSessionStore.loadWorkspace();
+  }
+
+  /** Creates and focuses a durable blank local Chat session. */
+  createLocalChatSession(): LocalChatWorkspace {
+    return this.chatSessionStore.createSession();
+  }
+
+  /** Opens a historical session as a tab and records it as the current session. */
+  openLocalChatSession(sessionId: string): LocalChatWorkspace {
+    return this.chatSessionStore.openSession(sessionId);
+  }
+
+  /** Removes a tab without deleting the session from local Chat history. */
+  closeLocalChatSession(sessionId: string): LocalChatWorkspace {
+    return this.chatSessionStore.closeSession(sessionId);
+  }
+
   /** Starts one local-only SSE turn and returns stream events to its caller alone. */
   startLocalChatTurn(event: IpcMainInvokeEvent, request: LocalChatTurnRequest): LocalChatTurnStarted {
-    return this.localChatTurnExecutor.startTurn(request, (streamEvent) => {
-      if (!event.sender.isDestroyed()) {
-        event.sender.send('chat:event', streamEvent);
-      }
+    const runtimeState = this.localInferenceProcessManager.getState();
+    if (runtimeState.status !== 'ready' || runtimeState.model?.id !== request.modelId) {
+      throw new Error('The selected local model is not running.');
+    }
+    this.chatSessionStore.beginTurn({
+      request,
+      modelLabel: runtimeState.model.label,
+      contextWindowTokens: runtimeState.contextWindowTokens
     });
+    try {
+      return this.localChatTurnExecutor.startTurn(request, (streamEvent) => {
+        this.chatSessionStore.handleStreamEvent(streamEvent);
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('chat:event', streamEvent);
+        }
+      });
+    } catch (error) {
+      this.chatSessionStore.failTurnStart(
+        request.turnId,
+        error instanceof Error ? error.message : 'The local model request failed.'
+      );
+      throw error;
+    }
   }
 
   /** Stops a local stream by its accepted opaque turn ID. */
@@ -402,6 +452,11 @@ export default class IpcController {
   /** Lists the models already stored under ~/.amiswifi/models. */
   listInstalledLocalModels(): Promise<InstalledLocalModel[]> {
     return this.localModelManager.listInstalled();
+  }
+
+  /** Starts an already-downloaded GGUF file for the local Chat runtime. */
+  startInstalledLocalModel(modelId: string): Promise<LocalChatRuntimeState> {
+    return this.localModelManager.startInstalledModel(modelId);
   }
 
   /** Deletes one downloaded model and returns the installed list that remains. */
@@ -419,17 +474,6 @@ export default class IpcController {
   /** Current USB presence and the one guarded local-server lifecycle. */
   getLocalModelRuntimeState() {
     return this.tokenHubRuntime.getState();
-  }
-
-  /** Starts the exact recursively-discovered GGUF selected on the Tokiie page. */
-  async startInstalledLocalModel(modelId: string) {
-    const model = (await this.localModelManager.listInstalled()).find(
-      (candidate) => candidate.id === modelId
-    );
-    if (!model) throw new Error(`Installed local model not found: ${modelId}`);
-    const state = await this.tokenHubRuntime.startModel(model);
-    await this.syncAgentModels();
-    return state;
   }
 
   /** Stops the single Dongle-guarded local model process. */

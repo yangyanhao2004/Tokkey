@@ -13,16 +13,21 @@ interface ActiveLocalChatTurn {
   emit: (event: LocalChatEvent) => void;
   terminalSent: boolean;
   request: LocalChatTurnRequest;
+  idleTimer: ReturnType<typeof setTimeout> | null;
 }
 
 type LocalChatDeltaEvent =
   | { type: 'textDelta'; text: string }
+  | { type: 'reasoningDelta'; text: string }
   | { type: 'usage'; inputTokens: number | null; outputTokens: number | null };
 
 type LocalChatTerminalEvent =
   | { type: 'completed' }
   | { type: 'cancelled' }
+  | { type: 'watchdogTerminated' }
   | { type: 'error'; message: string; retryable: boolean };
+
+const DEFAULT_IDLE_TIMEOUT_MS = 45_000;
 
 /**
  * Executes one direct, local-model-only Chat turn. It owns cancellation and
@@ -31,11 +36,17 @@ type LocalChatTerminalEvent =
 export class LocalChatTurnExecutor {
   private readonly runtime: LocalInferenceRuntimeServing;
   private readonly fetcher: LocalChatFetch;
+  private readonly idleTimeoutMs: number;
   private readonly activeTurns = new Map<string, ActiveLocalChatTurn>();
 
-  constructor(options: { runtime: LocalInferenceRuntimeServing; fetcher?: LocalChatFetch }) {
+  constructor(options: {
+    runtime: LocalInferenceRuntimeServing;
+    fetcher?: LocalChatFetch;
+    idleTimeoutMs?: number;
+  }) {
     this.runtime = options.runtime;
     this.fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
+    this.idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
   }
 
   /** Starts background streaming after checking that the requested local model is ready. */
@@ -53,9 +64,11 @@ export class LocalChatTurnExecutor {
       abortController: new AbortController(),
       emit: onEvent,
       terminalSent: false,
-      request
+      request,
+      idleTimer: null
     };
     this.activeTurns.set(request.turnId, activeTurn);
+    this.resetIdleWatchdog(activeTurn);
     void this.streamTurn(activeTurn, endpoint);
     return { turnId: request.turnId };
   }
@@ -142,6 +155,9 @@ export class LocalChatTurnExecutor {
       case 'text':
         this.emit(activeTurn, { type: 'textDelta', text: event.text });
         return;
+      case 'reasoning':
+        this.emit(activeTurn, { type: 'reasoningDelta', text: event.text });
+        return;
       case 'usage':
         this.emit(activeTurn, {
           type: 'usage',
@@ -164,6 +180,7 @@ export class LocalChatTurnExecutor {
     if (activeTurn.terminalSent) {
       return;
     }
+    this.resetIdleWatchdog(activeTurn);
     activeTurn.emit({
       ...event,
       turnId: activeTurn.request.turnId,
@@ -180,6 +197,7 @@ export class LocalChatTurnExecutor {
       return;
     }
     activeTurn.terminalSent = true;
+    this.clearIdleWatchdog(activeTurn);
     this.activeTurns.delete(activeTurn.request.turnId);
     activeTurn.emit({
       ...terminal,
@@ -187,6 +205,24 @@ export class LocalChatTurnExecutor {
       sessionId: activeTurn.request.sessionId,
       assistantMessageId: activeTurn.request.assistantMessageId
     });
+  }
+
+  /** Stops a stream that neither emits data nor reaches a terminal state. */
+  private resetIdleWatchdog(activeTurn: ActiveLocalChatTurn): void {
+    this.clearIdleWatchdog(activeTurn);
+    const timer = setTimeout(() => {
+      if (activeTurn.terminalSent) return;
+      activeTurn.abortController.abort();
+      this.finish(activeTurn, { type: 'watchdogTerminated' });
+    }, this.idleTimeoutMs);
+    timer.unref?.();
+    activeTurn.idleTimer = timer;
+  }
+
+  private clearIdleWatchdog(activeTurn: ActiveLocalChatTurn): void {
+    if (!activeTurn.idleTimer) return;
+    clearTimeout(activeTurn.idleTimer);
+    activeTurn.idleTimer = null;
   }
 
   private async describeResponseFailure(response: Response): Promise<string> {

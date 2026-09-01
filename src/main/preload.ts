@@ -44,9 +44,9 @@ class PreloadBridge {
       deleteLocalModel: (modelId, request) => ipcRenderer.invoke('models:delete', modelId, request),
       deployLocalModel: (modelId, request) => ipcRenderer.invoke('models:deploy', modelId, request),
       listInstalledLocalModels: () => ipcRenderer.invoke('models:list-installed'),
+      startInstalledLocalModel: (modelId) => ipcRenderer.invoke('models:start-installed', modelId),
       removeInstalledLocalModel: (modelId) => ipcRenderer.invoke('models:remove-installed', modelId),
       getLocalModelRuntimeState: () => ipcRenderer.invoke('models:runtime-state'),
-      startInstalledLocalModel: (modelId) => ipcRenderer.invoke('models:start-installed', modelId),
       stopLocalModelRuntime: () => ipcRenderer.invoke('models:stop-runtime'),
       onLocalModelRuntimeStateChanged: (listener) => {
         const handler = (_event: IpcRendererEvent, state: LocalModelRuntimeState) => listener(state);
@@ -56,6 +56,10 @@ class PreloadBridge {
       listCloudModelCards: () => ipcRenderer.invoke('models:cloud-cards'),
       connectCloudModel: (cardId) => ipcRenderer.invoke('models:connect-cloud', cardId),
       restoreCloudModels: () => ipcRenderer.invoke('models:restore-cloud'),
+      loadLocalChatWorkspace: () => ipcRenderer.invoke('chat:load-workspace'),
+      createLocalChatSession: () => ipcRenderer.invoke('chat:create-session'),
+      openLocalChatSession: (sessionId) => ipcRenderer.invoke('chat:open-session', sessionId),
+      closeLocalChatSession: (sessionId) => ipcRenderer.invoke('chat:close-session', sessionId),
       getLocalChatRuntimeState: () => ipcRenderer.invoke('chat:get-runtime-state'),
       startLocalChatTurn: (request) => ipcRenderer.invoke('chat:start-turn', request),
       cancelLocalChatTurn: (turnId) => ipcRenderer.invoke('chat:cancel-turn', turnId),
@@ -86,10 +90,13 @@ function isLocalChatEvent(value: unknown): value is LocalChatEvent {
   switch (event.type) {
     case 'textDelta':
       return typeof event.text === 'string';
+    case 'reasoningDelta':
+      return typeof event.text === 'string';
     case 'usage':
       return isNullableFiniteNumber(event.inputTokens) && isNullableFiniteNumber(event.outputTokens);
     case 'completed':
     case 'cancelled':
+    case 'watchdogTerminated':
       return true;
     case 'error':
       return typeof event.message === 'string' && typeof event.retryable === 'boolean';

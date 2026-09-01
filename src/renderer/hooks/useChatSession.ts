@@ -2,15 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   LocalChatEvent,
   LocalChatRuntimeState,
+  LocalChatStoredSession,
+  LocalChatWorkspace,
   LocalChatTurnRequest
 } from '../../shared/types';
+import { createLocalChatSessionTitle } from '../../shared/LocalChatSessionTitle';
 import {
-  FIXTURE_NOW,
-  createBlankSession,
-  createChatFixture,
   groupHistory,
-  paginateEarlier,
-  searchHistory,
   summarizeSession,
   type ChatHistoryGroup,
   type ChatMessage,
@@ -21,17 +19,27 @@ import {
   type ChatTokenUsage
 } from '../pages/chatContent';
 
-const INITIAL_OPEN_SESSION_IDS = ['daily-brief', 'wechat-motivation', 'vendio'];
-const EARLIER_PAGE_SIZE = 3;
 const LOCAL_CONTEXT_WINDOW_TOKENS = 4_096;
+const FALLBACK_SESSION: ChatSession = {
+  id: 'loading-local-chat',
+  title: 'New Private Chat',
+  createdAt: 0,
+  updatedAt: 0,
+  messages: []
+};
 
-type HistoryMode = 'closed' | 'browsing' | 'searching';
+type HistoryMode = 'closed' | 'browsing';
 type CopyState = 'idle' | 'copied' | 'error';
 
 interface ActiveChatTurn {
   sessionId: string;
   assistantMessageId: string;
   startedAt: number;
+}
+
+interface PendingMessageDeltas {
+  text: string;
+  reasoningContent: string;
 }
 
 const INITIAL_RUNTIME_STATE: LocalChatRuntimeState = {
@@ -48,19 +56,12 @@ export interface ChatSessionController {
   activeSessionId: string;
   requestState: ChatRequestState;
   historyMode: HistoryMode;
-  historyQuery: string;
   historyGroups: ChatHistoryGroup[];
-  historyResults: ReturnType<typeof searchHistory>;
-  earlierPage: number;
-  earlierPageItems: ReturnType<typeof paginateEarlier>['items'];
-  hasEarlierPage: boolean;
   modelState: ChatModelState;
   selectedModel: ChatModelOption | null;
   copyStateByMessageId: Readonly<Record<string, CopyState>>;
   openHistory: () => void;
   closeHistory: () => void;
-  setHistoryQuery: (query: string) => void;
-  setEarlierPage: (page: number) => void;
   selectSession: (sessionId: string) => void;
   createNewChat: () => void;
   closeSession: (sessionId: string) => void;
@@ -87,7 +88,11 @@ function modelStateForRuntime(runtimeState: LocalChatRuntimeState): ChatModelSta
 }
 
 function formatResponseDuration(startedAt: number): string {
-  const durationSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1_000));
+  return formatResponseDurationMilliseconds(Date.now() - startedAt);
+}
+
+function formatResponseDurationMilliseconds(durationMilliseconds: number): string {
+  const durationSeconds = Math.max(1, Math.round(durationMilliseconds / 1_000));
   const minutes = Math.floor(durationSeconds / 60);
   const seconds = durationSeconds % 60;
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
@@ -115,28 +120,90 @@ function updateAssistantMessage(
   });
 }
 
+function chatMessageStatusForStoredMessage(status: LocalChatStoredSession['messages'][number]['status']): ChatMessage['status'] {
+  return status === 'incomplete' ? 'error' : status;
+}
+
+function chatTokenUsageForStoredMessage(
+  tokenUsage: LocalChatStoredSession['messages'][number]['tokenUsage']
+): ChatTokenUsage | null {
+  if (!tokenUsage) return null;
+  const inputTokens = tokenUsage.inputTokens ?? 0;
+  const outputTokens = tokenUsage.outputTokens ?? 0;
+  const contextWindowTokens = tokenUsage.contextWindowTokens ?? LOCAL_CONTEXT_WINDOW_TOKENS;
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+    usedContextTokens: inputTokens + outputTokens,
+    contextWindowTokens
+  };
+}
+
+function chatSessionForStoredSession(session: LocalChatStoredSession): ChatSession {
+  return {
+    id: session.id,
+    title: session.title,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    messages: session.messages.map((message) => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      reasoningContent: message.reasoningContent,
+      createdAt: message.createdAt,
+      durationLabel: message.durationMs === null ? null : formatResponseDurationMilliseconds(message.durationMs),
+      status: chatMessageStatusForStoredMessage(message.status),
+      tokenUsage: chatTokenUsageForStoredMessage(message.tokenUsage)
+    }))
+  };
+}
+
 /** Owns renderer-only session layout state while main owns every model request. */
 export function useChatSession(): ChatSessionController {
-  const [sessions, setSessions] = useState<ChatSession[]>(() => createChatFixture());
-  const [openSessionIds, setOpenSessionIds] = useState<string[]>(INITIAL_OPEN_SESSION_IDS);
-  const [activeSessionId, setActiveSessionId] = useState('vendio');
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [openSessionIds, setOpenSessionIds] = useState<string[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState('');
+  const [workspaceIsReady, setWorkspaceIsReady] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [requestStateBySessionId, setRequestStateBySessionId] = useState<Record<string, ChatRequestState>>({});
   const [historyMode, setHistoryMode] = useState<HistoryMode>('closed');
-  const [historyQuery, setHistoryQuery] = useState('');
-  const [earlierPage, setEarlierPage] = useState(0);
   const [runtimeState, setRuntimeState] = useState<LocalChatRuntimeState>(INITIAL_RUNTIME_STATE);
   const [copyStateByMessageId, setCopyStateByMessageId] = useState<Record<string, CopyState>>({});
   const mountedRef = useRef(true);
   const copyTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const activeTurnsByIdRef = useRef(new Map<string, ActiveChatTurn>());
   const turnIdBySessionIdRef = useRef(new Map<string, string>());
-  const pendingTextByMessageIdRef = useRef(new Map<string, string>());
-  const textFlushFrameRef = useRef<number | null>(null);
+  const pendingMessageDeltasRef = useRef(new Map<string, PendingMessageDeltas>());
+  const messageFlushFrameRef = useRef<number | null>(null);
   const runtimeStateRef = useRef(runtimeState);
 
   useEffect(() => {
     runtimeStateRef.current = runtimeState;
   }, [runtimeState]);
+
+  const applyWorkspace = useCallback((workspace: LocalChatWorkspace) => {
+    if (!mountedRef.current) return;
+    setSessions(workspace.sessions.map(chatSessionForStoredSession));
+    setOpenSessionIds(workspace.openSessionIds);
+    setActiveSessionId(workspace.activeSessionId);
+    setWorkspaceError(null);
+    setWorkspaceIsReady(true);
+  }, []);
+
+  const handleWorkspaceError = useCallback((error: unknown) => {
+    if (!mountedRef.current) return;
+    setWorkspaceError(describeError(error));
+    setWorkspaceIsReady(false);
+  }, []);
+
+  const loadWorkspace = useCallback(async () => {
+    try {
+      applyWorkspace(await window.tokiie.loadLocalChatWorkspace());
+    } catch (error) {
+      handleWorkspaceError(error);
+    }
+  }, [applyWorkspace, handleWorkspaceError]);
 
   const refreshRuntimeState = useCallback(async () => {
     try {
@@ -156,22 +223,27 @@ export function useChatSession(): ChatSessionController {
     }
   }, []);
 
-  const flushPendingText = useCallback(() => {
-    if (textFlushFrameRef.current !== null) {
-      window.cancelAnimationFrame(textFlushFrameRef.current);
-      textFlushFrameRef.current = null;
+  const flushPendingDeltas = useCallback(() => {
+    if (messageFlushFrameRef.current !== null) {
+      window.cancelAnimationFrame(messageFlushFrameRef.current);
+      messageFlushFrameRef.current = null;
     }
-    const pendingText = new Map(pendingTextByMessageIdRef.current);
-    pendingTextByMessageIdRef.current.clear();
-    if (!mountedRef.current || pendingText.size === 0) return;
+    const pendingDeltas = new Map(pendingMessageDeltasRef.current);
+    pendingMessageDeltasRef.current.clear();
+    if (!mountedRef.current || pendingDeltas.size === 0) return;
 
     setSessions((currentSessions) => currentSessions.map((session) => {
       let changed = false;
       const messages = session.messages.map((message) => {
-        const delta = pendingText.get(message.id);
+        const delta = pendingDeltas.get(message.id);
         if (delta === undefined) return message;
+        if (!delta.text && !delta.reasoningContent) return message;
         changed = true;
-        return { ...message, content: `${message.content}${delta}` };
+        return {
+          ...message,
+          content: `${message.content}${delta.text}`,
+          reasoningContent: `${message.reasoningContent}${delta.reasoningContent}`
+        };
       });
       return changed ? { ...session, updatedAt: Date.now(), messages } : session;
     }));
@@ -180,7 +252,7 @@ export function useChatSession(): ChatSessionController {
   const markTurnFailed = useCallback((turnId: string, message: string) => {
     const activeTurn = activeTurnsByIdRef.current.get(turnId);
     if (!activeTurn) return;
-    flushPendingText();
+    flushPendingDeltas();
     activeTurnsByIdRef.current.delete(turnId);
     if (turnIdBySessionIdRef.current.get(activeTurn.sessionId) === turnId) {
       turnIdBySessionIdRef.current.delete(activeTurn.sessionId);
@@ -202,7 +274,7 @@ export function useChatSession(): ChatSessionController {
       ...currentStates,
       [activeTurn.sessionId]: 'error'
     }));
-  }, [flushPendingText]);
+  }, [flushPendingDeltas]);
 
   const handleLocalChatEvent = useCallback((event: LocalChatEvent) => {
     const activeTurn = activeTurnsByIdRef.current.get(event.turnId);
@@ -213,10 +285,31 @@ export function useChatSession(): ChatSessionController {
     }
 
     if (event.type === 'textDelta') {
-      const currentText = pendingTextByMessageIdRef.current.get(event.assistantMessageId) ?? '';
-      pendingTextByMessageIdRef.current.set(event.assistantMessageId, `${currentText}${event.text}`);
-      if (textFlushFrameRef.current === null) {
-        textFlushFrameRef.current = window.requestAnimationFrame(flushPendingText);
+      const currentDeltas = pendingMessageDeltasRef.current.get(event.assistantMessageId) ?? {
+        text: '',
+        reasoningContent: ''
+      };
+      pendingMessageDeltasRef.current.set(event.assistantMessageId, {
+        ...currentDeltas,
+        text: `${currentDeltas.text}${event.text}`
+      });
+      if (messageFlushFrameRef.current === null) {
+        messageFlushFrameRef.current = window.requestAnimationFrame(flushPendingDeltas);
+      }
+      return;
+    }
+
+    if (event.type === 'reasoningDelta') {
+      const currentDeltas = pendingMessageDeltasRef.current.get(event.assistantMessageId) ?? {
+        text: '',
+        reasoningContent: ''
+      };
+      pendingMessageDeltasRef.current.set(event.assistantMessageId, {
+        ...currentDeltas,
+        reasoningContent: `${currentDeltas.reasoningContent}${event.text}`
+      });
+      if (messageFlushFrameRef.current === null) {
+        messageFlushFrameRef.current = window.requestAnimationFrame(flushPendingDeltas);
       }
       return;
     }
@@ -250,7 +343,13 @@ export function useChatSession(): ChatSessionController {
       return;
     }
 
-    flushPendingText();
+    if (event.type === 'watchdogTerminated') {
+      markTurnFailed(event.turnId, 'The local model stopped responding before completing this reply.');
+      void refreshRuntimeState();
+      return;
+    }
+
+    flushPendingDeltas();
     activeTurnsByIdRef.current.delete(event.turnId);
     if (turnIdBySessionIdRef.current.get(event.sessionId) === event.turnId) {
       turnIdBySessionIdRef.current.delete(event.sessionId);
@@ -271,28 +370,28 @@ export function useChatSession(): ChatSessionController {
       ...currentStates,
       [event.sessionId]: 'idle'
     }));
-  }, [flushPendingText, markTurnFailed, refreshRuntimeState]);
+  }, [flushPendingDeltas, markTurnFailed, refreshRuntimeState]);
 
   useEffect(() => {
     mountedRef.current = true;
     const removeLocalChatEventListener = window.tokiie.onLocalChatEvent(handleLocalChatEvent);
-    void refreshRuntimeState();
+    void Promise.all([refreshRuntimeState(), loadWorkspace()]);
     return () => {
       mountedRef.current = false;
       removeLocalChatEventListener();
-      if (textFlushFrameRef.current !== null) {
-        window.cancelAnimationFrame(textFlushFrameRef.current);
+      if (messageFlushFrameRef.current !== null) {
+        window.cancelAnimationFrame(messageFlushFrameRef.current);
       }
       [...activeTurnsByIdRef.current.keys()].forEach((turnId) => {
         void window.tokiie.cancelLocalChatTurn(turnId).catch(() => undefined);
       });
       activeTurnsByIdRef.current.clear();
       turnIdBySessionIdRef.current.clear();
-      pendingTextByMessageIdRef.current.clear();
+      pendingMessageDeltasRef.current.clear();
       copyTimersRef.current.forEach((timer) => clearTimeout(timer));
       copyTimersRef.current = [];
     };
-  }, [handleLocalChatEvent, refreshRuntimeState]);
+  }, [handleLocalChatEvent, loadWorkspace, refreshRuntimeState]);
 
   const openSessions = useMemo(
     () => openSessionIds.flatMap((id) => {
@@ -302,19 +401,14 @@ export function useChatSession(): ChatSessionController {
     [openSessionIds, sessions]
   );
   const activeSession = sessions.find((session) => session.id === activeSessionId) ?? openSessions[0];
-  const safeActiveSession = activeSession ?? createBlankSession('fallback', FIXTURE_NOW);
+  const safeActiveSession = activeSession ?? FALLBACK_SESSION;
   const summaries = useMemo(
     () => sessions.filter((session) => session.messages.length > 0).map(summarizeSession),
     [sessions]
   );
-  const historyGroups = useMemo(() => groupHistory(summaries, FIXTURE_NOW), [summaries]);
-  const historyResults = useMemo(() => searchHistory(summaries, historyQuery), [historyQuery, summaries]);
-  const earlierPageData = useMemo(
-    () => paginateEarlier(summaries, FIXTURE_NOW, earlierPage, EARLIER_PAGE_SIZE),
-    [earlierPage, summaries]
-  );
-  const modelState = modelStateForRuntime(runtimeState);
-  const selectedModel = runtimeState.status === 'ready' && runtimeState.model
+  const historyGroups = useMemo(() => groupHistory(summaries, Date.now()), [summaries]);
+  const modelState = workspaceError ? 'error' : modelStateForRuntime(runtimeState);
+  const selectedModel = workspaceIsReady && runtimeState.status === 'ready' && runtimeState.model
     ? {
         id: runtimeState.model.id,
         label: runtimeState.model.label,
@@ -333,57 +427,34 @@ export function useChatSession(): ChatSessionController {
 
   const openHistory = useCallback(() => {
     setHistoryMode('browsing');
-    setHistoryQuery('');
-    setEarlierPage(0);
   }, []);
 
   const closeHistory = useCallback(() => setHistoryMode('closed'), []);
 
-  const updateHistoryQuery = useCallback((query: string) => {
-    setHistoryQuery(query);
-    setEarlierPage(0);
-    setHistoryMode(query.trim() ? 'searching' : 'browsing');
-  }, []);
-
   const selectSession = useCallback((sessionId: string) => {
-    setOpenSessionIds((currentIds) => currentIds.includes(sessionId) ? currentIds : [...currentIds, sessionId]);
-    setActiveSessionId(sessionId);
     setHistoryMode('closed');
-  }, []);
+    void window.tokiie.openLocalChatSession(sessionId)
+      .then(applyWorkspace)
+      .catch(handleWorkspaceError);
+  }, [applyWorkspace, handleWorkspaceError]);
 
   const createNewChat = useCallback(() => {
-    const session = createBlankSession(makeId('new'), Date.now());
-    setSessions((currentSessions) => [...currentSessions, session]);
-    setOpenSessionIds((currentIds) => [...currentIds, session.id]);
-    setActiveSessionId(session.id);
     setHistoryMode('closed');
-  }, []);
+    void window.tokiie.createLocalChatSession()
+      .then(applyWorkspace)
+      .catch(handleWorkspaceError);
+  }, [applyWorkspace, handleWorkspaceError]);
 
   const closeSession = useCallback((sessionId: string) => {
     cancelTurnForSession(sessionId);
-    const nextOpenSessionIds = openSessionIds.filter((id) => id !== sessionId);
-    const replacement = nextOpenSessionIds.length === 0 ? createBlankSession(makeId('new'), Date.now()) : null;
-    const resolvedOpenSessionIds = replacement ? [replacement.id] : nextOpenSessionIds;
-    const nextActiveSessionId = sessionId === activeSessionId
-      ? resolvedOpenSessionIds[resolvedOpenSessionIds.length - 1]
-      : activeSessionId;
-
-    setSessions((currentSessions) => {
-      const remainingSessions = currentSessions.filter((session) => session.id !== sessionId);
-      return replacement ? [...remainingSessions, replacement] : remainingSessions;
-    });
-    setOpenSessionIds(resolvedOpenSessionIds);
-    setActiveSessionId(nextActiveSessionId);
-    setRequestStateBySessionId((currentStates) => {
-      const nextStates = { ...currentStates };
-      delete nextStates[sessionId];
-      return nextStates;
-    });
-  }, [activeSessionId, cancelTurnForSession, openSessionIds]);
+    void window.tokiie.closeLocalChatSession(sessionId)
+      .then(applyWorkspace)
+      .catch(handleWorkspaceError);
+  }, [applyWorkspace, cancelTurnForSession, handleWorkspaceError]);
 
   const sendMessage = useCallback((content: string) => {
     const trimmedContent = content.trim();
-    if (!trimmedContent || !selectedModel) return;
+    if (!trimmedContent || !selectedModel || !workspaceIsReady) return;
 
     const sessionId = safeActiveSession.id;
     const createdAt = Date.now();
@@ -393,6 +464,7 @@ export function useChatSession(): ChatSessionController {
       id: makeId('user'),
       role: 'user',
       content: trimmedContent,
+      reasoningContent: '',
       createdAt,
       durationLabel: null,
       status: 'complete',
@@ -402,6 +474,7 @@ export function useChatSession(): ChatSessionController {
       id: assistantMessageId,
       role: 'assistant',
       content: '',
+      reasoningContent: '',
       createdAt,
       durationLabel: null,
       status: 'streaming',
@@ -410,8 +483,10 @@ export function useChatSession(): ChatSessionController {
     const request: LocalChatTurnRequest = {
       turnId,
       sessionId,
+      userMessageId: userMessage.id,
       assistantMessageId,
       modelId: selectedModel.id,
+      createdAt,
       messages: [...safeActiveSession.messages, userMessage]
         .filter((message) => message.status !== 'error' && message.content.trim().length > 0)
         .map((message) => ({ role: message.role, content: message.content }))
@@ -422,7 +497,7 @@ export function useChatSession(): ChatSessionController {
     setSessions((currentSessions) => currentSessions.map((session) => session.id === sessionId
       ? {
           ...session,
-          title: session.messages.length === 0 ? trimmedContent : session.title,
+          title: session.messages.length === 0 ? createLocalChatSessionTitle(trimmedContent) : session.title,
           updatedAt: createdAt,
           messages: [...session.messages, userMessage, assistantMessage]
         }
@@ -433,7 +508,7 @@ export function useChatSession(): ChatSessionController {
       markTurnFailed(turnId, describeError(error));
       void refreshRuntimeState();
     });
-  }, [markTurnFailed, refreshRuntimeState, safeActiveSession, selectedModel]);
+  }, [markTurnFailed, refreshRuntimeState, safeActiveSession, selectedModel, workspaceIsReady]);
 
   const stopStreaming = useCallback(() => {
     cancelTurnForSession(safeActiveSession.id);
@@ -462,19 +537,12 @@ export function useChatSession(): ChatSessionController {
     activeSessionId: safeActiveSession.id,
     requestState: requestStateBySessionId[safeActiveSession.id] ?? 'idle',
     historyMode,
-    historyQuery,
     historyGroups,
-    historyResults,
-    earlierPage,
-    earlierPageItems: earlierPageData.items,
-    hasEarlierPage: earlierPageData.hasNextPage,
     modelState,
     selectedModel,
     copyStateByMessageId,
     openHistory,
     closeHistory,
-    setHistoryQuery: updateHistoryQuery,
-    setEarlierPage,
     selectSession,
     createNewChat,
     closeSession,

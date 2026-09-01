@@ -1,6 +1,7 @@
 /** One normalized payload parsed from an OpenAI-compatible chat completion stream. */
 export type ParsedChatStreamEvent =
   | { type: 'text'; text: string }
+  | { type: 'reasoning'; text: string }
   | { type: 'usage'; inputTokens: number | null; outputTokens: number | null }
   | { type: 'completed' }
   | { type: 'error'; message: string };
@@ -73,10 +74,14 @@ export class OpenAiChatSseParser {
     const choices = decoded.choices;
     if (Array.isArray(choices)) {
       for (const choice of choices) {
-        const delta = readRecord(choice)?.delta;
-        const text = readString(readRecord(delta)?.content);
+        const delta = readRecord(readRecord(choice)?.delta);
+        const text = readString(delta?.content);
         if (text) {
           events.push({ type: 'text', text });
+        }
+        const reasoning = readString(delta?.reasoning_content);
+        if (reasoning) {
+          events.push({ type: 'reasoning', text: reasoning });
         }
       }
     }

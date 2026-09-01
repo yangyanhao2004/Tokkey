@@ -472,10 +472,13 @@ const sqliteAvailable = await import('node:sqlite').then(
 );
 const skipWithoutSqlite = sqliteAvailable ? false : 'node:sqlite is unavailable on this runtime';
 
-test('the store round-trips a profile through the shared schema', { skip: skipWithoutSqlite }, async () => {
+test('the store round-trips a profile through Tokiie local timestamp storage', { skip: skipWithoutSqlite }, async () => {
   const { SqliteModelProfileStore } = await import('../dist/main/models/ModelProfileStore.js');
+  const { localTimestampForEpochMilliseconds } = await import('../dist/main/storage/LocalTimestamp.js');
+  const { DatabaseSync } = await import('node:sqlite');
   const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-profiles-'));
-  const store = new SqliteModelProfileStore({ databasePath: path.join(directory, 'amis_wifi.db') });
+  const databasePath = path.join(directory, 'tokiie.db');
+  const store = new SqliteModelProfileStore({ databasePath });
   try {
     const profile = {
       id: CARD.id,
@@ -494,11 +497,142 @@ test('the store round-trips a profile through the shared schema', { skip: skipWi
 
     assert.equal(await store.find(profile.id), null);
     await store.save(profile);
+    store.close();
+
+    const expected = localTimestampForEpochMilliseconds(profile.createdAt * 1_000);
+    const database = new DatabaseSync(databasePath);
+    try {
+      const row = database.prepare(`
+        SELECT created_at, created_at_epoch_ms, created_at_time_zone, typeof(created_at) AS created_at_type
+          FROM model_profiles WHERE id = ?`).get(profile.id);
+      assert.deepEqual({ ...row }, {
+        created_at: expected.localDateTime,
+        created_at_epoch_ms: profile.createdAt * 1_000,
+        created_at_time_zone: expected.timeZone,
+        created_at_type: 'text'
+      });
+    } finally {
+      database.close();
+    }
+
     assert.deepEqual(await store.find(profile.id), profile);
 
     // A second save updates the same row rather than colliding on the key.
     await store.save({ ...profile, name: 'renamed' });
     assert.equal((await store.find(profile.id)).name, 'renamed');
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('the store leaves Amis-Wifi profiles isolated from Tokiie storage', { skip: skipWithoutSqlite }, async () => {
+  const { SqliteModelProfileStore } = await import('../dist/main/models/ModelProfileStore.js');
+  const homeDirectory = mkdtempSync(path.join(tmpdir(), 'tokiie-profile-isolation-'));
+  const legacyDatabasePath = path.join(homeDirectory, '.amiswifi', 'dbs', 'amis_wifi.db');
+  const legacyStore = new SqliteModelProfileStore({ databasePath: legacyDatabasePath });
+  let tokiieStore = null;
+  let legacyVerificationStore = null;
+  const profile = {
+    id: CARD.id,
+    name: 'Legacy profile',
+    provider: 'custom',
+    apiUrl: 'https://api.onetokens.net',
+    apiKey: 'legacy-key',
+    modelName: 'gpt-5.6-terra',
+    type: 'cloud',
+    supportedApiFormats: ['AMIS_GATEWAY_MANAGED'],
+    litellmLinks: [{ modelID: 'legacy-route', apiFormat: 'AMIS_GATEWAY_MANAGED', modelName: ROUTE_NAME }],
+    createdAt: 1_787_000_000
+  };
+
+  try {
+    await legacyStore.save(profile);
+    legacyStore.close();
+
+    tokiieStore = new SqliteModelProfileStore({ homeDirectory });
+    assert.equal(await tokiieStore.find(profile.id), null);
+
+    legacyVerificationStore = new SqliteModelProfileStore({ databasePath: legacyDatabasePath });
+    assert.deepEqual(await legacyVerificationStore.find(profile.id), profile);
+  } finally {
+    legacyStore.close();
+    tokiieStore?.close();
+    legacyVerificationStore?.close();
+    rmSync(homeDirectory, { recursive: true, force: true });
+  }
+});
+
+test('the store upgrades legacy Unix-second profile timestamps to local storage', { skip: skipWithoutSqlite }, async () => {
+  const { SqliteModelProfileStore } = await import('../dist/main/models/ModelProfileStore.js');
+  const { localTimestampForEpochMilliseconds } = await import('../dist/main/storage/LocalTimestamp.js');
+  const { DatabaseSync } = await import('node:sqlite');
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-profile-time-migration-'));
+  const databasePath = path.join(directory, 'tokiie.db');
+  const profile = {
+    id: 'legacy-profile',
+    name: 'Legacy profile',
+    provider: 'custom',
+    apiUrl: 'https://api.onetokens.net',
+    apiKey: 'legacy-key',
+    modelName: 'gpt-5.6-terra',
+    type: 'cloud',
+    supportedApiFormats: ['AMIS_GATEWAY_MANAGED'],
+    litellmLinks: [{ modelID: 'legacy-route', apiFormat: 'AMIS_GATEWAY_MANAGED', modelName: ROUTE_NAME }],
+    createdAt: 1_787_000_000.5
+  };
+  const database = new DatabaseSync(databasePath);
+  database.exec(`
+    CREATE TABLE model_profiles (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      api_url TEXT NOT NULL,
+      api_key TEXT,
+      model_name TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'cloud',
+      supported_api_formats TEXT NOT NULL DEFAULT 'openai_chat',
+      litellm_links TEXT NOT NULL DEFAULT '[]',
+      created_at REAL NOT NULL
+    )`);
+  database.prepare(`
+    INSERT INTO model_profiles
+      (id, name, provider, api_url, api_key, model_name, type, supported_api_formats, litellm_links, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(
+      profile.id,
+      profile.name,
+      profile.provider,
+      profile.apiUrl,
+      profile.apiKey,
+      profile.modelName,
+      profile.type,
+      profile.supportedApiFormats.join(','),
+      JSON.stringify(profile.litellmLinks),
+      profile.createdAt
+    );
+  database.close();
+
+  const store = new SqliteModelProfileStore({ databasePath });
+  try {
+    assert.deepEqual(await store.find(profile.id), profile);
+    store.close();
+
+    const expected = localTimestampForEpochMilliseconds(profile.createdAt * 1_000);
+    const migratedDatabase = new DatabaseSync(databasePath);
+    try {
+      const row = migratedDatabase.prepare(`
+        SELECT created_at, created_at_epoch_ms, created_at_time_zone, typeof(created_at) AS created_at_type
+          FROM model_profiles WHERE id = ?`).get(profile.id);
+      assert.deepEqual({ ...row }, {
+        created_at: expected.localDateTime,
+        created_at_epoch_ms: profile.createdAt * 1_000,
+        created_at_time_zone: expected.timeZone,
+        created_at_type: 'text'
+      });
+    } finally {
+      migratedDatabase.close();
+    }
   } finally {
     store.close();
     rmSync(directory, { recursive: true, force: true });
