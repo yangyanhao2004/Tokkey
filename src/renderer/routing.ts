@@ -7,7 +7,7 @@
 import { DEFAULT_NAV_ITEM_ID, type NavItemId } from './navigation';
 
 /** A sub-page: reachable from a nav page, but with no sidebar row of its own. */
-export type SubRouteId = 'add-model' | 'discover-skills';
+export type SubRouteId = 'add-model' | 'discover-skills' | 'sign-in';
 
 export type RouteId = NavItemId | SubRouteId;
 
@@ -17,7 +17,8 @@ export type RouteId = NavItemId | SubRouteId;
  */
 const NAV_ITEM_BY_SUB_ROUTE: Record<SubRouteId, NavItemId> = {
   'add-model': 'tokiie',
-  'discover-skills': 'agent-hub'
+  'discover-skills': 'agent-hub',
+  'sign-in': 'tokiie'
 };
 
 /** The sidebar row a route belongs to. Nav routes are their own row. */

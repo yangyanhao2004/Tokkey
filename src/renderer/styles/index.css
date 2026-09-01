@@ -143,6 +143,12 @@
   --color-field-bg: #f1f1ef;
   --color-field-placeholder: #94948f;
 
+  /* Account sign-in controls, carried over from the existing account pane. */
+  --color-account-icon: #2a2a28;
+  --color-account-heading: #171716;
+  --color-account-control: #242422;
+  --color-account-control-border: #dfdfdc;
+
   /* Router page (Figma 194:3906). */
   /* Recessed row inside the Local/Cloud model summary cards, and the fill a
      cloud model card takes once it is the selected one. */

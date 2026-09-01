@@ -11,6 +11,8 @@ import { RouterPage } from './pages/RouterPage';
 import { TokiiePage } from './pages/TokiiePage';
 import { ChatPage } from './pages/ChatPage';
 import { UnbuiltPage } from './pages/UnbuiltPage';
+import { SignInPage } from './pages/SignInPage';
+import { AccountProvider, useAccount } from './components/AccountProvider';
 
 /**
  * Pages that exist today. A nav row missing from here still navigates, it just
@@ -22,7 +24,8 @@ const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
   'agent-hub': AgentHubPage,
   chat: ChatPage,
   'add-model': AddModelPage,
-  'discover-skills': DiscoverSkillsPage
+  'discover-skills': DiscoverSkillsPage,
+  'sign-in': SignInPage
 };
 
 /**
@@ -31,8 +34,10 @@ const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
  */
 function AppFrame() {
   const { route, navigate } = useNavigation();
+  const { state: accountState } = useAccount();
   const ActivePage = PAGE_BY_ROUTE[route];
   const isChatActive = route === 'chat';
+  const isAccountPaneOpen = route === 'sign-in';
 
   return (
     <div
@@ -40,9 +45,11 @@ function AppFrame() {
       data-theme={isChatActive ? 'chat' : 'light'}
     >
       <Sidebar
-        activeItemId={navItemIdForRoute(route)}
+        activeItemId={isAccountPaneOpen ? undefined : navItemIdForRoute(route)}
         isDarkTheme={isChatActive}
+        accountProfile={accountState.profile}
         onSelect={(id: NavItemId) => navigate(id)}
+        onAccountSelect={() => navigate('sign-in')}
       />
       {ActivePage ? <ActivePage /> : <UnbuiltPage navItemId={navItemIdForRoute(route)} />}
     </div>
@@ -56,9 +63,11 @@ function AppFrame() {
 export function App() {
   return (
     <NavigationProvider>
-      <AgentDetectionProvider>
-        <AppFrame />
-      </AgentDetectionProvider>
+      <AccountProvider>
+        <AgentDetectionProvider>
+          <AppFrame />
+        </AgentDetectionProvider>
+      </AccountProvider>
     </NavigationProvider>
   );
 }
