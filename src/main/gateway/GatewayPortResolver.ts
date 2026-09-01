@@ -23,17 +23,17 @@ export interface GatewayPortResolverOptions {
  * The preferred port is reclaimed when an orphaned gateway from a previous app
  * launch still holds it. A port owned by an unrelated process is left alone and
  * a kernel-assigned free port is used instead, so an unrelated local service
- * never gets killed and the launch never fails just because 4000 is taken.
+ * never gets killed and the launch never fails just because 4033 is taken.
  *
  * "Orphan of a previous launch" is matched on the interpreter path, not on the
- * module name alone. The Amis-Wifi desktop app ships this same gateway module
- * and defaults to this same port, so a name-only check would let this app
- * terminate a running Amis-Wifi helper. Only a process running *this* app's
+ * module name alone. The Amis-Wifi desktop app ships this same gateway module,
+ * so a name-only check would let this app terminate a running Amis-Wifi helper
+ * that happened to land on this port. Only a process running *this* app's
  * interpreter can be ours.
  */
 export class GatewayPortResolver {
   /** Where the gateway listens unless something else already holds the port. */
-  static readonly DEFAULT_PORT = 4000;
+  static readonly DEFAULT_PORT = 4033;
 
   private readonly preferredPort: number;
   private readonly findListener: (port: number) => PortListener | null;

@@ -93,11 +93,11 @@ npm run gateway:test           # run the Python test suite
   only if `/health/liveness` reports that same instance id and a matching
   `runtime_protocol_version`, so an orphan from a previous launch is never
   mistaken for the current gateway.
-- Port 4000 is preferred. An orphan left by a previous launch of *this* app is
+- Port 4033 is preferred. An orphan left by a previous launch of *this* app is
   terminated and the port reclaimed; a port held by any other process is left
   alone and a free port is used instead. Ownership is matched on the interpreter
   path, because the Amis-Wifi desktop app runs the same `amis_gateway.main`
-  module on the same default port and must never be killed by this app.
+  module and must never be killed by this app.
 - An unexpected exit is relaunched with exponential backoff, capped at five
   consecutive attempts. Quitting the app stops the gateway.
 

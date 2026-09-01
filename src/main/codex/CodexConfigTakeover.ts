@@ -63,7 +63,7 @@ export class CodexConfigTakeover {
   /**
    * Backs up `config.toml` and rewrites it to serve models from the gateway.
    *
-   * @param gatewayBaseUrl the running gateway's base URL, e.g. `http://127.0.0.1:4000`
+   * @param gatewayBaseUrl the running gateway's base URL, e.g. `http://127.0.0.1:4033`
    * @param catalogPath the generated catalog to point Codex at, or null to
    *   leave whatever catalog the user had configured in place
    * @returns whether the file was taken over

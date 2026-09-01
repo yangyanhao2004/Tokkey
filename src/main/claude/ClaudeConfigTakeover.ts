@@ -58,7 +58,7 @@ export class ClaudeConfigTakeover {
   /**
    * Backs up `settings.json` and rewrites it to send Claude to the gateway.
    *
-   * @param gatewayBaseUrl the running gateway's base URL, e.g. `http://127.0.0.1:4000`
+   * @param gatewayBaseUrl the running gateway's base URL, e.g. `http://127.0.0.1:4033`
    * @param selection the models to restrict Claude Code to, or null to leave
    *   the user's own model choice in place
    * @returns whether the file was taken over

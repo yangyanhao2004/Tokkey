@@ -14,7 +14,7 @@ def parse_args() -> argparse.Namespace:
     """Parse the intentionally small process-launch contract owned by Swift."""
     parser = argparse.ArgumentParser(description="Run the local Tokiie LiteLLM SDK gateway.")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=4000)
+    parser.add_argument("--port", type=int, default=4033)
     return parser.parse_args()
 
 

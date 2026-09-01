@@ -108,7 +108,7 @@ export class ClaudeDesktopConfigLibrary {
    * no models cannot be signed into — and taking the configLibrary over to
    * produce that failure is worse than leaving Desktop as the user had it.
    *
-   * @param gatewayBaseUrl the running gateway's base URL, e.g. `http://127.0.0.1:4000`
+   * @param gatewayBaseUrl the running gateway's base URL, e.g. `http://127.0.0.1:4033`
    * @param models the models to offer in the Desktop picker, default first
    * @returns whether the configLibrary was taken over
    */
