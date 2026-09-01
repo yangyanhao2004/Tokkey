@@ -11,6 +11,14 @@ class PreloadBridge {
   expose(): void {
     const api: TokiieApi = {
       getAppInfo: () => ipcRenderer.invoke('app:get-info'),
+      getAccountState: () => ipcRenderer.invoke('account:get-state'),
+      requestEmailVerificationCode: (email) =>
+        ipcRenderer.invoke('account:request-email-code', email),
+      verifyEmailSignIn: (email, code) =>
+        ipcRenderer.invoke('account:verify-email', email, code),
+      signInWithGoogle: () => ipcRenderer.invoke('account:sign-in-google'),
+      cancelGoogleSignIn: () => ipcRenderer.invoke('account:cancel-google'),
+      signOutAccount: () => ipcRenderer.invoke('account:sign-out'),
       getHostSnapshot: () => ipcRenderer.invoke('host:snapshot'),
       detectAgents: () => ipcRenderer.invoke('agents:detect'),
       getInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),

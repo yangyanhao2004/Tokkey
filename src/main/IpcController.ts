@@ -62,11 +62,14 @@ import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import HostSnapshotService from './host/HostSnapshotService';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
+import AccountRuntime from './account/AccountRuntime';
+import AccountService from './account/AccountService';
 
 type IpcHandler = (...args: unknown[]) => unknown;
 
 /** Collaborators the controller builds itself unless a caller supplies one. */
 export interface IpcControllerOptions {
+  accountService?: AccountService;
   skillCatalogScanner?: LocalSkillCatalogScanner;
   skillDeployer?: SkillDeployer;
   discoverRepositories?: DiscoverRepositories;
@@ -110,12 +113,14 @@ export default class IpcController {
   private readonly chatSessionStore: ChatSessionStore;
   private readonly hostSnapshotService: HostSnapshotService;
   private readonly agentManager: AgentManager;
+  private readonly accountService: AccountService;
   private readonly cloudModelConnector: CloudModelConnector | null;
   private readonly codexGatewayIntegration: CodexGatewayIntegration | null;
   private readonly claudeGatewayIntegration: ClaudeGatewayIntegration | null;
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
   constructor(options: IpcControllerOptions = {}) {
+    this.accountService = options.accountService ?? AccountRuntime.create();
     this.agentManager = options.agentManager ?? new AgentManager();
     // One gate for both catalogs, so a departed agent disappears from each the
     // same way and the Agent Hub's greyed chips agree with what was scanned.
@@ -159,6 +164,17 @@ export default class IpcController {
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
+      'account:get-state': () => this.accountService.getState(),
+      'account:request-email-code': (email: unknown) =>
+        this.accountService.requestEmailCode(this.requireString(email, 'Email address')),
+      'account:verify-email': (email: unknown, code: unknown) =>
+        this.accountService.verifyEmail(
+          this.requireString(email, 'Email address'),
+          this.requireString(code, 'Verification code')
+        ),
+      'account:sign-in-google': () => this.accountService.signInWithGoogle(),
+      'account:cancel-google': () => this.accountService.cancelGoogleSignIn(),
+      'account:sign-out': () => this.accountService.signOut(),
       'host:snapshot': () => this.getHostSnapshot(),
       'agents:detect': () => this.detectAgents(),
       'mcps:list-installed': () => this.scanInstalledMcps(),
@@ -239,6 +255,11 @@ export default class IpcController {
   /** Connects native Electron downloads after app.whenReady(). */
   attachModelDownloadSession(): void {
     this.localModelManager.attachDownloadSession();
+  }
+
+  /** Closes any temporary OAuth listener when its owning window/app disappears. */
+  cancelAccountSignIn(): void {
+    this.accountService.cancelGoogleSignIn();
   }
 
   /** Registers every handler on ipcMain. Call once, before any window opens. */

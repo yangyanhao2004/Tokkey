@@ -5,6 +5,7 @@ import {
   type SidebarNavSection
 } from '../navigation';
 import { NavItem } from './NavItem';
+import type { AccountProfile } from '../../shared/types';
 
 /**
  * Figma draws the traffic lights, but the window runs with `hiddenInset`, so
@@ -48,7 +49,7 @@ interface SidebarSectionProps {
   /** The first heading sits under the brand block, which already carries the space. */
   isFirst: boolean;
   isDarkTheme: boolean;
-  activeItemId: NavItemId;
+  activeItemId?: NavItemId;
   onSelect: (id: NavItemId) => void;
 }
 
@@ -75,26 +76,37 @@ function SidebarSection({ section, isFirst, isDarkTheme, activeItemId, onSelect 
   );
 }
 
-function SidebarAccount({ isDarkTheme }: { isDarkTheme: boolean }) {
+interface SidebarAccountProps {
+  isDarkTheme: boolean;
+  profile: AccountProfile | null;
+  onSelect: () => void;
+}
+
+/** Opens the account pane and projects only the renderer-safe public profile. */
+function SidebarAccount({ isDarkTheme, profile, onSelect }: SidebarAccountProps) {
   const accountTextClasses = isDarkTheme ? 'text-white' : 'text-text-primary';
   const accountSecondaryClasses = isDarkTheme ? 'text-white/60' : 'text-text-secondary';
+  const displayName = profile?.displayName?.trim() || 'Tokiie Account';
+  const secondaryText = profile?.email ?? 'Sign In';
+  const initial = profile ? displayName.charAt(0).toUpperCase() : 'IN';
 
   return (
     <div className="mt-auto pt-8">
       <button
         type="button"
+        onClick={onSelect}
         className={`flex min-h-[38px] w-full items-center gap-2 rounded-[10px] p-2 focus-visible:outline-2 focus-visible:outline-offset-1 ${isDarkTheme ? 'hover:bg-white/10 focus-visible:outline-white' : 'hover:bg-vibrant-tertiary/60 focus-visible:outline-text-primary'}`}
         data-testid="account-button"
       >
         <span className={`flex size-5 shrink-0 items-center justify-center rounded-full text-[7.143px] leading-none font-black tracking-[0.0857px] ${isDarkTheme ? 'border-[0.714px] border-white/20 bg-white/10 text-white' : 'border-[0.714px] border-black/14 bg-white/72 text-black'}`}>
-          IN
+          {initial}
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-[0.831px] text-left">
-          <span className={`text-[12px] leading-[14px] font-bold ${accountTextClasses}`}>
-            Tokiie Account
+          <span className={`truncate text-[12px] leading-[14px] font-bold ${accountTextClasses}`}>
+            {displayName}
           </span>
-          <span className={`text-[10px] leading-[12px] tracking-[0.0997px] ${accountSecondaryClasses}`}>
-            Sign In
+          <span className={`truncate text-[10px] leading-[12px] tracking-[0.0997px] ${accountSecondaryClasses}`}>
+            {secondaryText}
           </span>
         </span>
       </button>
@@ -103,13 +115,21 @@ function SidebarAccount({ isDarkTheme }: { isDarkTheme: boolean }) {
 }
 
 interface SidebarProps {
-  activeItemId: NavItemId;
+  activeItemId?: NavItemId;
   isDarkTheme: boolean;
+  accountProfile: AccountProfile | null;
   onSelect: (id: NavItemId) => void;
+  onAccountSelect: () => void;
 }
 
 /** The left navigation panel. Owns no state: the app decides what is selected. */
-export function Sidebar({ activeItemId, isDarkTheme, onSelect }: SidebarProps) {
+export function Sidebar({
+  activeItemId,
+  isDarkTheme,
+  accountProfile,
+  onSelect,
+  onAccountSelect
+}: SidebarProps) {
   const surfaceClasses = isDarkTheme ? 'bg-chat-sidebar' : 'bg-vibrant-quinary';
 
   return (
@@ -133,7 +153,11 @@ export function Sidebar({ activeItemId, isDarkTheme, onSelect }: SidebarProps) {
             />
           ))}
         </nav>
-        <SidebarAccount isDarkTheme={isDarkTheme} />
+        <SidebarAccount
+          isDarkTheme={isDarkTheme}
+          profile={accountProfile}
+          onSelect={onAccountSelect}
+        />
       </div>
     </aside>
   );

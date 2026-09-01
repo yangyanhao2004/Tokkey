@@ -160,6 +160,7 @@ export class TokiieApp {
    * remove stops answering the moment the gateway below it goes down.
    */
   onWillQuit(): void {
+    this.ipcController.cancelAccountSignIn();
     this.tokenHubRuntime.shutdownNow();
     this.codexGatewayIntegration.deactivate();
     this.claudeGatewayIntegration.deactivate();
@@ -269,6 +270,7 @@ export class TokiieApp {
       mainWindow.show();
     });
     mainWindow.on('closed', () => {
+      this.ipcController.cancelAccountSignIn();
       this.mainWindow = null;
     });
 

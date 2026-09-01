@@ -8,6 +8,37 @@ export interface AppInfo {
   platform: string;
 }
 
+/** Public account profile returned to the renderer after credentials are secured. */
+export interface AccountProfile {
+  id: number;
+  email: string;
+  displayName: string | null;
+  emailVerified: boolean;
+}
+
+/** Renderer-safe account state; authentication credentials never cross IPC. */
+export type AccountState =
+  | { status: 'signedOut'; profile: null }
+  | { status: 'authenticated'; profile: AccountProfile };
+
+/** Stable failure vocabulary used by every renderer-facing account operation. */
+export type AccountErrorCode =
+  | 'invalidEmail'
+  | 'invalidCode'
+  | 'rejected'
+  | 'unavailable'
+  | 'invalidResponse';
+
+export interface AccountOperationError {
+  code: AccountErrorCode;
+  message: string;
+}
+
+/** Structured IPC result keeps Electron from leaking internal error details. */
+export type AccountOperationResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: AccountOperationError };
+
 /** The coding agents Tokiie detects, each named after its executable. */
 export type CodingAgent = 'codex' | 'claude';
 
@@ -158,6 +189,12 @@ export interface HostSnapshot {
 /** Renderer-facing API exposed by the preload bridge. */
 export interface TokiieApi {
   getAppInfo(): Promise<AppInfo>;
+  getAccountState(): Promise<AccountOperationResult<AccountState>>;
+  requestEmailVerificationCode(email: string): Promise<AccountOperationResult<null>>;
+  verifyEmailSignIn(email: string, code: string): Promise<AccountOperationResult<AccountState>>;
+  signInWithGoogle(): Promise<AccountOperationResult<AccountState>>;
+  cancelGoogleSignIn(): Promise<void>;
+  signOutAccount(): Promise<AccountOperationResult<AccountState>>;
   getHostSnapshot(): Promise<HostSnapshot>;
   detectAgents(): Promise<AgentInstallation[]>;
   getInstalledMcps(): Promise<McpCatalogScan>;
