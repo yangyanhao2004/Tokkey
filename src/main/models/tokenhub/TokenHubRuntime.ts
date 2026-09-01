@@ -351,7 +351,7 @@ export class TokenHubRuntime {
       '--parallel', '1',
       '-ngl', '99',
       '-t', '2',
-      '-rea', 'off',
+      '-rea', 'on',
       '--no-mmap',
       '--cache-ram', '0',
       '-ub', '4096',
