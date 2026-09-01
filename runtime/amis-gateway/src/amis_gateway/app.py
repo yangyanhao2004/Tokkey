@@ -358,9 +358,8 @@ class ModelDiscoveryCatalog:
     management view and returns the endpoint and marker behind each route, which
     an inference caller has no business seeing.
 
-    Claude Code reads only `id` and the optional `display_name`, and filters out
-    any id that contains neither "claude" nor "anthropic", so the whole route set
-    is offered here and the client keeps what it recognizes. The remaining fields
+    Claude Code reads only `id` and the optional `display_name`, and imposes no
+    shape on the id, so the whole route set is offered here. The remaining fields
     are what an OpenAI-format client needs to parse the entry at all.
     """
 
@@ -468,6 +467,56 @@ class UnregisteredClaudeRoute:
             # model no provider has.
             return alias if alias[len(cls.PROVIDER_PREFIX):].startswith(cls.MODEL_PREFIX) else None
         return f"{cls.PROVIDER_PREFIX}{alias}" if alias.startswith(cls.MODEL_PREFIX) else None
+
+
+class PickerModelAlias:
+    """Undo the name Tokiie publishes cloud routes under in Claude's pickers.
+
+    Neither Claude surface will show a bare route name, so Tokiie publishes each
+    cloud route under an `anthropic.`-prefixed alias and the prefix comes back
+    off here, before the registry lookup.
+
+    The body behind the prefix is one of two things, because the two surfaces
+    accept different names. Claude Code takes any name under that prefix, so it
+    gets the route name whole. Claude Desktop additionally refuses any name
+    containing a rival vendor's fragment -- `gpt`, `openai`, `deepseek` and
+    dozens more -- which a route named for the model it fronts always carries,
+    so it gets the route's trailing id segment alone. Both are resolved here:
+    the whole name by an exact lookup, the suffix by matching the one route that
+    ends in it.
+
+    Distinct from `UnregisteredClaudeRoute.PROVIDER_PREFIX` despite the shared
+    word: that one is `anthropic/`, LiteLLM's provider selector, and it goes
+    *on* the way out to name an upstream. This one is `anthropic.`, a client-side
+    display convention, and it comes *off* the way in.
+    """
+
+    PREFIX = "anthropic."
+
+    @classmethod
+    def strip(cls, alias: str) -> str | None:
+        """Return the body behind a picker alias, or None for anything else."""
+        if not alias.startswith(cls.PREFIX):
+            return None
+        # A bare prefix names no route; treat it as a miss rather than looking
+        # the empty string up.
+        return alias[len(cls.PREFIX):] or None
+
+    @staticmethod
+    def resolve(body: str, routes: list[ModelRoute]) -> ModelRoute | None:
+        """Return the route an alias body names, or None when it names no single one.
+
+        An exact name wins outright. Otherwise the body is a route's trailing id
+        segment, and only an unambiguous match counts: two routes ending in the
+        same segment would make the alias name neither, and serving an arbitrary
+        one of them would send the turn to a provider the user did not pick.
+        """
+        for route in routes:
+            if route.model_name == body:
+                return route
+        suffix = f"-{body}"
+        matches = [route for route in routes if route.model_name.endswith(suffix)]
+        return matches[0] if len(matches) == 1 else None
 
 
 class AmisGatewayApplication:
@@ -748,10 +797,23 @@ class AmisGatewayApplication:
         The registry stays the only source of seeded routes; this just stops an
         unseeded Claude model from being refused locally. A `KeyError` still
         leaves here for every other alias, so the 404 path is unchanged.
+
+        Claude's pickers reject bare cloud route names, so Tokiie publishes them
+        under a `PickerModelAlias`. The prefix is stripped here so the real route
+        can be found in the registry — the route's own `litellm_params` still
+        carry the correct model identifier sent upstream.
         """
         try:
             return self._registry.resolve(alias)
         except KeyError:
+            # Retry under the picker alias before handing off to the Anthropic
+            # unregistered-route path, which would otherwise try to forward a
+            # cloud model name to Anthropic.
+            body = PickerModelAlias.strip(alias)
+            if body is not None:
+                aliased = PickerModelAlias.resolve(body, self._registry.list())
+                if aliased is not None:
+                    return aliased
             route = UnregisteredClaudeRoute.build(alias)
             if route is None:
                 raise

@@ -233,6 +233,87 @@ async def test_unseeded_claude_model_still_requires_the_caller_to_bring_a_key() 
     assert "claude-opus-6" in response.json()["error"]["message"]
 
 
+async def test_picker_alias_resolves_to_the_route_behind_it() -> None:
+    """Claude's pickers name a cloud route under a prefix the gateway takes off."""
+    captured: dict[str, Any] = {}
+
+    async def messages_call(**kwargs: Any) -> FakeResponse:
+        captured.update(kwargs)
+        return FakeResponse({"id": "msg"})
+
+    application = AmisGatewayApplication(messages_call=messages_call)
+    application._registry.create(model_payload())
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://gateway.test",
+    )
+
+    response = await client.post(
+        "/v1/messages",
+        headers=AUTH,
+        json={"model": "anthropic.agent-model", "messages": [], "max_tokens": 10},
+    )
+
+    assert response.status_code == 200
+    # The registered route answered — not the unregistered-Claude fallback, which
+    # would have sent an "anthropic/..." model to Anthropic with no api_base.
+    assert captured["model"] == "openai/upstream-model"
+    assert captured["api_base"] == "https://provider.example/v1"
+    await client.aclose()
+
+
+async def test_picker_alias_resolves_a_route_named_only_by_its_id_suffix() -> None:
+    """Claude Desktop refuses a vendor-named route, so it names one by its suffix."""
+    captured: dict[str, Any] = {}
+
+    async def messages_call(**kwargs: Any) -> FakeResponse:
+        captured.update(kwargs)
+        return FakeResponse({"id": "msg"})
+
+    application = AmisGatewayApplication(messages_call=messages_call)
+    suffixed = model_payload()
+    suffixed["model_name"] = "custom-gpt-5.6-terra-openai-c05442"
+    application._registry.create(suffixed)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://gateway.test",
+    )
+
+    response = await client.post(
+        "/v1/messages",
+        headers=AUTH,
+        json={"model": "anthropic.c05442", "messages": [], "max_tokens": 10},
+    )
+
+    assert response.status_code == 200
+    assert captured["model"] == "openai/upstream-model"
+    await client.aclose()
+
+
+async def test_picker_alias_refuses_a_suffix_two_routes_share() -> None:
+    """An ambiguous suffix names no route, rather than an arbitrary one of them."""
+    application = AmisGatewayApplication()
+    for provider in ("openai", "azure"):
+        route = model_payload()
+        route["model_name"] = f"custom-model-{provider}-c05442"
+        application._registry.create(route)
+    client = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=application.app),
+        base_url="http://gateway.test",
+    )
+
+    response = await client.post(
+        "/v1/messages",
+        headers=AUTH,
+        json={"model": "anthropic.c05442", "messages": [], "max_tokens": 10},
+    )
+
+    # Refused locally: serving either one would bill a provider the user's
+    # picker never named.
+    assert response.status_code == 404
+    await client.aclose()
+
+
 async def test_fallback_refuses_to_relay_a_non_anthropic_alias() -> None:
     """An unregistered alias cannot aim the caller's key at another provider."""
     for alias in ("openai/gpt-5", "gpt-5", "anthropic/gpt-5", "sonnet", "anthropic/"):

@@ -188,6 +188,9 @@ test('restoring without a takeover is a no-op', () => {
 /** The route name the one shipped cloud card derives; see `CloudModelCatalog`. */
 const CLOUD_ROUTE = 'custom-gpt-5.6-terra-openai-c05442';
 
+/** The name that route is published under in the pickers; see `ClaudeModelAlias`. */
+const CLOUD_ALIAS = `anthropic.${CLOUD_ROUTE}`;
+
 /** A gateway client answering with a fixed set of routes. */
 class FakeGatewayModelClient {
   constructor(routes) {
@@ -217,10 +220,12 @@ test('pins claude to the connected cloud model and offers the native ones beside
 
   const taken = JSON.parse(readFileSync(settingsPath, 'utf8'));
   assert.equal(taken.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:4173');
-  assert.equal(taken.model, CLOUD_ROUTE);
+  // The cloud route is pinned under the alias its picker row is built from —
+  // the bare route name would name nothing `availableModels` offers.
+  assert.equal(taken.model, CLOUD_ALIAS);
   assert.equal(taken.enforceAvailableModels, true);
   // The cloud model leads, and every Claude model the gateway routes follows.
-  assert.equal(taken.availableModels[0], CLOUD_ROUTE);
+  assert.equal(taken.availableModels[0], CLOUD_ALIAS);
   assert.ok(taken.availableModels.includes('claude-opus-5'));
   assert.ok(taken.availableModels.slice(1).every((model) => model.startsWith('claude-')));
 
@@ -267,7 +272,7 @@ test('a model connected mid-session reaches the picker, and the backup survives 
   assert.equal(await integration.syncSettings(), true);
 
   const synced = JSON.parse(readFileSync(settingsPath, 'utf8'));
-  assert.equal(synced.model, CLOUD_ROUTE);
+  assert.equal(synced.model, CLOUD_ALIAS);
   assert.equal(synced.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:4173');
   assert.deepEqual(synced.permissions.allow, ['Bash(npm run test)']);
   // The refresh rewrote the file, not the backup: quit still returns the original.
@@ -283,5 +288,111 @@ test('a sync without a takeover leaves the file untouched', async () => {
   assert.equal(await makeIntegration(home, [CLOUD_ROUTE]).syncSettings(), false);
 
   assert.equal(readFileSync(settingsPath, 'utf8'), USER_SETTINGS);
+  rmSync(home, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------------------
+// Claude Desktop configLibrary
+// ---------------------------------------------------------------------------
+
+/** Tokiie's own entry id; see `ClaudeDesktopConfigLibrary`. */
+const TOKIIE_ENTRY_ID = '00000000-0000-4000-8000-000000157211';
+
+/** The name the cloud route is published under in Desktop's picker. */
+const DESKTOP_ALIAS = 'anthropic.c05442';
+
+function configLibraryOf(home) {
+  return path.join(home, 'Library', 'Application Support', 'Claude-3p', 'configLibrary');
+}
+
+function readDesktopEntry(home) {
+  return JSON.parse(readFileSync(path.join(configLibraryOf(home), `${TOKIIE_ENTRY_ID}.json`), 'utf8'));
+}
+
+function readDesktopMeta(home) {
+  return JSON.parse(readFileSync(path.join(configLibraryOf(home), '_meta.json'), 'utf8'));
+}
+
+/** Seeds a configLibrary that another tool (cc-switch) already owns. */
+function writeForeignMeta(home, id) {
+  mkdirSync(configLibraryOf(home), { recursive: true });
+  const meta = { appliedId: id, entries: [{ id, name: 'cc-switch' }] };
+  writeFileSync(path.join(configLibraryOf(home), '_meta.json'), JSON.stringify(meta, null, 2));
+  return meta;
+}
+
+test('desktop is offered the cloud model alone, under a name its validator accepts', async () => {
+  const home = makeHome();
+  writeSettings(home, USER_SETTINGS);
+  const integration = makeIntegration(home, ['claude-opus-5', CLOUD_ROUTE]);
+
+  await integration.activate();
+
+  const entry = readDesktopEntry(home);
+  assert.equal(entry.inferenceGatewayBaseUrl, 'http://127.0.0.1:4173');
+  // One of Desktop's five credential kinds; anything else leaves the entry
+  // with no credential and sign-in fails outright.
+  assert.equal(entry.inferenceCredentialKind, 'static');
+  assert.equal(entry.inferenceGatewayAuthScheme, 'bearer');
+  // Only the cloud route: the native Claude routes carry no key, and Desktop's
+  // sign-in probe would send them the static gateway token and get a 401.
+  assert.deepEqual(entry.inferenceModels, [
+    { name: DESKTOP_ALIAS, labelOverride: 'gpt-5.6-terra', anthropicFamilyTier: 'opus' }
+  ]);
+
+  integration.deactivate();
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('desktop keeps its own config when no cloud model is connected', async () => {
+  const home = makeHome();
+  writeSettings(home, USER_SETTINGS);
+  const foreign = writeForeignMeta(home, '00000000-0000-4000-8000-000000157210');
+
+  await makeIntegration(home, ['claude-opus-5']).activate();
+
+  // A takeover with nothing to offer produces an entry Desktop cannot sign
+  // into, so the configLibrary is left exactly as the user had it.
+  assert.deepEqual(readDesktopMeta(home), foreign);
+  assert.equal(existsSync(path.join(configLibraryOf(home), `${TOKIIE_ENTRY_ID}.json`)), false);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('the meta index points at tokiie without unlisting another tool', async () => {
+  const home = makeHome();
+  writeSettings(home, USER_SETTINGS);
+  const foreignId = '00000000-0000-4000-8000-000000157210';
+  const foreign = writeForeignMeta(home, foreignId);
+  const integration = makeIntegration(home, [CLOUD_ROUTE]);
+
+  await integration.activate();
+
+  const meta = readDesktopMeta(home);
+  assert.equal(meta.appliedId, TOKIIE_ENTRY_ID);
+  assert.deepEqual(meta.entries.map((entry) => entry.id), [foreignId, TOKIIE_ENTRY_ID]);
+
+  // Quit hands the whole index back, and takes Tokiie's own entry with it.
+  integration.deactivate();
+  assert.deepEqual(readDesktopMeta(home), foreign);
+  assert.equal(existsSync(path.join(configLibraryOf(home), `${TOKIIE_ENTRY_ID}.json`)), false);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('a model connected mid-session reaches the desktop picker too', async () => {
+  const home = makeHome();
+  writeSettings(home, USER_SETTINGS);
+  const routes = [CLOUD_ROUTE];
+  const integration = makeIntegration(home, routes);
+  await integration.activate();
+
+  routes.length = 0;
+  routes.push(CLOUD_ROUTE, 'claude-opus-5');
+  await integration.syncSettings();
+
+  assert.deepEqual(
+    readDesktopEntry(home).inferenceModels.map((model) => model.name),
+    [DESKTOP_ALIAS]
+  );
+  integration.deactivate();
   rmSync(home, { recursive: true, force: true });
 });

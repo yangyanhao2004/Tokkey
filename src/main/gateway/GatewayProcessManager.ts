@@ -42,6 +42,15 @@ export class GatewayStartupError extends Error {
  */
 export class GatewayProcessManager {
   private static readonly STDERR_TAIL_LIMIT = 30;
+  /**
+   * Read/write deadline LiteLLM applies to every upstream call, in seconds.
+   *
+   * Without `REQUEST_TIMEOUT` in the environment LiteLLM falls back to 600s for
+   * chat completions, which a long reasoning or tool-using turn can outrun and
+   * surface to the client as a 408. Thirty minutes covers those turns while
+   * still bounding a genuinely hung upstream.
+   */
+  private static readonly UPSTREAM_REQUEST_TIMEOUT_SECONDS = 1800;
   private static readonly MAX_RESTART_ATTEMPTS = 5;
   private static readonly RESTART_BASE_SECONDS = 2;
   private static readonly RESTART_CAP_SECONDS = 60;
@@ -178,10 +187,13 @@ export class GatewayProcessManager {
    * startup: this is an offline-first loopback service, and that fetch would
    * otherwise stall boot whenever the network or a configured proxy is slow.
    * Bytecode writes are disabled because the packaged runtime lives inside a
-   * signed, read-only app bundle.
+   * signed, read-only app bundle. `REQUEST_TIMEOUT` raises LiteLLM's upstream
+   * deadline off its 600s default, and an inherited value wins so an operator
+   * can still tune it from the launching shell.
    */
   private gatewayEnvironment(): NodeJS.ProcessEnv {
     return {
+      REQUEST_TIMEOUT: String(GatewayProcessManager.UPSTREAM_REQUEST_TIMEOUT_SECONDS),
       ...process.env,
       LITELLM_LOCAL_MODEL_COST_MAP: 'True',
       PYTHONDONTWRITEBYTECODE: '1',

@@ -261,8 +261,42 @@ test('manager launches the interpreter with the gateway module and loopback flag
   assert.equal(launchOptions.env.AMIS_GATEWAY_MASTER_KEY, undefined);
   assert.equal(launchOptions.env.LITELLM_LOCAL_MODEL_COST_MAP, 'True');
   assert.equal(launchOptions.env.PYTHONDONTWRITEBYTECODE, '1');
+  assert.equal(launchOptions.env.REQUEST_TIMEOUT, '1800');
   assert.ok(launchOptions.env.AMIS_GATEWAY_INSTANCE_ID);
   manager.stop('test finished');
+});
+
+test('manager keeps an inherited REQUEST_TIMEOUT so an operator can tune it', async () => {
+  const child = new FakeChildProcess();
+  let launchOptions = null;
+  const inherited = process.env.REQUEST_TIMEOUT;
+  process.env.REQUEST_TIMEOUT = '120';
+  const manager = new GatewayProcessManager({
+    locator: new GatewayRuntimeLocator({
+      projectRoot: PROJECT_ROOT,
+      environment: {},
+      isExecutable: () => true
+    }),
+    portResolver: new GatewayPortResolver({ preferredPort: 4000, findListener: () => null }),
+    healthProbe: { isHealthy: async () => true },
+    spawnProcess: (executable, args, options) => {
+      launchOptions = options;
+      return child;
+    },
+    delay: async () => {}
+  });
+
+  try {
+    await manager.startIfNeeded();
+    assert.equal(launchOptions.env.REQUEST_TIMEOUT, '120');
+  } finally {
+    if (inherited === undefined) {
+      delete process.env.REQUEST_TIMEOUT;
+    } else {
+      process.env.REQUEST_TIMEOUT = inherited;
+    }
+    manager.stop('test finished');
+  }
 });
 
 test('manager reports the stderr tail when the gateway never becomes ready', async () => {
