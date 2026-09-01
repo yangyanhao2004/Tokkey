@@ -23,6 +23,7 @@ export interface McpConfigurationFileOperations {
 }
 
 /** Implements local reads and same-directory atomic replacements. */
+
 export class LocalMcpConfigurationFileOperations implements McpConfigurationFileOperations {
   async read(filePath: string): Promise<{ bytes: Uint8Array; mode: number } | null> {
     try {
