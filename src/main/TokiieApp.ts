@@ -9,7 +9,6 @@ import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
 import LocalChatTurnExecutor from './chat/LocalChatTurnExecutor';
-import LocalInferenceProcessManager from './local-inference/LocalInferenceProcessManager';
 import LocalModelManager from './models/LocalModelManager';
 import HubModelConnector from './models/HubModelConnector';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
@@ -31,7 +30,6 @@ export class TokiieApp {
   private readonly height: number;
   private readonly ipcController: IpcController;
   private readonly gatewayProcessManager: GatewayProcessManager;
-  private readonly localInferenceProcessManager: LocalInferenceProcessManager;
   private readonly localModelManager: LocalModelManager;
   private readonly localChatTurnExecutor: LocalChatTurnExecutor;
   private readonly cloudModelConnector: CloudModelConnector;
@@ -65,17 +63,6 @@ export class TokiieApp {
     this.gatewayProcessManager = new GatewayProcessManager({
       resourcesPath: app.isPackaged ? process.resourcesPath : undefined
     });
-    // Chat has its own local-only runtime. It deliberately is not registered
-    // with the generic gateway, which also owns cloud and Codex routes.
-    this.localInferenceProcessManager = new LocalInferenceProcessManager({
-      resourcesPath: app.isPackaged ? process.resourcesPath : undefined
-    });
-    this.localModelManager = new LocalModelManager({
-      localInference: this.localInferenceProcessManager
-    });
-    this.localChatTurnExecutor = new LocalChatTurnExecutor({
-      runtime: this.localInferenceProcessManager
-    });
     this.cloudModelConnector = CloudModelConnector.forGateway(this.gatewayProcessManager);
     this.codexNativeModelRegistrar = CodexNativeModelRegistrar.forGateway(this.gatewayProcessManager);
     this.claudeNativeModelRegistrar = ClaudeNativeModelRegistrar.forGateway(this.gatewayProcessManager);
@@ -92,13 +79,18 @@ export class TokiieApp {
       }),
       profileConnector: HubModelConnector.forGateway(this.gatewayProcessManager)
     });
+    this.localModelManager = new LocalModelManager({
+      localRuntime: this.tokenHubRuntime
+    });
+    this.localChatTurnExecutor = new LocalChatTurnExecutor({
+      runtime: this.tokenHubRuntime
+    });
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
       cloudModelConnector: this.cloudModelConnector,
       codexGatewayIntegration: this.codexGatewayIntegration,
       claudeGatewayIntegration: this.claudeGatewayIntegration,
       localModelManager: this.localModelManager,
-      localInferenceProcessManager: this.localInferenceProcessManager,
       localChatTurnExecutor: this.localChatTurnExecutor,
       tokenHubRuntime: this.tokenHubRuntime
     });
@@ -165,7 +157,6 @@ export class TokiieApp {
     this.codexGatewayIntegration.deactivate();
     this.claudeGatewayIntegration.deactivate();
     this.gatewayProcessManager.stop('application quit');
-    void this.localInferenceProcessManager.stop('application quit');
   }
 
   /**

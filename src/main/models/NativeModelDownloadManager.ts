@@ -10,7 +10,7 @@ import type {
   LocalModelRow
 } from '../../shared/types';
 import HostDiskProbe from '../host/HostDiskProbe';
-import type { LocalInferenceModel } from '../local-inference/LocalInferenceProcessManager';
+import type { LocalModelLaunchRequest } from './LocalModelRuntime';
 import DownloadedModelStore from './DownloadedModelStore';
 
 interface PersistedDownload {
@@ -38,7 +38,7 @@ interface RuntimeEntry {
 type ModelStateListener = () => void;
 
 /** Starts an app-owned local runtime for the downloaded model and returns its loopback endpoint. */
-export type LocalModelRuntimeStarter = (model: LocalInferenceModel) => Promise<string>;
+export type LocalModelRuntimeStarter = (model: LocalModelLaunchRequest) => Promise<string>;
 
 /** Owns Electron DownloadItems and projects them into model lifecycle rows. */
 export class NativeModelDownloadManager {
@@ -232,6 +232,7 @@ export class NativeModelDownloadManager {
       entry.endpoint = await startRuntime({
         id: descriptor.id,
         label: descriptor.name,
+        fileName: descriptor.fileName,
         filePath: this.store.fileFor(descriptor)
       });
       entry.state = 'deployed';

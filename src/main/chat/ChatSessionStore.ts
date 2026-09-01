@@ -55,10 +55,7 @@ CREATE TABLE IF NOT EXISTS "chat_messages" (
   "created_at_epoch_ms" INTEGER NOT NULL DEFAULT 0,
   "created_at_time_zone" TEXT NOT NULL DEFAULT '',
   "status" TEXT NOT NULL,
-  "duration_ms" INTEGER,
-  "input_tokens" INTEGER,
-  "output_tokens" INTEGER,
-  "context_window_tokens" INTEGER
+  "duration_ms" INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS "chat_turns" (
@@ -254,8 +251,8 @@ export class ChatSessionStore {
       database.prepare(`
         INSERT INTO "chat_messages"
           (id, session_id, turn_id, role, content, reasoning_content, created_at, created_at_epoch_ms, created_at_time_zone,
-           status, duration_ms, input_tokens, output_tokens, context_window_tokens)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)`)
+           status, duration_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`)
         .run(
           request.userMessageId,
           request.sessionId,
@@ -271,8 +268,8 @@ export class ChatSessionStore {
       database.prepare(`
         INSERT INTO "chat_messages"
           (id, session_id, turn_id, role, content, reasoning_content, created_at, created_at_epoch_ms, created_at_time_zone,
-           status, duration_ms, input_tokens, output_tokens, context_window_tokens)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL)`)
+           status, duration_ms)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`)
         .run(
           request.assistantMessageId,
           request.sessionId,
@@ -388,16 +385,13 @@ export class ChatSessionStore {
       const database = this.databaseOrThrow();
       database.prepare(`
         UPDATE "chat_messages"
-           SET content = ?, reasoning_content = ?, status = ?, duration_ms = ?, input_tokens = ?, output_tokens = ?, context_window_tokens = ?
+           SET content = ?, reasoning_content = ?, status = ?, duration_ms = ?
          WHERE id = ? AND session_id = ?`)
         .run(
           content,
           activeTurn.reasoningContent,
           messageStatus,
           durationMs,
-          hasUsage ? activeTurn.inputTokens : null,
-          hasUsage ? activeTurn.outputTokens : null,
-          hasUsage ? activeTurn.contextWindowTokens : null,
           activeTurn.request.assistantMessageId,
           activeTurn.request.sessionId
         );
@@ -575,10 +569,15 @@ export class ChatSessionStore {
   private decodeSession(row: Record<string, unknown>): LocalChatStoredSession {
     const sessionId = this.textValue(row.id);
     const rows = this.databaseOrThrow().prepare(`
-      SELECT id, role, content, reasoning_content, created_at_epoch_ms, status, duration_ms, input_tokens, output_tokens, context_window_tokens
-        FROM "chat_messages"
-       WHERE session_id = ?
-       ORDER BY created_at_epoch_ms ASC, rowid ASC`).all(sessionId) as Record<string, unknown>[];
+      SELECT messages.id, messages.role, messages.content, messages.reasoning_content,
+             messages.created_at_epoch_ms, messages.status, messages.duration_ms,
+             turns.input_tokens, turns.output_tokens, turns.context_window_tokens
+        FROM "chat_messages" AS messages
+        LEFT JOIN "chat_turns" AS turns
+          ON turns.assistant_message_id = messages.id
+         AND turns.session_id = messages.session_id
+       WHERE messages.session_id = ?
+       ORDER BY messages.created_at_epoch_ms ASC, messages.rowid ASC`).all(sessionId) as Record<string, unknown>[];
     const activeTextByAssistantMessageId = new Map(
       [...this.activeTurns.values()]
         .filter((activeTurn) => activeTurn.request.sessionId === sessionId)
@@ -617,7 +616,7 @@ export class ChatSessionStore {
     const inputTokens = this.nullableNumberValue(row.input_tokens);
     const outputTokens = this.nullableNumberValue(row.output_tokens);
     const contextWindowTokens = this.nullableNumberValue(row.context_window_tokens);
-    const hasUsage = inputTokens !== null || outputTokens !== null || contextWindowTokens !== null;
+    const hasUsage = inputTokens !== null || outputTokens !== null;
     return {
       id: this.textValue(row.id),
       role: this.decodeRole(this.textValue(row.role)),
@@ -676,6 +675,7 @@ export class ChatSessionStore {
     this.database = database;
     this.ensureReasoningContentColumn();
     this.migrateLocalTimestampStorage();
+    this.migrateMessageTokenUsageToTurns();
     database.exec(CHAT_TIMESTAMP_INDEXES);
     this.restrictPermissions();
     return database;
@@ -684,6 +684,32 @@ export class ChatSessionStore {
   private ensureReasoningContentColumn(): void {
     if (this.tableHasColumn('chat_messages', 'reasoning_content')) return;
     this.databaseOrThrow().exec(`ALTER TABLE "chat_messages" ADD COLUMN "reasoning_content" TEXT NOT NULL DEFAULT ''`);
+  }
+
+  /** Moves the one-to-one generation usage record out of assistant messages. */
+  private migrateMessageTokenUsageToTurns(): void {
+    const tokenColumns = ['input_tokens', 'output_tokens', 'context_window_tokens'] as const;
+    const existingTokenColumns = tokenColumns.filter((column) => this.tableHasColumn('chat_messages', column));
+    if (existingTokenColumns.length === 0) return;
+
+    this.transaction(() => {
+      const database = this.databaseOrThrow();
+      database.prepare(`
+        UPDATE "chat_turns"
+           SET ${existingTokenColumns.map((column) => `${column} = COALESCE(${column}, (
+                 SELECT ${column}
+                   FROM "chat_messages"
+                  WHERE id = "chat_turns".assistant_message_id
+               ))`).join(', ')}
+         WHERE EXISTS (
+           SELECT 1
+             FROM "chat_messages"
+            WHERE id = "chat_turns".assistant_message_id
+         )`).run();
+      existingTokenColumns.forEach((column) => {
+        database.exec(`ALTER TABLE "chat_messages" DROP COLUMN "${column}"`);
+      });
+    });
   }
 
   private migrateLocalTimestampStorage(): void {
@@ -776,8 +802,8 @@ export class ChatSessionStore {
       INSERT INTO "chat_messages"
         (id, session_id, turn_id, role, content, reasoning_content,
          created_at, created_at_epoch_ms, created_at_time_zone,
-         status, duration_ms, input_tokens, output_tokens, context_window_tokens)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+         status, duration_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     rows.forEach((row) => {
       const createdAt = this.timestampForRow(row, 'created_at');
       statement.run(
@@ -791,10 +817,7 @@ export class ChatSessionStore {
         createdAt.epochMilliseconds,
         createdAt.timeZone,
         this.textValue(row.status),
-        this.nullableNumberValue(row.duration_ms),
-        this.nullableNumberValue(row.input_tokens),
-        this.nullableNumberValue(row.output_tokens),
-        this.nullableNumberValue(row.context_window_tokens)
+        this.nullableNumberValue(row.duration_ms)
       );
     });
   }

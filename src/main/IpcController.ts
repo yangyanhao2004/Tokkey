@@ -55,7 +55,6 @@ import {
   validateLocalChatTurnId,
   validateLocalChatTurnRequest
 } from './chat/LocalChatTurnRequestValidator';
-import LocalInferenceProcessManager from './local-inference/LocalInferenceProcessManager';
 import LocalModelManager from './models/LocalModelManager';
 import CloudModelConnector from './models/CloudModelConnector';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
@@ -79,8 +78,6 @@ export interface IpcControllerOptions {
   mcpConfigurationApplier?: McpConfigurationApplying;
   localModelManager?: LocalModelManager;
   tokenHubRuntime?: TokenHubRuntime;
-  /** Shared with model deployment so Chat always reaches the deployed process. */
-  localInferenceProcessManager?: LocalInferenceProcessManager;
   localChatTurnExecutor?: LocalChatTurnExecutor;
   chatSessionStore?: ChatSessionStore;
   hostSnapshotService?: HostSnapshotService;
@@ -108,7 +105,6 @@ export default class IpcController {
   private readonly mcpConfigurationApplier: McpConfigurationApplying;
   private readonly localModelManager: LocalModelManager;
   private readonly tokenHubRuntime: TokenHubRuntime;
-  private readonly localInferenceProcessManager: LocalInferenceProcessManager;
   private readonly localChatTurnExecutor: LocalChatTurnExecutor;
   private readonly chatSessionStore: ChatSessionStore;
   private readonly hostSnapshotService: HostSnapshotService;
@@ -142,15 +138,13 @@ export default class IpcController {
     this.mcpCatalogScanner = options.mcpCatalogScanner ?? new LocalMcpCatalogScanner({ agentGate });
     this.mcpConfigurationApplier =
       options.mcpConfigurationApplier ?? new LocalMcpConfigurationApplier();
-    this.localInferenceProcessManager =
-      options.localInferenceProcessManager ?? new LocalInferenceProcessManager();
+    this.tokenHubRuntime = options.tokenHubRuntime ?? new TokenHubRuntime();
     this.localModelManager = options.localModelManager ?? new LocalModelManager({
-      localInference: this.localInferenceProcessManager
+      localRuntime: this.tokenHubRuntime
     });
     this.localChatTurnExecutor = options.localChatTurnExecutor ?? new LocalChatTurnExecutor({
-      runtime: this.localInferenceProcessManager
+      runtime: this.tokenHubRuntime
     });
-    this.tokenHubRuntime = options.tokenHubRuntime ?? new TokenHubRuntime();
     this.tokenHubRuntime.subscribe((state) => {
       BrowserWindow.getAllWindows().forEach((window) => {
         if (!window.isDestroyed()) window.webContents.send('models:runtime-state-changed', state);
@@ -415,7 +409,7 @@ export default class IpcController {
 
   /** Returns only renderer-safe availability for the app-owned local model. */
   getLocalChatRuntimeState(): LocalChatRuntimeState {
-    return this.localInferenceProcessManager.getState();
+    return this.tokenHubRuntime.getLocalChatRuntimeState();
   }
 
   /** Restores persisted local Chat history, tabs, and the current session. */
@@ -440,7 +434,7 @@ export default class IpcController {
 
   /** Starts one local-only SSE turn and returns stream events to its caller alone. */
   startLocalChatTurn(event: IpcMainInvokeEvent, request: LocalChatTurnRequest): LocalChatTurnStarted {
-    const runtimeState = this.localInferenceProcessManager.getState();
+    const runtimeState = this.tokenHubRuntime.getLocalChatRuntimeState();
     if (runtimeState.status !== 'ready' || runtimeState.model?.id !== request.modelId) {
       throw new Error('The selected local model is not running.');
     }

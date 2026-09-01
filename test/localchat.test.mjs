@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -12,11 +11,6 @@ import {
   validateLocalChatTurnId,
   validateLocalChatTurnRequest
 } from '../dist/main/chat/LocalChatTurnRequestValidator.js';
-import {
-  LocalInferenceProcessManager,
-  LocalInferenceStartupError
-} from '../dist/main/local-inference/LocalInferenceProcessManager.js';
-import { LocalInferenceRuntimeLocator } from '../dist/main/local-inference/LocalInferenceRuntimeLocator.js';
 import { LocalModelManager } from '../dist/main/models/LocalModelManager.js';
 import { NativeModelDownloadManager } from '../dist/main/models/NativeModelDownloadManager.js';
 
@@ -43,29 +37,6 @@ const CHAT_EVENT_IDENTITY = {
 };
 
 const IpcController = IpcControllerModule.default;
-
-class FakeChildProcess extends EventEmitter {
-  constructor({ exitOnKill = true } = {}) {
-    super();
-    this.stderr = new EventEmitter();
-    this.stderr.setEncoding = () => {};
-    this.killed = false;
-    this.exitOnKill = exitOnKill;
-  }
-
-  kill() {
-    this.killed = true;
-    if (this.exitOnKill) this.emit('exit', 0, 'SIGTERM');
-    return true;
-  }
-}
-
-function runtimeLocator(location = { executablePath: '/runtime/llama-server', source: 'override' }) {
-  return {
-    locate: () => location,
-    searchPath: () => '/runtime/llama-server'
-  };
-}
 
 function responseStream(chunks) {
   const encoder = new TextEncoder();
@@ -105,134 +76,24 @@ async function waitFor(condition, attempts = 40) {
   throw new Error('Timed out waiting for local Chat event.');
 }
 
+function chatRuntime(endpoint) {
+  return {
+    getLocalChatRuntimeState: () => ({
+      status: 'ready',
+      model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label },
+      contextWindowTokens: 16_384,
+      error: null
+    }),
+    chatCompletionsUrl: () => endpoint,
+    chatRequestHeaders: () => ({ Authorization: 'Bearer hub-test-key' })
+  };
+}
+
 const sqliteAvailable = await import('node:sqlite').then(
   () => true,
   () => false
 );
 const skipWithoutSqlite = sqliteAvailable ? false : 'node:sqlite is unavailable on this runtime';
-
-test('local runtime locator prioritizes its explicit development override', () => {
-  const locator = new LocalInferenceRuntimeLocator({
-    projectRoot: '/repo',
-    resourcesPath: '/app/Resources',
-    environment: { TOKIIE_LOCAL_INFERENCE_SERVER: '/custom/llama-server' },
-    isExecutable: () => true
-  });
-
-  assert.deepEqual(locator.locate(), {
-    executablePath: '/custom/llama-server',
-    source: 'override'
-  });
-});
-
-test('local runtime uses a loopback-only llama-server launch and reports its ready model', async () => {
-  const child = new FakeChildProcess();
-  const spawned = [];
-  const manager = new LocalInferenceProcessManager({
-    locator: runtimeLocator(),
-    portResolver: { resolve: async () => 47111 },
-    modelFileExists: async () => true,
-    healthCheck: async () => true,
-    spawnProcess: (command, argumentsList, options) => {
-      spawned.push({ command, argumentsList, options });
-      return child;
-    }
-  });
-
-  const state = await manager.start(LOCAL_MODEL);
-
-  assert.deepEqual(state, {
-    status: 'ready',
-    model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label },
-    contextWindowTokens: 4096,
-    error: null
-  });
-  assert.deepEqual(spawned[0].argumentsList, [
-    '--model', LOCAL_MODEL.filePath,
-    '--host', '127.0.0.1',
-    '--port', '47111',
-    '--ctx-size', '4096',
-    '--no-webui',
-    '--reasoning', 'on'
-  ]);
-  assert.equal(manager.chatCompletionsUrl(LOCAL_MODEL.id), 'http://127.0.0.1:47111/v1/chat/completions');
-
-  await manager.stop('test complete');
-  assert.equal(child.killed, true);
-});
-
-test('local runtime fails safely when its executable or selected model file is unavailable', async () => {
-  const missingRuntime = new LocalInferenceProcessManager({
-    locator: runtimeLocator(null),
-    modelFileExists: async () => true
-  });
-  await assert.rejects(
-    () => missingRuntime.start(LOCAL_MODEL),
-    (error) => error instanceof LocalInferenceStartupError && /bundled local inference runtime/i.test(error.message)
-  );
-
-  const missingModel = new LocalInferenceProcessManager({
-    locator: runtimeLocator(),
-    modelFileExists: async () => false,
-    spawnProcess: () => {
-      throw new Error('spawn must not run without a model artifact');
-    }
-  });
-  await assert.rejects(
-    () => missingModel.start(LOCAL_MODEL),
-    /selected local model file is unavailable/i
-  );
-});
-
-test('local runtime reports an asynchronous process launch failure without crashing', async () => {
-  const child = new FakeChildProcess();
-  const manager = new LocalInferenceProcessManager({
-    locator: runtimeLocator(),
-    portResolver: { resolve: async () => 47111 },
-    modelFileExists: async () => true,
-    healthCheck: async () => false,
-    spawnProcess: () => {
-      process.nextTick(() => child.emit('error', new Error('exec format error')));
-      return child;
-    }
-  });
-
-  await assert.rejects(() => manager.start(LOCAL_MODEL), /exec format error/i);
-  assert.deepEqual(manager.getState(), {
-    status: 'error',
-    model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label },
-    contextWindowTokens: 4096,
-    error: 'exec format error'
-  });
-});
-
-test('switching local models waits for the old process to exit before launching the next', async () => {
-  const firstChild = new FakeChildProcess({ exitOnKill: false });
-  const secondChild = new FakeChildProcess();
-  const launchedModels = [];
-  const manager = new LocalInferenceProcessManager({
-    locator: runtimeLocator(),
-    portResolver: { resolve: async () => 47111 },
-    modelFileExists: async () => true,
-    healthCheck: async () => true,
-    spawnProcess: (_command, argumentsList) => {
-      launchedModels.push(argumentsList[1]);
-      return launchedModels.length === 1 ? firstChild : secondChild;
-    }
-  });
-  const nextModel = { ...LOCAL_MODEL, id: 'llama-local', label: 'Llama Local', filePath: '/models/llama-local.gguf' };
-
-  await manager.start(LOCAL_MODEL);
-  const switchModel = manager.start(nextModel);
-  await Promise.resolve();
-
-  assert.equal(firstChild.killed, true);
-  assert.deepEqual(launchedModels, [LOCAL_MODEL.filePath]);
-
-  firstChild.emit('exit', 0, 'SIGTERM');
-  await switchModel;
-  assert.deepEqual(launchedModels, [LOCAL_MODEL.filePath, nextModel.filePath]);
-});
 
 test('deploying a downloaded model starts the shared local runtime before it becomes running', async () => {
   const homeDirectory = mkdtempSync(path.join(tmpdir(), 'tokiie-local-runtime-'));
@@ -266,27 +127,31 @@ test('deploying a downloaded model starts the shared local runtime before it bec
   });
   let runtimeStateListener = null;
   let startedModel = null;
-  const localInference = {
-    setStateListener: (listener) => {
+  let chatRuntimeState = { status: 'unavailable', model: null, contextWindowTokens: null, error: null };
+  const localRuntime = {
+    subscribe: (listener) => {
       runtimeStateListener = listener;
+      return () => {};
     },
-    getState: () => ({ status: 'unavailable', model: null, contextWindowTokens: null, error: null }),
-    start: async (model) => {
+    getLocalChatRuntimeState: () => chatRuntimeState,
+    startModel: async (model) => {
       startedModel = model;
-      runtimeStateListener({
+      chatRuntimeState = {
         status: 'ready',
         model: { id: model.id, label: model.label },
-        contextWindowTokens: 4096,
+        contextWindowTokens: 16384,
         error: null
-      });
+      };
+      runtimeStateListener({ phase: 'running', modelId: model.id, endpoint: 'http://127.0.0.1:8081/v1', error: null, device: null });
     },
     stopModel: async () => {},
-    chatCompletionsUrl: () => 'http://127.0.0.1:47999/v1/chat/completions'
+    chatCompletionsUrl: () => 'http://127.0.0.1:8081/v1/chat/completions',
+    chatRequestHeaders: () => ({ Authorization: 'Bearer hub-key' })
   };
   const manager = new LocalModelManager({
     catalog: { load: async () => ({ models: [descriptor], providers: ['Local'], fromCache: true }) },
     downloader,
-    localInference
+    localRuntime
   });
 
   const scan = await manager.deployModel(descriptor.id);
@@ -294,10 +159,11 @@ test('deploying a downloaded model starts the shared local runtime before it bec
   assert.deepEqual(startedModel, {
     id: descriptor.id,
     label: descriptor.name,
+    fileName: descriptor.fileName,
     filePath: artifactPath
   });
   assert.equal(scan.models[0].lifecycle, 'deployed');
-  assert.equal(scan.models[0].endpoint, 'http://127.0.0.1:47999');
+  assert.equal(scan.models[0].endpoint, 'http://127.0.0.1:8081');
 });
 
 test('starting a discovered installed model starts the shared local runtime', async () => {
@@ -312,6 +178,7 @@ test('starting a discovered installed model starts the shared local runtime', as
     filePath: '/models/discovered.gguf'
   };
   let startedModel = null;
+  let chatRuntimeState = { status: 'unavailable', model: null, contextWindowTokens: null, error: null };
   const manager = new LocalModelManager({
     downloader: {
       listInstalled: async () => [installedModel],
@@ -319,18 +186,24 @@ test('starting a discovered installed model starts the shared local runtime', as
       markDeploymentReady: () => {},
       markDeploymentFailed: () => {}
     },
-    localInference: {
-      setStateListener: () => {},
-      getState: () => ({ status: 'unavailable', model: null, contextWindowTokens: null, error: null }),
-      start: async (model) => {
+    localRuntime: {
+      subscribe: () => () => {},
+      getLocalChatRuntimeState: () => chatRuntimeState,
+      startModel: async (model) => {
         startedModel = model;
-        return {
+        chatRuntimeState = {
           status: 'ready',
           model: { id: model.id, label: model.label },
-          contextWindowTokens: 4096,
+          contextWindowTokens: 16_384,
           error: null
         };
-      }
+        return {
+          phase: 'running', modelId: model.id, endpoint: 'http://127.0.0.1:8081/v1', error: null, device: null
+        };
+      },
+      stopModel: async () => ({ phase: 'idle', modelId: null, endpoint: null, error: null, device: null }),
+      chatCompletionsUrl: () => 'http://127.0.0.1:8081/v1/chat/completions',
+      chatRequestHeaders: () => ({ Authorization: 'Bearer hub-key' })
     }
   });
 
@@ -339,10 +212,59 @@ test('starting a discovered installed model starts the shared local runtime', as
   assert.deepEqual(startedModel, {
     id: installedModel.id,
     label: installedModel.name,
+    fileName: installedModel.fileName,
     filePath: installedModel.filePath
   });
   assert.equal(state.status, 'ready');
   await assert.rejects(() => manager.startInstalledModel('local-file:missing.gguf'), /not found/i);
+});
+
+test('switching installed models stops the active Hub runtime before starting the next model', async () => {
+  const installedModels = [
+    { id: 'first', name: 'First', fileName: 'first.gguf', filePath: '/models/first.gguf' },
+    { id: 'second', name: 'Second', fileName: 'second.gguf', filePath: '/models/second.gguf' }
+  ];
+  const calls = [];
+  let runtimeState = {
+    status: 'ready',
+    model: { id: 'first', label: 'First' },
+    contextWindowTokens: 16_384,
+    error: null
+  };
+  const manager = new LocalModelManager({
+    downloader: {
+      listInstalled: async () => installedModels,
+      markDeploymentStopped: (modelId) => calls.push(`marked:${modelId}`),
+      markDeploymentReady: () => {},
+      markDeploymentFailed: () => {}
+    },
+    localRuntime: {
+      subscribe: () => () => {},
+      getLocalChatRuntimeState: () => runtimeState,
+      stopModel: async () => {
+        calls.push('stop');
+        runtimeState = { status: 'unavailable', model: null, contextWindowTokens: null, error: null };
+        return { phase: 'idle', modelId: null, endpoint: null, error: null, device: null };
+      },
+      startModel: async (model) => {
+        calls.push(`start:${model.id}`);
+        runtimeState = {
+          status: 'ready',
+          model: { id: model.id, label: model.label },
+          contextWindowTokens: 16_384,
+          error: null
+        };
+        return { phase: 'running', modelId: model.id, endpoint: 'http://127.0.0.1:8081/v1', error: null, device: null };
+      },
+      chatCompletionsUrl: () => 'http://127.0.0.1:8081/v1/chat/completions',
+      chatRequestHeaders: () => ({ Authorization: 'Bearer hub-key' })
+    }
+  });
+
+  const state = await manager.startInstalledModel('second');
+
+  assert.deepEqual(calls, ['stop', 'marked:first', 'start:second']);
+  assert.equal(state.model?.id, 'second');
 });
 
 test('local model deployment actions run one at a time so row state cannot resolve out of order', async () => {
@@ -366,12 +288,13 @@ test('local model deployment actions run one at a time so row state cannot resol
       filePath: `/models/${descriptor.fileName}`
     })
   };
-  const localInference = {
-    setStateListener: (listener) => {
+  const localRuntime = {
+    subscribe: (listener) => {
       runtimeStateListener = listener;
+      return () => {};
     },
-    getState: () => runtimeState,
-    start: async (model) => {
+    getLocalChatRuntimeState: () => runtimeState,
+    startModel: async (model) => {
       startedModelIds.push(model.id);
       if (model.id === 'first-model') {
         await new Promise((resolve) => {
@@ -381,18 +304,19 @@ test('local model deployment actions run one at a time so row state cannot resol
       runtimeState = {
         status: 'ready',
         model: { id: model.id, label: model.label },
-        contextWindowTokens: 4096,
+        contextWindowTokens: 16384,
         error: null
       };
-      runtimeStateListener(runtimeState);
+      runtimeStateListener({ phase: 'running', modelId: model.id, endpoint: 'http://127.0.0.1:8081/v1', error: null, device: null });
     },
     stopModel: async () => {},
-    chatCompletionsUrl: () => 'http://127.0.0.1:47999/v1/chat/completions'
+    chatCompletionsUrl: () => 'http://127.0.0.1:8081/v1/chat/completions',
+    chatRequestHeaders: () => ({ Authorization: 'Bearer hub-key' })
   };
   const manager = new LocalModelManager({
     catalog: { load: async () => ({ models: descriptors, providers: ['Local'], fromCache: true }) },
     downloader,
-    localInference
+    localRuntime
   });
 
   await manager.list();
@@ -433,10 +357,7 @@ test('local turn executor streams only the local endpoint and maps text, usage, 
   const requests = [];
   const events = [];
   const executor = new LocalChatTurnExecutor({
-    runtime: {
-      getState: () => ({ status: 'ready', model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label }, contextWindowTokens: 4096, error: null }),
-      chatCompletionsUrl: () => 'http://127.0.0.1:47000/v1/chat/completions'
-    },
+    runtime: chatRuntime('http://127.0.0.1:47000/v1/chat/completions'),
     fetcher: async (input, init) => {
       requests.push({ input, init });
       return new Response(responseStream([
@@ -458,6 +379,7 @@ test('local turn executor streams only the local endpoint and maps text, usage, 
     messages: CHAT_REQUEST.messages
   });
   assert.equal(requests[0].init.redirect, 'error');
+  assert.equal(requests[0].init.headers.Authorization, 'Bearer hub-test-key');
   assert.deepEqual(events, [
     { type: 'textDelta', ...CHAT_EVENT_IDENTITY, text: 'Hi' },
     { type: 'usage', ...CHAT_EVENT_IDENTITY, inputTokens: 3, outputTokens: 1 },
@@ -468,10 +390,7 @@ test('local turn executor streams only the local endpoint and maps text, usage, 
 test('reasoning deltas stream separately from the visible local Chat reply', async () => {
   const events = [];
   const executor = new LocalChatTurnExecutor({
-    runtime: {
-      getState: () => ({ status: 'ready', model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label }, contextWindowTokens: 4096, error: null }),
-      chatCompletionsUrl: () => 'http://127.0.0.1:47000/v1/chat/completions'
-    },
+    runtime: chatRuntime('http://127.0.0.1:47000/v1/chat/completions'),
     idleTimeoutMs: 20,
     fetcher: async () => new Response(delayedResponseStream([
       'data: {"choices":[{"delta":{"reasoning_content":"Thinking"}}]}\n\n',
@@ -494,10 +413,7 @@ test('local turn cancellation is idempotent and remote endpoints are rejected', 
   let requestSignal;
   const cancellationEvents = [];
   const cancellable = new LocalChatTurnExecutor({
-    runtime: {
-      getState: () => ({ status: 'ready', model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label }, contextWindowTokens: 4096, error: null }),
-      chatCompletionsUrl: () => 'http://127.0.0.1:47000/v1/chat/completions'
-    },
+    runtime: chatRuntime('http://127.0.0.1:47000/v1/chat/completions'),
     fetcher: async (_input, init) => new Promise((_resolve, reject) => {
       requestSignal = init.signal;
       init.signal.addEventListener('abort', () => reject(new Error('aborted')));
@@ -512,10 +428,7 @@ test('local turn cancellation is idempotent and remote endpoints are rejected', 
   assert.deepEqual(cancellationEvents, [{ type: 'cancelled', ...CHAT_EVENT_IDENTITY }]);
 
   const remote = new LocalChatTurnExecutor({
-    runtime: {
-      getState: () => ({ status: 'ready', model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label }, contextWindowTokens: 4096, error: null }),
-      chatCompletionsUrl: () => 'https://example.com/v1/chat/completions'
-    }
+    runtime: chatRuntime('https://example.com/v1/chat/completions')
   });
   assert.throws(
     () => remote.startTurn(CHAT_REQUEST, () => {}),
@@ -523,10 +436,7 @@ test('local turn cancellation is idempotent and remote endpoints are rejected', 
   );
 
   const localhost = new LocalChatTurnExecutor({
-    runtime: {
-      getState: () => ({ status: 'ready', model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label }, contextWindowTokens: 4096, error: null }),
-      chatCompletionsUrl: () => 'http://localhost:47000/v1/chat/completions'
-    }
+    runtime: chatRuntime('http://localhost:47000/v1/chat/completions')
   });
   assert.throws(
     () => localhost.startTurn(CHAT_REQUEST, () => {}),
@@ -538,10 +448,7 @@ test('local turn watchdog cancels a stalled stream and emits one terminal event'
   let requestSignal;
   const events = [];
   const executor = new LocalChatTurnExecutor({
-    runtime: {
-      getState: () => ({ status: 'ready', model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label }, contextWindowTokens: 4096, error: null }),
-      chatCompletionsUrl: () => 'http://127.0.0.1:47000/v1/chat/completions'
-    },
+    runtime: chatRuntime('http://127.0.0.1:47000/v1/chat/completions'),
     idleTimeoutMs: 10,
     fetcher: async (_input, init) => new Promise((_resolve, reject) => {
       requestSignal = init.signal;
@@ -664,6 +571,102 @@ test('Chat session store restores durable history, tabs, and interrupted turns',
   } finally {
     store.close();
     reopened?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Chat session store migrates token usage from assistant messages onto Chat turns', { skip: skipWithoutSqlite }, async () => {
+  const [{ ChatSessionStore }, { DatabaseSync }, { localTimestampForEpochMilliseconds }] = await Promise.all([
+    import('../dist/main/chat/ChatSessionStore.js'),
+    import('node:sqlite'),
+    import('../dist/main/storage/LocalTimestamp.js')
+  ]);
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-chat-token-usage-'));
+  const databasePath = path.join(directory, 'tokiie.db');
+  const createdAt = 1_788_000_000_000;
+  const timestamp = localTimestampForEpochMilliseconds(createdAt);
+  const initialStore = new ChatSessionStore({
+    databasePath,
+    now: () => createdAt,
+    createId: () => 'token-usage-session'
+  });
+  let migratedStore = null;
+
+  try {
+    const sessionId = initialStore.loadWorkspace().activeSessionId;
+    initialStore.close();
+
+    const database = new DatabaseSync(databasePath);
+    try {
+      database.exec(`
+        ALTER TABLE chat_messages ADD COLUMN input_tokens INTEGER;
+        ALTER TABLE chat_messages ADD COLUMN output_tokens INTEGER;
+        ALTER TABLE chat_messages ADD COLUMN context_window_tokens INTEGER;`);
+      const insertMessage = database.prepare(`
+        INSERT INTO chat_messages
+          (id, session_id, turn_id, role, content, reasoning_content,
+           created_at, created_at_epoch_ms, created_at_time_zone,
+           status, duration_ms, input_tokens, output_tokens, context_window_tokens)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      insertMessage.run(
+        'legacy-token-user', sessionId, 'legacy-token-turn', 'user', 'Hello', '',
+        timestamp.localDateTime, createdAt, timestamp.timeZone, 'complete', null, null, null, null
+      );
+      insertMessage.run(
+        'legacy-token-assistant', sessionId, 'legacy-token-turn', 'assistant', 'Hi', '',
+        timestamp.localDateTime, createdAt, timestamp.timeZone, 'complete', 1_500, 7, 4, 4_096
+      );
+      database.prepare(`
+        INSERT INTO chat_turns
+          (id, session_id, user_message_id, assistant_message_id, model_id, model_label,
+           started_at, started_at_epoch_ms, started_at_time_zone,
+           ended_at, ended_at_epoch_ms, ended_at_time_zone,
+           status, input_tokens, output_tokens, context_window_tokens)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)`)
+        .run(
+          'legacy-token-turn', sessionId, 'legacy-token-user', 'legacy-token-assistant',
+          LOCAL_MODEL.id, LOCAL_MODEL.label,
+          timestamp.localDateTime, createdAt, timestamp.timeZone,
+          timestamp.localDateTime, createdAt, timestamp.timeZone,
+          'completed'
+        );
+    } finally {
+      database.close();
+    }
+
+    migratedStore = new ChatSessionStore({ databasePath, now: () => createdAt });
+    const migratedSession = migratedStore.loadWorkspace().sessions.find((session) => session.id === sessionId);
+    const migratedAssistant = migratedSession.messages.find((message) => message.id === 'legacy-token-assistant');
+    assert.deepEqual(migratedAssistant.tokenUsage, {
+      inputTokens: 7,
+      outputTokens: 4,
+      contextWindowTokens: 4_096
+    });
+    migratedStore.close();
+    migratedStore = null;
+
+    const migratedDatabase = new DatabaseSync(databasePath);
+    try {
+      const messageColumns = migratedDatabase.prepare('PRAGMA table_info(chat_messages)').all();
+      const turn = migratedDatabase.prepare(`
+        SELECT input_tokens, output_tokens, context_window_tokens
+          FROM chat_turns WHERE id = 'legacy-token-turn'`).get();
+
+      assert.equal(
+        messageColumns.some((column) => ['input_tokens', 'output_tokens', 'context_window_tokens'].includes(column.name)),
+        false
+      );
+      assert.deepEqual({ ...turn }, {
+        input_tokens: 7,
+        output_tokens: 4,
+        context_window_tokens: 4_096
+      });
+    } finally {
+      migratedDatabase.close();
+    }
+  } finally {
+    initialStore.close();
+    migratedStore?.close();
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -856,12 +859,13 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
     failTurnStart: (turnId, message) => calls.push({ type: 'start-failed', turnId, message })
   };
   const runtime = {
-    getState: () => ({
+    getLocalChatRuntimeState: () => ({
       status: 'ready',
       model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label },
-      contextWindowTokens: 4096,
+      contextWindowTokens: 16_384,
       error: null
-    })
+    }),
+    subscribe: () => () => {}
   };
   let startShouldFail = false;
   const executor = {
@@ -876,7 +880,7 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
   const controller = new IpcController({
     chatSessionStore,
     localChatTurnExecutor: executor,
-    localInferenceProcessManager: runtime,
+    tokenHubRuntime: runtime,
     localModelManager: {}
   });
   const sentEvents = [];
@@ -892,7 +896,7 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
       start: {
         request: CHAT_REQUEST,
         modelLabel: LOCAL_MODEL.label,
-        contextWindowTokens: 4096
+        contextWindowTokens: 16_384
       }
     },
     {
@@ -925,8 +929,9 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
   const unavailableController = new IpcController({
     chatSessionStore,
     localChatTurnExecutor: executor,
-    localInferenceProcessManager: {
-      getState: () => ({ status: 'unavailable', model: null, contextWindowTokens: null, error: null })
+    tokenHubRuntime: {
+      getLocalChatRuntimeState: () => ({ status: 'unavailable', model: null, contextWindowTokens: null, error: null }),
+      subscribe: () => () => {}
     },
     localModelManager: {}
   });

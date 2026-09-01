@@ -3,7 +3,7 @@ import type {
   LocalChatTurnRequest,
   LocalChatTurnStarted
 } from '../../shared/types';
-import type { LocalInferenceRuntimeServing } from '../local-inference/LocalInferenceProcessManager';
+import type { LocalChatRuntimeServing } from '../models/LocalModelRuntime';
 import OpenAiChatSseParser, { type ParsedChatStreamEvent } from './OpenAiChatSseParser';
 
 export type LocalChatFetch = (input: string, init: RequestInit) => Promise<Response>;
@@ -34,13 +34,13 @@ const DEFAULT_IDLE_TIMEOUT_MS = 45_000;
  * converts an OpenAI-compatible SSE response into renderer-safe chat events.
  */
 export class LocalChatTurnExecutor {
-  private readonly runtime: LocalInferenceRuntimeServing;
+  private readonly runtime: LocalChatRuntimeServing;
   private readonly fetcher: LocalChatFetch;
   private readonly idleTimeoutMs: number;
   private readonly activeTurns = new Map<string, ActiveLocalChatTurn>();
 
   constructor(options: {
-    runtime: LocalInferenceRuntimeServing;
+    runtime: LocalChatRuntimeServing;
     fetcher?: LocalChatFetch;
     idleTimeoutMs?: number;
   }) {
@@ -87,7 +87,10 @@ export class LocalChatTurnExecutor {
     try {
       const response = await this.fetcher(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          ...this.runtime.chatRequestHeaders(activeTurn.request.modelId),
+          'Content-Type': 'application/json'
+        },
         // A local server must not be allowed to turn a Chat request into a
         // request elsewhere through an HTTP redirect.
         redirect: 'error',

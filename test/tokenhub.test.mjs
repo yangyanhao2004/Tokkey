@@ -216,17 +216,20 @@ test('runtime rejects Start without a connected Dongle and publishes failed stat
 
   await assert.rejects(() => runtime.startModel({
     id: 'model',
-    name: 'model',
-    provider: 'Local',
-    series: '',
+    label: 'model',
     fileName: 'model.gguf',
-    sizeBytes: 4,
-    downloadedAt: 0,
     filePath
   }), /Insert an Amis Hub/);
 
   assert.equal(states.at(-1).phase, 'failed');
   assert.equal(states.at(-1).modelId, 'model');
+  assert.deepEqual(runtime.getLocalChatRuntimeState(), {
+    status: 'error',
+    model: { id: 'model', label: 'model' },
+    contextWindowTokens: 16_384,
+    error: 'Insert an Amis Hub before starting a model.'
+  });
+  assert.throws(() => runtime.chatCompletionsUrl('model'), /Hub-authenticated local model is not running/);
 });
 
 test('Hub connector creates a durable route and repoints it on the next start', async () => {

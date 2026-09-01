@@ -6,15 +6,15 @@ import type {
   LocalModelDescriptor,
   LocalModelProvider
 } from '../../shared/types';
-import LocalInferenceProcessManager from '../local-inference/LocalInferenceProcessManager';
 import LocalModelCatalogService from './LocalModelCatalogService';
 import NativeModelDownloadManager from './NativeModelDownloadManager';
+import type { LocalModelRuntime } from './LocalModelRuntime';
 
 /** Coordinates catalog freshness, target capability, and model lifecycle actions. */
 export class LocalModelManager {
   private readonly catalog: LocalModelCatalogService;
   private readonly downloader: NativeModelDownloadManager;
-  private readonly localInference: LocalInferenceProcessManager;
+  private readonly localRuntime: LocalModelRuntime;
   private descriptors: LocalModelDescriptor[] = [];
   private providers: string[] = [];
   private runtimeOperation: Promise<void> = Promise.resolve();
@@ -22,14 +22,18 @@ export class LocalModelManager {
   constructor(options: {
     catalog?: LocalModelCatalogService;
     downloader?: NativeModelDownloadManager;
-    localInference?: LocalInferenceProcessManager;
+    localRuntime?: LocalModelRuntime;
   } = {}) {
     this.catalog = options.catalog ?? new LocalModelCatalogService();
     this.downloader = options.downloader ?? new NativeModelDownloadManager();
-    this.localInference = options.localInference ?? new LocalInferenceProcessManager();
-    this.localInference.setStateListener((state) => {
+    if (!options.localRuntime) {
+      throw new Error('LocalModelManager requires the shared Hub local model runtime.');
+    }
+    this.localRuntime = options.localRuntime;
+    this.localRuntime.subscribe(() => {
+      const state = this.localRuntime.getLocalChatRuntimeState();
       if (state.status === 'ready' && state.model) {
-        const endpoint = new URL(this.localInference.chatCompletionsUrl(state.model.id)).origin;
+        const endpoint = new URL(this.localRuntime.chatCompletionsUrl(state.model.id)).origin;
         this.downloader.markDeploymentReady(state.model.id, endpoint);
         return;
       }
@@ -71,7 +75,7 @@ export class LocalModelManager {
   async deleteModel(modelId: string, request: LocalModelCatalogRequest = {}): Promise<LocalModelCatalogScan> {
     await this.ensureCatalog(request);
     return this.queueRuntimeOperation(async () => {
-      await this.localInference.stopModel(modelId, 'removing local model');
+      await this.stopRuntimeForModel(modelId);
       await this.downloader.deleteModel(modelId);
       return this.scan(request);
     });
@@ -80,13 +84,19 @@ export class LocalModelManager {
   async deployModel(modelId: string, request: LocalModelCatalogRequest = {}): Promise<LocalModelCatalogScan> {
     await this.ensureCatalog(request);
     return this.queueRuntimeOperation(async () => {
-      const previousModelId = this.localInference.getState().model?.id;
+      const descriptor = this.requireDescriptor(modelId);
+      const currentRuntime = this.localRuntime.getLocalChatRuntimeState();
+      const previousModelId = currentRuntime.model?.id;
+      if (currentRuntime.status === 'ready' && previousModelId === modelId) {
+        return this.scan(request);
+      }
       if (previousModelId && previousModelId !== modelId) {
+        await this.localRuntime.stopModel();
         this.downloader.markDeploymentStopped(previousModelId);
       }
-      await this.downloader.deployModel(this.requireDescriptor(modelId), async (model) => {
-        await this.localInference.start(model);
-        return new URL(this.localInference.chatCompletionsUrl(model.id)).origin;
+      await this.downloader.deployModel(descriptor, async (model) => {
+        await this.localRuntime.startModel({ ...model, fileName: descriptor.fileName });
+        return new URL(this.localRuntime.chatCompletionsUrl(model.id)).origin;
       });
       return this.scan(request);
     });
@@ -109,22 +119,29 @@ export class LocalModelManager {
         throw new Error(`Installed local model not found: ${modelId}`);
       }
 
-      const previousModelId = this.localInference.getState().model?.id;
+      const currentRuntime = this.localRuntime.getLocalChatRuntimeState();
+      const previousModelId = currentRuntime.model?.id;
+      if (currentRuntime.status === 'ready' && previousModelId === installedModel.id) {
+        return currentRuntime;
+      }
       if (previousModelId && previousModelId !== installedModel.id) {
+        await this.localRuntime.stopModel();
         this.downloader.markDeploymentStopped(previousModelId);
       }
-      return this.localInference.start({
+      await this.localRuntime.startModel({
         id: installedModel.id,
         label: installedModel.name,
+        fileName: installedModel.fileName,
         filePath: installedModel.filePath
       });
+      return this.localRuntime.getLocalChatRuntimeState();
     });
   }
 
   /** Removes a downloaded model and answers with the remaining installed list. */
   removeInstalled(modelId: string): Promise<InstalledLocalModel[]> {
     return this.queueRuntimeOperation(async () => {
-      await this.localInference.stopModel(modelId, 'removing installed local model');
+      await this.stopRuntimeForModel(modelId);
       return this.downloader.removeInstalled(modelId);
     });
   }
@@ -132,6 +149,13 @@ export class LocalModelManager {
   private async ensureCatalog(request: LocalModelCatalogRequest): Promise<void> {
     if (this.descriptors.length > 0) return;
     await this.list(request);
+  }
+
+  private async stopRuntimeForModel(modelId: string): Promise<void> {
+    if (this.localRuntime.getLocalChatRuntimeState().model?.id !== modelId) {
+      return;
+    }
+    await this.localRuntime.stopModel();
   }
 
   /** Keeps catalog rows and the single in-memory runtime in the same order. */

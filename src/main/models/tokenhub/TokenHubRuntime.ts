@@ -5,11 +5,16 @@ import { access, copyFile, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type {
-  InstalledLocalModel,
+  LocalChatRuntimeModel,
+  LocalChatRuntimeState,
   LocalModelRuntimeState,
   TokenHubDevice
 } from '../../../shared/types';
 import type { HubModelConnecting, RunningHubModel } from '../HubModelConnector';
+import type {
+  LocalModelLaunchRequest,
+  LocalModelRuntime
+} from '../LocalModelRuntime';
 import TokenHubDeviceProbe from './TokenHubDeviceProbe';
 import {
   parseTokenHubManifest,
@@ -26,6 +31,8 @@ import TokenHubSerialTransport, {
 
 const SERVER_PORT = 8081;
 const SERVER_ENDPOINT = `http://127.0.0.1:${SERVER_PORT}/v1`;
+const SERVER_CHAT_COMPLETIONS_ENDPOINT = `${SERVER_ENDPOINT}/chat/completions`;
+const SERVER_CONTEXT_WINDOW_TOKENS = 16_384;
 const DEVICE_SCAN_INTERVAL_MS = 1_000;
 const SERVER_READINESS_TIMEOUT_MS = 180_000;
 const SERVER_STOP_GRACE_MS = 3_000;
@@ -72,8 +79,8 @@ function delay(milliseconds: number): Promise<void> {
   });
 }
 
-/** Owns the single authenticated Dongle/server lifecycle used by Tokiie's Start button. */
-export class TokenHubRuntime {
+/** Owns the single authenticated Dongle/server lifecycle used by local model deployment and Chat. */
+export class TokenHubRuntime implements LocalModelRuntime {
   private readonly listeners = new Set<RuntimeStateListener>();
   private readonly deviceProbe: DeviceProbing;
   private readonly transportFactory: TransportFactory;
@@ -89,6 +96,11 @@ export class TokenHubRuntime {
   private monitorTimer: NodeJS.Timeout | null = null;
   private activeTransport: TokenHubCommandTransport | null = null;
   private activeProcess: RunningProcess | null = null;
+  private activeChatServer: {
+    modelId: string;
+    apiKey: string;
+  } | null = null;
+  private selectedChatModel: LocalChatRuntimeModel | null = null;
   private generation = 0;
 
   constructor(options: {
@@ -125,7 +137,33 @@ export class TokenHubRuntime {
     return this.snapshot();
   }
 
-  async startModel(model: InstalledLocalModel): Promise<LocalModelRuntimeState> {
+  /** Returns the renderer-safe state of the one Hub-authenticated Chat runtime. */
+  getLocalChatRuntimeState(): LocalChatRuntimeState {
+    const model = this.selectedChatModel && this.selectedChatModel.id === this.state.modelId
+      ? { ...this.selectedChatModel }
+      : null;
+    const status = this.chatStatusForPhase(this.state.phase);
+    return {
+      status,
+      model,
+      contextWindowTokens: model ? SERVER_CONTEXT_WINDOW_TOKENS : null,
+      error: this.state.error
+    };
+  }
+
+  /** Resolves the Chat route only for the currently authenticated Hub model. */
+  chatCompletionsUrl(modelId: string): string {
+    this.requireActiveChatServer(modelId);
+    return SERVER_CHAT_COMPLETIONS_ENDPOINT;
+  }
+
+  /** Keeps the Hub-derived inference credential in the main process. */
+  chatRequestHeaders(modelId: string): Record<string, string> {
+    const server = this.requireActiveChatServer(modelId);
+    return { Authorization: `Bearer ${server.apiKey}` };
+  }
+
+  async startModel(model: LocalModelLaunchRequest): Promise<LocalModelRuntimeState> {
     if (this.state.phase === 'starting' || this.state.phase === 'running') {
       throw new Error('Another local model is already starting or running.');
     }
@@ -135,6 +173,7 @@ export class TokenHubRuntime {
     await access(model.filePath, constants.R_OK).catch(() => {
       throw new Error(`The selected local model no longer exists: ${model.filePath}`);
     });
+    this.selectedChatModel = { id: model.id, label: model.label };
 
     const [device] = await this.deviceProbe.connectedDevices();
     if (!device) {
@@ -186,6 +225,7 @@ export class TokenHubRuntime {
       error: null,
       device: this.state.device
     });
+    this.selectedChatModel = null;
     return this.snapshot();
   }
 
@@ -196,6 +236,7 @@ export class TokenHubRuntime {
     this.monitorTimer = null;
     void this.activeTransport?.close();
     this.activeTransport = null;
+    this.activeChatServer = null;
     const running = this.activeProcess;
     this.activeProcess = null;
     if (running) {
@@ -208,7 +249,7 @@ export class TokenHubRuntime {
   private async runStart(
     attempt: number,
     device: TokenHubDevice,
-    model: InstalledLocalModel
+    model: LocalModelLaunchRequest
   ): Promise<void> {
     const transport = await this.transportFactory(device);
     let license: TokenHubLicenseSession | null = null;
@@ -243,12 +284,13 @@ export class TokenHubRuntime {
         console.info('[TokenHub] llama-server readiness check passed.');
         const runningModel: RunningHubModel = {
           deviceId: deviceId.toString('hex'),
-          displayName: path.basename(model.filePath, path.extname(model.filePath)),
-          modelName: path.basename(model.filePath),
+          displayName: model.label,
+          modelName: model.fileName,
           endpoint: SERVER_ENDPOINT,
           apiKey: credential.apiKey
         };
         this.assertCurrent(attempt);
+        this.activeChatServer = { modelId: model.id, apiKey: credential.apiKey };
         this.setState({
           phase: 'running',
           modelId: model.id,
@@ -260,6 +302,7 @@ export class TokenHubRuntime {
         await this.synchronizeProfile(runningModel, running, attempt);
       } catch (error) {
         if (this.activeProcess === running) this.activeProcess = null;
+        this.activeChatServer = null;
         await this.stopProcess(running);
         throw error;
       }
@@ -339,7 +382,7 @@ export class TokenHubRuntime {
   private async launchServer(
     resources: { serverPath: string; templatePath: string },
     device: TokenHubDevice,
-    model: InstalledLocalModel,
+    model: LocalModelLaunchRequest,
     apiKey: string
   ): Promise<RunningProcess> {
     const workingDirectory = await mkdtemp(path.join(os.tmpdir(), 'tokiie-tokenhub-'));
@@ -431,6 +474,7 @@ export class TokenHubRuntime {
     await rm(running.workingDirectory, { recursive: true, force: true });
     if (this.generation !== attempt || this.activeProcess !== running) return;
     this.activeProcess = null;
+    this.activeChatServer = null;
     this.setState({
       phase: 'failed',
       modelId,
@@ -480,6 +524,7 @@ export class TokenHubRuntime {
     await transport?.close().catch(() => undefined);
     const running = this.activeProcess;
     this.activeProcess = null;
+    this.activeChatServer = null;
     if (running) await this.stopProcess(running);
   }
 
@@ -506,6 +551,28 @@ export class TokenHubRuntime {
 
   private assertCurrent(attempt: number): void {
     if (this.generation !== attempt) throw new Error('The Amis Hub model startup was stopped.');
+  }
+
+  private requireActiveChatServer(modelId: string): { modelId: string; apiKey: string } {
+    const server = this.activeChatServer;
+    if (
+      !server ||
+      this.state.phase !== 'running' ||
+      server.modelId !== modelId ||
+      this.state.modelId !== modelId
+    ) {
+      throw new Error('The selected Hub-authenticated local model is not running.');
+    }
+    return server;
+  }
+
+  private chatStatusForPhase(phase: LocalModelRuntimeState['phase']): LocalChatRuntimeState['status'] {
+    switch (phase) {
+    case 'idle': return 'unavailable';
+    case 'starting': return 'starting';
+    case 'running': return 'ready';
+    case 'failed': return 'error';
+    }
   }
 
   private setState(state: LocalModelRuntimeState): void {
