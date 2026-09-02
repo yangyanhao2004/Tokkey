@@ -42,17 +42,17 @@ test('locator prefers the developer override over every packaged layout', () => 
   const locator = new GatewayRuntimeLocator({
     projectRoot: PROJECT_ROOT,
     resourcesPath: '/app/Resources',
-    environment: { AMIS_GATEWAY_PYTHON: '/custom/python3' },
+    environment: { AMIS_GATEWAY_EXECUTABLE: '/custom/amis-gateway' },
     isExecutable: () => true
   });
 
   const location = locator.locate();
 
-  assert.equal(location.interpreterPath, '/custom/python3');
+  assert.equal(location.executablePath, '/custom/amis-gateway');
   assert.equal(location.source, 'override');
 });
 
-test('locator maps x64 onto the x86_64 bundled runtime folder', () => {
+test('locator uses the architecture folder verbatim, without an x86_64 rewrite', () => {
   const locator = new GatewayRuntimeLocator({
     projectRoot: PROJECT_ROOT,
     resourcesPath: '/app/Resources',
@@ -62,25 +62,47 @@ test('locator maps x64 onto the x86_64 bundled runtime folder', () => {
   });
 
   assert.equal(
-    locator.locate().interpreterPath,
-    '/app/Resources/GatewayRuntime/x86_64/python/bin/python3'
+    locator.locate().executablePath,
+    '/app/Resources/GatewayRuntime/x64/amis-gateway/amis-gateway'
   );
 });
 
-test('locator falls back to the development virtualenv when nothing is bundled', () => {
+test('locator finds the frozen bundle in a packaged app before the checked-out tree', () => {
   const locator = new GatewayRuntimeLocator({
     projectRoot: PROJECT_ROOT,
+    resourcesPath: '/app/Resources',
     environment: {},
+    architecture: 'arm64',
     isExecutable: () => true
   });
 
   const location = locator.locate();
 
-  assert.equal(location.interpreterPath, '/repo/runtime/amis-gateway/.venv/bin/python3');
+  assert.equal(
+    location.executablePath,
+    '/app/Resources/GatewayRuntime/arm64/amis-gateway/amis-gateway'
+  );
+  assert.equal(location.source, 'bundled');
+});
+
+test('locator falls back to the repository resources tree during development', () => {
+  const locator = new GatewayRuntimeLocator({
+    projectRoot: PROJECT_ROOT,
+    environment: {},
+    architecture: 'arm64',
+    isExecutable: () => true
+  });
+
+  const location = locator.locate();
+
+  assert.equal(
+    location.executablePath,
+    '/repo/resources/GatewayRuntime/arm64/amis-gateway/amis-gateway'
+  );
   assert.equal(location.source, 'development');
 });
 
-test('locator reports no interpreter rather than returning an unusable path', () => {
+test('locator reports no runtime rather than returning an unusable path', () => {
   const locator = new GatewayRuntimeLocator({
     projectRoot: PROJECT_ROOT,
     environment: {},
@@ -88,7 +110,7 @@ test('locator reports no interpreter rather than returning an unusable path', ()
   });
 
   assert.equal(locator.locate(), null);
-  assert.match(locator.searchPath(), /\.venv\/bin\/python3/);
+  assert.match(locator.searchPath(), /GatewayRuntime\/.+\/amis-gateway\/amis-gateway/);
 });
 
 test('health probe rejects an orphaned helper from a previous app launch', async () => {
@@ -148,7 +170,7 @@ test('health probe treats an unreachable port as unhealthy', async () => {
   assert.equal(await probe.isHealthy(4000), false);
 });
 
-const OWN_INTERPRETER = '/repo/runtime/amis-gateway/.venv/bin/python3';
+const OWN_EXECUTABLE = '/repo/resources/GatewayRuntime/arm64/amis-gateway/amis-gateway';
 
 test('port resolver keeps the preferred port when nothing is listening', async () => {
   const resolver = new GatewayPortResolver({
@@ -156,7 +178,7 @@ test('port resolver keeps the preferred port when nothing is listening', async (
     findListener: () => null
   });
 
-  assert.equal(await resolver.resolve(OWN_INTERPRETER), 4000);
+  assert.equal(await resolver.resolve(OWN_EXECUTABLE), 4000);
 });
 
 test('port resolver reclaims the preferred port from a stale gateway helper', async () => {
@@ -165,7 +187,7 @@ test('port resolver reclaims the preferred port from a stale gateway helper', as
     preferredPort: 4000,
     findListener: () => ({
       processId: 321,
-      commandLine: `${OWN_INTERPRETER} -m amis_gateway.main --host 127.0.0.1 --port 4000`
+      commandLine: `${OWN_EXECUTABLE} --host 127.0.0.1 --port 4000`
     }),
     terminate: (processId) => {
       terminated.push(processId);
@@ -174,19 +196,19 @@ test('port resolver reclaims the preferred port from a stale gateway helper', as
     findFreePort: async () => 51000
   });
 
-  assert.equal(await resolver.resolve(OWN_INTERPRETER), 4000);
+  assert.equal(await resolver.resolve(OWN_EXECUTABLE), 4000);
   assert.deepEqual(terminated, [321]);
 });
 
-test('port resolver never kills another app running the same gateway module', async () => {
+test('port resolver never kills another app shipping the same gateway executable', async () => {
   const terminated = [];
   const resolver = new GatewayPortResolver({
     preferredPort: 4000,
     findListener: () => ({
       processId: 777,
       commandLine:
-        '/Applications/Amis-Wifi.app/Contents/Resources/AmisGatewayRuntime/arm64/python/bin/python3 ' +
-        '-m amis_gateway.main --host 127.0.0.1 --port 4000'
+        '/Applications/Amis-Wifi.app/Contents/Resources/GatewayRuntime/arm64/amis-gateway/amis-gateway ' +
+        '--host 127.0.0.1 --port 4000'
     }),
     terminate: (processId) => {
       terminated.push(processId);
@@ -195,7 +217,7 @@ test('port resolver never kills another app running the same gateway module', as
     findFreePort: async () => 51000
   });
 
-  assert.equal(await resolver.resolve(OWN_INTERPRETER), 51000);
+  assert.equal(await resolver.resolve(OWN_EXECUTABLE), 51000);
   assert.deepEqual(terminated, []);
 });
 
@@ -211,22 +233,22 @@ test('port resolver leaves an unrelated process alone and takes a free port', as
     findFreePort: async () => 51000
   });
 
-  assert.equal(await resolver.resolve(OWN_INTERPRETER), 51000);
+  assert.equal(await resolver.resolve(OWN_EXECUTABLE), 51000);
   assert.deepEqual(terminated, []);
 });
 
 test('port resolver falls back when a stale helper refuses to release the port', async () => {
   const resolver = new GatewayPortResolver({
     preferredPort: 4000,
-    findListener: () => ({ processId: 321, commandLine: `${OWN_INTERPRETER} -m amis_gateway.main` }),
+    findListener: () => ({ processId: 321, commandLine: `${OWN_EXECUTABLE} --port 4000` }),
     terminate: () => false,
     findFreePort: async () => 51000
   });
 
-  assert.equal(await resolver.resolve(OWN_INTERPRETER), 51000);
+  assert.equal(await resolver.resolve(OWN_EXECUTABLE), 51000);
 });
 
-test('manager launches the interpreter with the gateway module and loopback flags', async () => {
+test('manager launches the frozen executable with only the loopback flags', async () => {
   const child = new FakeChildProcess();
   let launchArguments = null;
   let launchOptions = null;
@@ -234,6 +256,7 @@ test('manager launches the interpreter with the gateway module and loopback flag
     locator: new GatewayRuntimeLocator({
       projectRoot: PROJECT_ROOT,
       environment: {},
+      architecture: 'arm64',
       isExecutable: () => true
     }),
     portResolver: new GatewayPortResolver({ preferredPort: 4000, findListener: () => null }),
@@ -248,10 +271,10 @@ test('manager launches the interpreter with the gateway module and loopback flag
 
   await manager.startIfNeeded();
 
+  // The bundle carries its own interpreter, so no `-m amis_gateway.main` and no
+  // interpreter path appear here: the executable is the whole launch contract.
   assert.deepEqual(launchArguments, [
-    '/repo/runtime/amis-gateway/.venv/bin/python3',
-    '-m',
-    'amis_gateway.main',
+    '/repo/resources/GatewayRuntime/arm64/amis-gateway/amis-gateway',
     '--host',
     '127.0.0.1',
     '--port',
@@ -260,7 +283,6 @@ test('manager launches the interpreter with the gateway module and loopback flag
   assert.equal(manager.baseUrl(), 'http://127.0.0.1:4000');
   assert.equal(launchOptions.env.AMIS_GATEWAY_MASTER_KEY, undefined);
   assert.equal(launchOptions.env.LITELLM_LOCAL_MODEL_COST_MAP, 'True');
-  assert.equal(launchOptions.env.PYTHONDONTWRITEBYTECODE, '1');
   assert.equal(launchOptions.env.REQUEST_TIMEOUT, '1800');
   assert.ok(launchOptions.env.AMIS_GATEWAY_INSTANCE_ID);
   manager.stop('test finished');
@@ -333,7 +355,7 @@ test('manager reports the stderr tail when the gateway never becomes ready', asy
   assert.equal(child.killed, true);
 });
 
-test('manager fails with a usable hint when no interpreter is installed', async () => {
+test('manager fails with a usable hint when the frozen runtime is missing', async () => {
   const manager = new GatewayProcessManager({
     locator: new GatewayRuntimeLocator({
       projectRoot: PROJECT_ROOT,
@@ -341,7 +363,7 @@ test('manager fails with a usable hint when no interpreter is installed', async 
       isExecutable: () => false
     }),
     spawnProcess: () => {
-      throw new Error('spawn must not be attempted without an interpreter');
+      throw new Error('spawn must not be attempted without a runtime');
     },
     delay: async () => {}
   });
@@ -349,8 +371,8 @@ test('manager fails with a usable hint when no interpreter is installed', async 
   await assert.rejects(
     () => manager.startIfNeeded(),
     (error) => {
-      assert.match(error.message, /uv sync/);
-      assert.match(error.message, /AMIS_GATEWAY_PYTHON/);
+      assert.match(error.message, /gateway:freeze/);
+      assert.match(error.message, /AMIS_GATEWAY_EXECUTABLE/);
       return true;
     }
   );

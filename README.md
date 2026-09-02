@@ -64,7 +64,7 @@ scikit-learn, onnxruntime, lightgbm, scipy, and numpy from the runtime.
 runtime/amis-gateway/       # Python package, pyproject.toml, uv.lock, tests
 src/main/gateway/            # main-process supervisor
 ├── GatewayProcessManager.ts # spawn, readiness, crash restart, shutdown
-├── GatewayRuntimeLocator.ts # finds the interpreter to run
+├── GatewayRuntimeLocator.ts # finds the frozen executable to run
 ├── GatewayPortResolver.ts   # picks the port, reclaims it from stale helpers
 └── GatewayHealthProbe.ts    # verifies a listener belongs to this app launch
 ```
@@ -77,13 +77,20 @@ npm run gateway:sync           # create runtime/amis-gateway/.venv
 npm run gateway:test           # run the Python test suite
 ```
 
-`npm run dev` then starts the gateway automatically against that virtualenv.
-`AMIS_GATEWAY_PYTHON=/path/to/python3` overrides the interpreter for one run.
+The virtualenv is for editing and testing the Python source; the app never runs
+it. `npm run dev`, `start`, and `evidence` each re-run `gateway:freeze` first,
+so a change under `runtime/amis-gateway/src` reaches the app on the next launch
+without a separate command. `AMIS_GATEWAY_EXECUTABLE=/path/to/amis-gateway`
+overrides the bundle for one run.
+
+`npm test` deliberately does *not* freeze: the gateway tests drive the
+supervisor against fakes, so making the JavaScript suite depend on uv and
+PyInstaller would buy nothing.
 
 ### How the supervisor behaves
 
-- The gateway starts after the main window, so a slow Python boot never delays
-  first paint, and a startup failure leaves the rest of the app usable.
+- The gateway starts after the main window, so its boot never delays first
+  paint, and a startup failure leaves the rest of the app usable.
 - The gateway itself is unauthenticated: it listens on loopback only, so a key
   checked at its door would guard nothing the operating system does not already
   guard. Credentials are a per-model concern instead — a local model server is
@@ -95,18 +102,37 @@ npm run gateway:test           # run the Python test suite
   mistaken for the current gateway.
 - Port 4033 is preferred. An orphan left by a previous launch of *this* app is
   terminated and the port reclaimed; a port held by any other process is left
-  alone and a free port is used instead. Ownership is matched on the interpreter
-  path, because the Amis-Wifi desktop app runs the same `amis_gateway.main`
-  module and must never be killed by this app.
+  alone and a free port is used instead. Ownership is matched on the executable
+  path, because the Amis-Wifi desktop app ships this same gateway and must never
+  be killed by this app.
 - An unexpected exit is relaunched with exponential backoff, capped at five
   consecutive attempts. Quitting the app stops the gateway.
 
-### Packaging (not wired up yet)
+### The frozen runtime
 
-Production expects a relocatable CPython tree at
-`resources/GatewayRuntime/<arch>/python/bin/python3`. Building and signing that
-tree still needs to be ported from Amis-Wifi's `Scripts/build-litellm-runtime.py`
-— see the note in `TODO.md`.
+`npm run gateway:freeze` runs PyInstaller against
+`runtime/amis-gateway/packaging/amis-gateway.spec` and writes a self-contained
+bundle to `resources/GatewayRuntime/<arch>/amis-gateway/`. The executable there
+carries its own CPython and every dependency in a sibling `_internal/`
+directory, so no user PATH, Homebrew package, or system Python is involved at
+runtime — the supervisor spawns it with nothing but `--host` and `--port`.
+
+A freeze takes ~17s and is not incremental in any useful sense: PyInstaller
+re-runs its dependency analysis and rewrites the whole 99MB `COLLECT` tree every
+time. `--clean` is left off so the `runtime/amis-gateway/build/` cache is reused,
+but that only saves ~2s of the 17 — use `npm run gateway:freeze:clean` after
+changing dependencies or the spec, when a stale cache is the likelier suspect.
+
+Rebuilds are not byte-reproducible: `_internal/base_library.zip` (1.3MB) embeds
+timestamps and so differs on every run. Because the bundle is committed, every
+app launch leaves that one file modified in `git status`. Nothing else in the
+tree changes.
+
+PyInstaller cannot cross-compile: the bundle always matches the machine that
+built it. The committed tree is arm64 macOS, which is the only target the app
+supports today (`TokenHubRuntimeLocator` already refuses anything else). An
+Intel or Linux build must be produced on that host and land in its own `<arch>`
+folder — `process.arch` names the folder verbatim, so Intel macOS is `x64/`.
 
 ## Adding a renderer API
 

@@ -16,10 +16,12 @@
     "test": "npm run build && node --test test/*.test.mjs",
     "gateway:sync": "uv sync --directory runtime/amis-gateway",
     "gateway:test": "uv run --directory runtime/amis-gateway --frozen pytest -q",
+    "gateway:freeze": "cd runtime/amis-gateway/packaging && uv run --project .. --with pyinstaller --frozen pyinstaller --noconfirm --distpath \"../../../resources/GatewayRuntime/$(node -p 'process.arch')\" --workpath ../build amis-gateway.spec",
+    "gateway:freeze:clean": "npm run gateway:freeze -- --clean",
     "kill:app": "pkill -f \"$PWD/node_modules/[e]lectron/dist\" ; true",
-    "start": "npm run build && npm run kill:app && electron .",
-    "dev": "npm run build && npm run kill:app && electron . --dev",
-    "evidence": "npm run build && npm run kill:app && electron . --evidence"
+    "start": "npm run gateway:freeze && npm run build && npm run kill:app && electron .",
+    "dev": "npm run gateway:freeze && npm run build && npm run kill:app && electron . --dev",
+    "evidence": "npm run gateway:freeze && npm run build && npm run kill:app && electron . --evidence"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

@@ -15,12 +15,15 @@ npm-debug.log*
 .env.local
 
 # Python gateway runtime: the development virtualenv and the per-architecture
-# interpreter tree are both build products rebuilt from pyproject.toml/uv.lock.
+# frozen bundle under resources/ are both build products, rebuilt from
+# pyproject.toml/uv.lock by `npm run gateway:sync` and `npm run gateway:freeze`.
+# Unlike resources/TokenHubRuntime, which is a committed third-party binary,
+# this tree is ~99MB of regenerable output and stays out of the repository.
 runtime/amis-gateway/.venv/
 runtime/amis-gateway/**/__pycache__/
 runtime/amis-gateway/.pytest_cache/
 runtime/amis-gateway/.ruff_cache/
-resources/GatewayRuntime/
+#resources/GatewayRuntime/
 
 # OS files
 .DS_Store

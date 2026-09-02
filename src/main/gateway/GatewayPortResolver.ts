@@ -25,11 +25,11 @@ export interface GatewayPortResolverOptions {
  * a kernel-assigned free port is used instead, so an unrelated local service
  * never gets killed and the launch never fails just because 4033 is taken.
  *
- * "Orphan of a previous launch" is matched on the interpreter path, not on the
- * module name alone. The Amis-Wifi desktop app ships this same gateway module,
- * so a name-only check would let this app terminate a running Amis-Wifi helper
- * that happened to land on this port. Only a process running *this* app's
- * interpreter can be ours.
+ * "Orphan of a previous launch" is matched on the executable path. The
+ * Amis-Wifi desktop app ships this same gateway, so a check on the program
+ * name alone would let this app terminate a running Amis-Wifi helper that
+ * happened to land on this port. Only a process running *this* app's copy of
+ * the executable can be ours.
  */
 export class GatewayPortResolver {
   /** Where the gateway listens unless something else already holds the port. */
@@ -49,15 +49,15 @@ export class GatewayPortResolver {
 
   /**
    * Returns the port this launch should bind, evicting a stale helper if needed.
-   * @param interpreterPath the interpreter this launch will run, used to tell
-   *   this app's own orphaned helper apart from another app's live gateway
+   * @param executablePath the gateway executable this launch will run, used to
+   *   tell this app's own orphaned helper apart from another app's live gateway
    */
-  async resolve(interpreterPath: string): Promise<number> {
+  async resolve(executablePath: string): Promise<number> {
     const listener = this.findListener(this.preferredPort);
     if (!listener) {
       return this.preferredPort;
     }
-    const isOwnHelper = GatewayPortResolver.isOwnGatewayProcess(listener.commandLine, interpreterPath);
+    const isOwnHelper = GatewayPortResolver.isOwnGatewayProcess(listener.commandLine, executablePath);
     if (isOwnHelper && this.terminate(listener.processId)) {
       console.info(`[AmisGateway] Reclaimed port ${this.preferredPort} from stale helper ${listener.processId}.`);
       return this.preferredPort;
@@ -70,9 +70,17 @@ export class GatewayPortResolver {
     return fallbackPort;
   }
 
-  /** Recognizes only this app's own helper as safe to evict. */
-  private static isOwnGatewayProcess(commandLine: string, interpreterPath: string): boolean {
-    return commandLine.includes('amis_gateway.main') && commandLine.includes(interpreterPath);
+  /**
+   * Recognizes only this app's own helper as safe to evict.
+   *
+   * The executable path is the whole signal. It used to be paired with a check
+   * for the `amis_gateway.main` module name, because a bare interpreter path
+   * said nothing about what that interpreter was running. A frozen executable
+   * carries its own identity: this exact file can only be this app's gateway,
+   * and another app shipping the same bundle runs it from its own directory.
+   */
+  private static isOwnGatewayProcess(commandLine: string, executablePath: string): boolean {
+    return commandLine.includes(executablePath);
   }
 
   private static listenerOnPort(port: number): PortListener | null {

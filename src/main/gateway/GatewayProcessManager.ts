@@ -132,13 +132,13 @@ export class GatewayProcessManager {
     const location = this.locator.locate();
     if (!location) {
       throw new GatewayStartupError(
-        'No gateway interpreter was found.',
+        'No gateway runtime was found.',
         `Searched: ${this.locator.searchPath()}\n` +
-          'Run `uv sync` in runtime/amis-gateway for development, or set AMIS_GATEWAY_PYTHON.'
+          'Run `npm run gateway:freeze` to build it, or set AMIS_GATEWAY_EXECUTABLE.'
       );
     }
-    const port = await this.portResolver.resolve(location.interpreterPath);
-    this.launch(location.interpreterPath, port);
+    const port = await this.portResolver.resolve(location.executablePath);
+    this.launch(location.executablePath, port);
 
     for (let attempt = 0; attempt < this.readinessTimeoutSeconds; attempt += 1) {
       if (await this.healthProbe.isHealthy(port)) {
@@ -159,15 +159,16 @@ export class GatewayProcessManager {
   }
 
   /**
-   * Runs the bundled interpreter directly against the gateway module, so no
-   * user PATH, Homebrew package, or globally installed Python is involved.
+   * Runs the frozen gateway executable, so no user PATH, Homebrew package, or
+   * globally installed Python is involved. The bundle carries its own
+   * interpreter, so the launch contract is just the host and port.
    */
-  private launch(interpreterPath: string, port: number): void {
+  private launch(executablePath: string, port: number): void {
     this.stderrTail = [];
     this.stderrBuffer = '';
     const child = this.spawnProcess(
-      interpreterPath,
-      ['-m', 'amis_gateway.main', '--host', '127.0.0.1', '--port', String(port)],
+      executablePath,
+      ['--host', '127.0.0.1', '--port', String(port)],
       {
         env: this.gatewayEnvironment(),
         stdio: ['ignore', 'ignore', 'pipe']
@@ -186,17 +187,20 @@ export class GatewayProcessManager {
    * map bundled inside its own package instead of fetching it from GitHub at
    * startup: this is an offline-first loopback service, and that fetch would
    * otherwise stall boot whenever the network or a configured proxy is slow.
-   * Bytecode writes are disabled because the packaged runtime lives inside a
-   * signed, read-only app bundle. `REQUEST_TIMEOUT` raises LiteLLM's upstream
-   * deadline off its 600s default, and an inherited value wins so an operator
-   * can still tune it from the launching shell.
+   * `REQUEST_TIMEOUT` raises LiteLLM's upstream deadline off its 600s default,
+   * and an inherited value wins so an operator can still tune it from the
+   * launching shell.
+   *
+   * `PYTHONDONTWRITEBYTECODE` used to be set here to keep the interpreter from
+   * writing `__pycache__` into a signed, read-only app bundle. The frozen
+   * bundle ships no `.py` files — modules are loaded from the archive inside
+   * the executable — so there is nothing left to byte-compile.
    */
   private gatewayEnvironment(): NodeJS.ProcessEnv {
     return {
       REQUEST_TIMEOUT: String(GatewayProcessManager.UPSTREAM_REQUEST_TIMEOUT_SECONDS),
       ...process.env,
       LITELLM_LOCAL_MODEL_COST_MAP: 'True',
-      PYTHONDONTWRITEBYTECODE: '1',
       AMIS_GATEWAY_INSTANCE_ID: this.instanceId
     };
   }
