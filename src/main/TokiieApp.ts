@@ -8,6 +8,8 @@ import ClaudeNativeModelRegistrar from './models/ClaudeNativeModelRegistrar';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
+import LocalChatTurnExecutor from './chat/LocalChatTurnExecutor';
+import LocalModelManager from './models/LocalModelManager';
 import HubModelConnector from './models/HubModelConnector';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 import TokenHubRuntimeLocator from './models/tokenhub/TokenHubRuntimeLocator';
@@ -28,6 +30,8 @@ export class TokiieApp {
   private readonly height: number;
   private readonly ipcController: IpcController;
   private readonly gatewayProcessManager: GatewayProcessManager;
+  private readonly localModelManager: LocalModelManager;
+  private readonly localChatTurnExecutor: LocalChatTurnExecutor;
   private readonly cloudModelConnector: CloudModelConnector;
   private readonly codexNativeModelRegistrar: CodexNativeModelRegistrar;
   private readonly claudeNativeModelRegistrar: ClaudeNativeModelRegistrar;
@@ -75,11 +79,19 @@ export class TokiieApp {
       }),
       profileConnector: HubModelConnector.forGateway(this.gatewayProcessManager)
     });
+    this.localModelManager = new LocalModelManager({
+      localRuntime: this.tokenHubRuntime
+    });
+    this.localChatTurnExecutor = new LocalChatTurnExecutor({
+      runtime: this.tokenHubRuntime
+    });
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
       cloudModelConnector: this.cloudModelConnector,
       codexGatewayIntegration: this.codexGatewayIntegration,
       claudeGatewayIntegration: this.claudeGatewayIntegration,
+      localModelManager: this.localModelManager,
+      localChatTurnExecutor: this.localChatTurnExecutor,
       tokenHubRuntime: this.tokenHubRuntime
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.

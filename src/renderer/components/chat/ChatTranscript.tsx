@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   formatConversationDate,
+  formatMessageTime,
   ICON_BASE_PATH,
-  TOKEN_USAGE_FIXTURE,
   type ChatMessage,
   type ChatSession
 } from '../../pages/chatContent';
@@ -54,6 +54,51 @@ function UserMessage({ message }: { message: ChatMessage }) {
   );
 }
 
+function ThinkingDisclosure({ message }: { message: ChatMessage }) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const hasThinkingContent = message.reasoningContent.length > 0;
+  const shouldShow = message.status === 'streaming' || hasThinkingContent;
+
+  useEffect(() => {
+    if (message.status !== 'streaming') {
+      setIsExpanded(false);
+    }
+  }, [message.status]);
+
+  if (!shouldShow) return null;
+
+  const label = message.status === 'streaming'
+    ? 'Thinking...'
+    : message.status === 'complete'
+      ? `Thought for ${message.durationLabel ?? 'a moment'}`
+      : 'Thinking stopped';
+
+  return (
+    <div className="flex flex-col items-start gap-2" data-testid={`chat-thinking-${message.id}`}>
+      <button
+        type="button"
+        className="flex items-center gap-1 py-1 text-left text-[12px] leading-[18px] text-white/75 focus-visible:outline-2 focus-visible:outline-white"
+        onClick={() => setIsExpanded((isOpen) => !isOpen)}
+        aria-expanded={isExpanded}
+        aria-controls={`chat-thinking-content-${message.id}`}
+        data-testid={`chat-thinking-toggle-${message.id}`}
+      >
+        <span>{label}</span>
+        <span className={`inline-block w-3 text-center transition-transform ${isExpanded ? 'rotate-90' : ''}`} aria-hidden="true">&gt;</span>
+      </button>
+      {isExpanded && hasThinkingContent && (
+        <div
+          id={`chat-thinking-content-${message.id}`}
+          className="max-w-full whitespace-pre-wrap break-words border-l border-white/20 pl-3 text-[12px] leading-[1.8] text-white/65"
+          data-testid={`chat-thinking-content-${message.id}`}
+        >
+          {message.reasoningContent}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AssistantMessage({
   message,
   onCopy,
@@ -76,14 +121,18 @@ function AssistantMessage({
     : copyState === 'error'
       ? 'Copy assistant response failed'
       : 'Copy assistant response';
+  const messageTime = formatMessageTime(message.createdAt);
 
   return (
     <article className="flex flex-col gap-3" data-testid="chat-assistant-message">
       <h2 className="py-1 text-[12px] leading-[18px] font-semibold text-white">Tokiie</h2>
-      <p className="whitespace-pre-wrap break-words py-1 text-[12px] leading-[1.8] text-white">
-        {message.content || 'Thinking…'}
-      </p>
-      <div className="relative flex items-center gap-2 px-1 py-2 text-[10px] text-chat-tertiary-text">
+      <ThinkingDisclosure message={message} />
+      {message.content && (
+        <p className="whitespace-pre-wrap break-words py-1 text-[12px] leading-[1.8] text-white">
+          {message.content}
+        </p>
+      )}
+      <div className="relative flex min-h-8 items-center gap-2 px-1 text-[10px] text-chat-tertiary-text">
         <button
           type="button"
           className="flex size-4 items-center justify-center rounded hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white"
@@ -95,18 +144,26 @@ function AssistantMessage({
         >
           <img className="block size-4 max-w-none" src={`${ICON_BASE_PATH}/chat-copy.svg`} alt="" />
         </button>
-        <button
-          type="button"
-          className="flex size-4 items-center justify-center rounded hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white"
-          onClick={() => setUsageIsOpen((isOpen) => !isOpen)}
-          aria-label="Show token usage"
-          aria-expanded={usageIsOpen}
-          data-testid={`chat-token-usage-trigger-${message.id}`}
-        >
-          <img className="block size-4 max-w-none" src={`${ICON_BASE_PATH}/chat-response-timer.svg`} alt="" />
-        </button>
-        {message.durationLabel && <span aria-label={`Response time ${message.durationLabel}`}>{message.durationLabel}</span>}
-        {usageIsOpen && <TokenUsagePopover usage={TOKEN_USAGE_FIXTURE} onClose={() => setUsageIsOpen(false)} />}
+        <div className="box-border flex h-8 items-center gap-2 px-[2px]" data-testid={`chat-message-time-${message.id}`}>
+          {message.tokenUsage && (
+            <button
+              type="button"
+              className="flex size-4 items-center justify-center rounded hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white"
+              onClick={() => setUsageIsOpen((isOpen) => !isOpen)}
+              aria-label="Show token usage"
+              aria-expanded={usageIsOpen}
+              data-testid={`chat-token-usage-trigger-${message.id}`}
+            >
+              <img className="block size-4 max-w-none" src={`${ICON_BASE_PATH}/chat-response-timer.svg`} alt="" />
+            </button>
+          )}
+          <time className="leading-4 text-chat-tertiary-text" dateTime={new Date(message.createdAt).toISOString()} aria-label={`Sent at ${messageTime}`}>
+            {messageTime}
+          </time>
+        </div>
+        {usageIsOpen && message.tokenUsage && (
+          <TokenUsagePopover usage={message.tokenUsage} onClose={() => setUsageIsOpen(false)} />
+        )}
       </div>
     </article>
   );

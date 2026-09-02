@@ -228,14 +228,160 @@ export interface TokiieApi {
   deleteLocalModel(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
   deployLocalModel(modelId: string, request?: LocalModelCatalogRequest): Promise<LocalModelCatalogScan>;
   listInstalledLocalModels(): Promise<InstalledLocalModel[]>;
+  startInstalledLocalModel(modelId: string): Promise<LocalChatRuntimeState>;
   removeInstalledLocalModel(modelId: string): Promise<InstalledLocalModel[]>;
   getLocalModelRuntimeState(): Promise<LocalModelRuntimeState>;
-  startInstalledLocalModel(modelId: string): Promise<LocalModelRuntimeState>;
   stopLocalModelRuntime(): Promise<LocalModelRuntimeState>;
   onLocalModelRuntimeStateChanged(listener: (state: LocalModelRuntimeState) => void): () => void;
   listCloudModelCards(): Promise<CloudModelCard[]>;
   connectCloudModel(cardId: string): Promise<CloudModelConnection>;
   restoreCloudModels(): Promise<CloudModelConnection[]>;
+  loadLocalChatWorkspace(): Promise<LocalChatWorkspace>;
+  createLocalChatSession(): Promise<LocalChatWorkspace>;
+  openLocalChatSession(sessionId: string): Promise<LocalChatWorkspace>;
+  closeLocalChatSession(sessionId: string): Promise<LocalChatWorkspace>;
+  getLocalChatRuntimeState(): Promise<LocalChatRuntimeState>;
+  startLocalChatTurn(request: LocalChatTurnRequest): Promise<LocalChatTurnStarted>;
+  cancelLocalChatTurn(turnId: string): Promise<void>;
+  onLocalChatEvent(listener: LocalChatEventListener): () => void;
+}
+
+/** The only message roles the local text-chat runtime accepts in phase one. */
+export type LocalChatMessageRole = 'user' | 'assistant';
+
+/** One already-visible transcript item sent to the local model. */
+export interface LocalChatMessageInput {
+  role: LocalChatMessageRole;
+  content: string;
+}
+
+/** Immutable renderer-to-main request for one local-model chat turn. */
+export interface LocalChatTurnRequest {
+  turnId: string;
+  sessionId: string;
+  userMessageId: string;
+  assistantMessageId: string;
+  modelId: string;
+  createdAt: number;
+  messages: LocalChatMessageInput[];
+}
+
+/** Immediate acknowledgement that the main process accepted a chat turn. */
+export interface LocalChatTurnStarted {
+  turnId: string;
+}
+
+/** Small renderer-safe description of the model currently loaded in memory. */
+export interface LocalChatRuntimeModel {
+  id: string;
+  label: string;
+}
+
+/** The local inference runtime's current availability, without exposing its endpoint. */
+export interface LocalChatRuntimeState {
+  status: 'unavailable' | 'starting' | 'ready' | 'error';
+  model: LocalChatRuntimeModel | null;
+  /** Actual context size passed to the local runtime, when one is selected. */
+  contextWindowTokens: number | null;
+  error: string | null;
+}
+
+/** Stream events normalized from the local runtime's OpenAI-compatible SSE response. */
+export type LocalChatEvent =
+  | {
+      type: 'textDelta';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+      text: string;
+    }
+  | {
+      type: 'reasoningDelta';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+      text: string;
+    }
+  | {
+      type: 'usage';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+      inputTokens: number | null;
+      outputTokens: number | null;
+    }
+  | {
+      type: 'completed' | 'cancelled';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+    }
+  | {
+      type: 'watchdogTerminated';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+    }
+  | {
+      type: 'error';
+      turnId: string;
+      sessionId: string;
+      assistantMessageId: string;
+      message: string;
+      retryable: boolean;
+    };
+
+/** Removes the IPC listener installed by `onLocalChatEvent`. */
+export type LocalChatEventListener = (event: LocalChatEvent) => void;
+
+/** Durable state assigned to a transcript message by the local Chat store. */
+export type LocalChatMessageStatus = 'complete' | 'streaming' | 'error' | 'incomplete';
+
+/** Lifecycle of one persisted local-model turn. */
+export type LocalChatTurnStatus =
+  | 'streaming'
+  | 'completed'
+  | 'cancelled'
+  | 'error'
+  | 'watchdogTerminated'
+  | 'incomplete';
+
+/** Token measurements the local runtime supplied for one assistant response. */
+export interface LocalChatTokenUsage {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  contextWindowTokens: number | null;
+}
+
+/** One message restored from the local Chat database. */
+export interface LocalChatStoredMessage {
+  id: string;
+  role: LocalChatMessageRole;
+  content: string;
+  reasoningContent: string;
+  createdAt: number;
+  durationMs: number | null;
+  status: LocalChatMessageStatus;
+  tokenUsage: LocalChatTokenUsage | null;
+}
+
+/** One durable Chat session, including its transcript and selected model metadata. */
+export interface LocalChatStoredSession {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  modelId: string | null;
+  modelLabel: string | null;
+  closed: boolean;
+  messages: LocalChatStoredMessage[];
+}
+
+/** Restored workspace state for the history panel, open tabs, and current session. */
+export interface LocalChatWorkspace {
+  sessions: LocalChatStoredSession[];
+  openSessionIds: string[];
+  activeSessionId: string;
 }
 
 /**
@@ -276,7 +422,7 @@ export interface ModelProfile {
   type: ModelProfileType;
   supportedApiFormats: CloudApiFormat[];
   litellmLinks: LiteLlmModelLink[];
-  /** Unix timestamp in seconds, stored as SQLite REAL for exact roundtrips. */
+  /** Unix timestamp in seconds exposed to model code; SQLite stores local ISO time plus a sortable epoch value. */
   createdAt: number;
 }
 

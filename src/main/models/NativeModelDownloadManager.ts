@@ -10,6 +10,7 @@ import type {
   LocalModelRow
 } from '../../shared/types';
 import HostDiskProbe from '../host/HostDiskProbe';
+import type { LocalModelLaunchRequest } from './LocalModelRuntime';
 import DownloadedModelStore from './DownloadedModelStore';
 
 interface PersistedDownload {
@@ -35,6 +36,9 @@ interface RuntimeEntry {
 }
 
 type ModelStateListener = () => void;
+
+/** Starts an app-owned local runtime for the downloaded model and returns its loopback endpoint. */
+export type LocalModelRuntimeStarter = (model: LocalModelLaunchRequest) => Promise<string>;
 
 /** Owns Electron DownloadItems and projects them into model lifecycle rows. */
 export class NativeModelDownloadManager {
@@ -206,8 +210,8 @@ export class NativeModelDownloadManager {
     return fitsMemory ? 0 : 1;
   }
 
-  /** Marks a downloaded model as running without pretending to start a server. */
-  async deployModel(descriptor: LocalModelDescriptor): Promise<void> {
+  /** Starts the inference runtime only after the model artifact is confirmed on disk. */
+  async deployModel(descriptor: LocalModelDescriptor, startRuntime: LocalModelRuntimeStarter): Promise<void> {
     if (!(await this.isDownloaded(descriptor))) throw new Error('Download the model before deploying it.');
     const entry = this.entries.get(descriptor.id) ?? {
       descriptor,
@@ -220,11 +224,56 @@ export class NativeModelDownloadManager {
       endpoint: null
     };
     entry.state = 'deployPreparing';
+    entry.error = null;
+    entry.endpoint = null;
     this.entries.set(descriptor.id, entry);
     this.notify();
-    // Server integration is intentionally a separate target concern; keep the state explicit until it exists.
+    try {
+      entry.endpoint = await startRuntime({
+        id: descriptor.id,
+        label: descriptor.name,
+        fileName: descriptor.fileName,
+        filePath: this.store.fileFor(descriptor)
+      });
+      entry.state = 'deployed';
+      entry.error = null;
+      this.notify();
+    } catch (error) {
+      entry.state = 'deployFailed';
+      entry.endpoint = null;
+      entry.error = error instanceof Error ? error.message : String(error);
+      this.notify();
+      throw error;
+    }
+  }
+
+  /** Moves a model back to its downloaded state when a different runtime takes over. */
+  markDeploymentStopped(modelId: string): void {
+    const entry = this.entries.get(modelId);
+    if (!entry) return;
+    entry.state = 'downloaded';
+    entry.endpoint = null;
+    entry.error = null;
+    this.notify();
+  }
+
+  /** Marks a model as running again after its supervised runtime has recovered. */
+  markDeploymentReady(modelId: string, endpoint: string): void {
+    const entry = this.entries.get(modelId);
+    if (!entry) return;
     entry.state = 'deployed';
-    entry.endpoint = `local://${this.safeId(descriptor.id)}`;
+    entry.endpoint = endpoint;
+    entry.error = null;
+    this.notify();
+  }
+
+  /** Reflects an unexpected runtime exit in the model row without deleting its artifact. */
+  markDeploymentFailed(modelId: string, error: string): void {
+    const entry = this.entries.get(modelId);
+    if (!entry) return;
+    entry.state = 'deployFailed';
+    entry.endpoint = null;
+    entry.error = error;
     this.notify();
   }
 

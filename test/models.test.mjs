@@ -181,6 +181,14 @@ function createManager() {
     downloader: {
       capability: async () => ({ target: 'mac', freeDiskBytes: null, totalRamBytes: null, platform: 'darwin' }),
       projectRows: async (descriptors) => descriptors.map((descriptor) => ({ ...descriptor, lifecycle: 'downloadable' }))
+    },
+    localRuntime: {
+      subscribe: () => () => {},
+      getLocalChatRuntimeState: () => ({ status: 'unavailable', model: null, contextWindowTokens: null, error: null }),
+      startModel: async () => ({ phase: 'idle', modelId: null, endpoint: null, error: null, device: null }),
+      stopModel: async () => ({ phase: 'idle', modelId: null, endpoint: null, error: null, device: null }),
+      chatCompletionsUrl: () => 'http://127.0.0.1:8081/v1/chat/completions',
+      chatRequestHeaders: () => ({ Authorization: 'Bearer test-key' })
     }
   });
 }

@@ -102,7 +102,7 @@ interface CatalogModelRowProps {
   model: CatalogModel;
   isFirst: boolean;
   isLast: boolean;
-  /** True while this row's own action is still running in the main process. */
+  /** True while any catalog mutation is running in the main process. */
   isBusy: boolean;
   onAction: (modelId: string, kind: CatalogActionKind) => void;
 }
@@ -243,7 +243,7 @@ function CatalogCard() {
             model={describeCatalogModel(model)}
             isFirst={index === 0}
             isLast={index === models.length - 1}
-            isBusy={catalog.busyModelId === model.id}
+            isBusy={catalog.busyModelId !== null}
             onAction={catalog.runAction}
           />
         ))}

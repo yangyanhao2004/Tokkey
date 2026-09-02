@@ -2,6 +2,13 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
+import { tokiieDatabasePath } from '../storage/TokiieDatabase';
+import {
+  epochMillisecondsFromStoredTimestamp,
+  isLocalStorageTimestamp,
+  localTimestampForEpochMilliseconds,
+  type LocalStorageTimestamp
+} from '../storage/LocalTimestamp';
 import type {
   CloudApiFormat,
   LiteLlmModelLink,
@@ -21,10 +28,8 @@ const CLOUD_API_FORMATS: readonly CloudApiFormat[] = [
 const MODEL_PROFILE_TYPES: readonly ModelProfileType[] = ['cloud', 'local', 'hub', 'tokenbox'];
 
 /**
- * Column-for-column copy of the table the Swift app creates through its GRDB
- * migration. `IF NOT EXISTS` makes this a no-op on a database that already ran
- * that migration, and creates a compatible table on a machine that never had
- * the Swift app installed.
+ * Tokiie keeps local business time in readable ISO text with the user's system
+ * timezone. A paired epoch column remains available for stable comparisons.
  */
 const MODEL_PROFILES_SCHEMA = `
 CREATE TABLE IF NOT EXISTS "model_profiles" (
@@ -37,22 +42,24 @@ CREATE TABLE IF NOT EXISTS "model_profiles" (
   "type" TEXT NOT NULL DEFAULT 'cloud',
   "supported_api_formats" TEXT NOT NULL DEFAULT 'openai_chat',
   "litellm_links" TEXT NOT NULL DEFAULT '[]',
-  "created_at" REAL NOT NULL
+  "created_at" TEXT NOT NULL,
+  "created_at_epoch_ms" INTEGER NOT NULL DEFAULT 0,
+  "created_at_time_zone" TEXT NOT NULL DEFAULT ''
 )`;
 
 const SELECT_PROFILE_BY_ID = `
 SELECT id, name, provider, api_url, api_key, model_name, type,
-       supported_api_formats, litellm_links, created_at
+       supported_api_formats, litellm_links, created_at, created_at_epoch_ms
   FROM "model_profiles"
  WHERE id = ?`;
 
-// INSERT OR REPLACE mirrors what GRDB's save() does, so a profile written by
-// either app updates the same row instead of failing on the primary key.
+// INSERT OR REPLACE keeps a profile's stable ID idempotent within Tokiie's database.
 const UPSERT_PROFILE = `
 INSERT OR REPLACE INTO "model_profiles"
   (id, name, provider, api_url, api_key, model_name, type,
-   supported_api_formats, litellm_links, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+   supported_api_formats, litellm_links,
+   created_at, created_at_epoch_ms, created_at_time_zone)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 /** Persistence contract the connector programs against. */
 export interface ModelProfileStoring {
@@ -70,12 +77,7 @@ export interface SqliteModelProfileStoreOptions {
 }
 
 /**
- * Reads and writes `model_profiles` in `~/.amiswifi/dbs/amis_wifi.db`.
- *
- * The file is shared with the Swift Amis-Wifi app, so this class owns no schema
- * of its own: it creates the table exactly as that app's migration does and
- * encodes every column in the same representation (comma-joined API formats,
- * JSON links, Unix-seconds timestamp).
+ * Reads and writes Tokiie's `model_profiles` in `~/.tokiie/dbs/tokiie.db`.
  */
 export class SqliteModelProfileStore implements ModelProfileStoring {
   private readonly databasePath: string;
@@ -84,8 +86,7 @@ export class SqliteModelProfileStore implements ModelProfileStoring {
 
   constructor(options: SqliteModelProfileStoreOptions = {}) {
     const homeDirectory = options.homeDirectory ?? os.homedir();
-    this.databasePath =
-      options.databasePath ?? path.join(homeDirectory, '.amiswifi', 'dbs', 'amis_wifi.db');
+    this.databasePath = options.databasePath ?? tokiieDatabasePath(homeDirectory);
     this.openDatabase = options.openDatabase ?? SqliteModelProfileStore.openSqliteDatabase;
   }
 
@@ -95,6 +96,7 @@ export class SqliteModelProfileStore implements ModelProfileStoring {
   }
 
   async save(profile: ModelProfile): Promise<void> {
+    const createdAt = this.timestampForSeconds(profile.createdAt);
     this.connect()
       .prepare(UPSERT_PROFILE)
       .run(
@@ -107,7 +109,9 @@ export class SqliteModelProfileStore implements ModelProfileStoring {
         profile.type,
         profile.supportedApiFormats.join(','),
         JSON.stringify(profile.litellmLinks),
-        profile.createdAt
+        createdAt.localDateTime,
+        createdAt.epochMilliseconds,
+        createdAt.timeZone
       );
   }
 
@@ -125,10 +129,117 @@ export class SqliteModelProfileStore implements ModelProfileStoring {
     mkdirSync(path.dirname(this.databasePath), { recursive: true });
     const database = this.openDatabase(this.databasePath);
     database.exec(MODEL_PROFILES_SCHEMA);
+    this.database = database;
+    this.migrateLocalTimestampStorage();
     // Stored API keys must not be world-readable; matches the Swift app.
     this.restrictPermissions();
-    this.database = database;
     return database;
+  }
+
+  private migrateLocalTimestampStorage(): void {
+    if (!this.tableHasColumn('created_at_epoch_ms') || !this.tableHasColumn('created_at_time_zone')) {
+      this.rebuildTimestampSchema();
+    }
+    this.backfillLocalTimestamp();
+  }
+
+  private rebuildTimestampSchema(): void {
+    const database = this.databaseOrThrow();
+    const rows = database.prepare('SELECT rowid, * FROM "model_profiles"').all() as Record<string, unknown>[];
+    database.exec('BEGIN IMMEDIATE');
+    try {
+      database.exec('ALTER TABLE "model_profiles" RENAME TO "model_profiles_legacy_timestamp"');
+      database.exec(MODEL_PROFILES_SCHEMA);
+      const statement = database.prepare(`
+        INSERT INTO "model_profiles"
+          (id, name, provider, api_url, api_key, model_name, type, supported_api_formats, litellm_links,
+           created_at, created_at_epoch_ms, created_at_time_zone)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      rows.forEach((row) => {
+        const createdAt = this.timestampForRow(row);
+        statement.run(
+          this.textValue(row.id),
+          this.textValue(row.name),
+          this.textValue(row.provider),
+          this.textValue(row.api_url),
+          row.api_key === null || row.api_key === undefined ? null : this.textValue(row.api_key),
+          this.textValue(row.model_name),
+          this.textValue(row.type),
+          this.textValue(row.supported_api_formats),
+          this.textValue(row.litellm_links),
+          createdAt.localDateTime,
+          createdAt.epochMilliseconds,
+          createdAt.timeZone
+        );
+      });
+      database.exec('DROP TABLE "model_profiles_legacy_timestamp"');
+      database.exec('COMMIT');
+    } catch (error) {
+      database.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private backfillLocalTimestamp(): void {
+    const rows = this.databaseOrThrow()
+      .prepare('SELECT rowid, * FROM "model_profiles"')
+      .all() as Record<string, unknown>[];
+    rows.forEach((row) => {
+      if (this.hasCompleteTimestamp(row)) return;
+      const createdAt = this.timestampForRow(row);
+      this.databaseOrThrow().prepare(`
+        UPDATE "model_profiles"
+           SET created_at = ?, created_at_epoch_ms = ?, created_at_time_zone = ?
+         WHERE rowid = ?`)
+        .run(createdAt.localDateTime, createdAt.epochMilliseconds, createdAt.timeZone, this.numberValue(row.rowid));
+    });
+  }
+
+  private hasCompleteTimestamp(row: Record<string, unknown>): boolean {
+    const timeZone = row.created_at_time_zone;
+    return (
+      isLocalStorageTimestamp(row.created_at) &&
+      epochMillisecondsFromStoredTimestamp(row.created_at_epoch_ms, 'milliseconds') !== null &&
+      typeof timeZone === 'string' && timeZone.length > 0
+    );
+  }
+
+  private timestampForRow(row: Record<string, unknown>): LocalStorageTimestamp {
+    if (this.hasCompleteTimestamp(row)) {
+      return {
+        localDateTime: this.textValue(row.created_at),
+        epochMilliseconds: epochMillisecondsFromStoredTimestamp(row.created_at_epoch_ms, 'milliseconds') ?? Date.now(),
+        timeZone: this.textValue(row.created_at_time_zone)
+      };
+    }
+    const epochMilliseconds = epochMillisecondsFromStoredTimestamp(row.created_at_epoch_ms, 'milliseconds')
+      ?? epochMillisecondsFromStoredTimestamp(row.created_at, 'seconds')
+      ?? Date.now();
+    return localTimestampForEpochMilliseconds(epochMilliseconds);
+  }
+
+  private timestampForSeconds(seconds: number): LocalStorageTimestamp {
+    const timestamp = epochMillisecondsFromStoredTimestamp(seconds, 'seconds');
+    if (timestamp === null) {
+      throw new TypeError('Model profile createdAt must be a positive Unix timestamp in seconds.');
+    }
+    return localTimestampForEpochMilliseconds(timestamp);
+  }
+
+  private createdAtSeconds(row: Record<string, unknown>): number {
+    const epochMilliseconds = epochMillisecondsFromStoredTimestamp(row.created_at_epoch_ms, 'milliseconds')
+      ?? epochMillisecondsFromStoredTimestamp(row.created_at, 'seconds')
+      ?? 0;
+    return epochMilliseconds / 1_000;
+  }
+
+  private tableHasColumn(columnName: string): boolean {
+    const rows = this.databaseOrThrow().prepare('PRAGMA table_info("model_profiles")').all() as Record<string, unknown>[];
+    return rows.some((row) => this.textValue(row.name) === columnName);
+  }
+
+  private databaseOrThrow(): DatabaseSync {
+    return this.database ?? this.connect();
   }
 
   private restrictPermissions(): void {
@@ -156,7 +267,7 @@ export class SqliteModelProfileStore implements ModelProfileStoring {
       type: this.decodeType(this.textValue(row.type)),
       supportedApiFormats: this.decodeFormats(this.textValue(row.supported_api_formats)),
       litellmLinks: this.decodeLinks(this.textValue(row.litellm_links)),
-      createdAt: typeof row.created_at === 'number' ? row.created_at : Number(row.created_at ?? 0)
+      createdAt: this.createdAtSeconds(row)
     };
   }
 
@@ -199,6 +310,11 @@ export class SqliteModelProfileStore implements ModelProfileStoring {
 
   private textValue(value: unknown): string {
     return typeof value === 'string' ? value : String(value ?? '');
+  }
+
+  private numberValue(value: unknown): number {
+    const parsed = typeof value === 'number' ? value : Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 
   /**

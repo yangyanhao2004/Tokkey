@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { LocalModelRuntimeState, TokiieApi } from '../shared/types';
+import type { LocalChatEvent, LocalModelRuntimeState, TokiieApi } from '../shared/types';
 
 /**
  * The only bridge between renderer and main process. It exposes a small,
@@ -52,9 +52,9 @@ class PreloadBridge {
       deleteLocalModel: (modelId, request) => ipcRenderer.invoke('models:delete', modelId, request),
       deployLocalModel: (modelId, request) => ipcRenderer.invoke('models:deploy', modelId, request),
       listInstalledLocalModels: () => ipcRenderer.invoke('models:list-installed'),
+      startInstalledLocalModel: (modelId) => ipcRenderer.invoke('models:start-installed', modelId),
       removeInstalledLocalModel: (modelId) => ipcRenderer.invoke('models:remove-installed', modelId),
       getLocalModelRuntimeState: () => ipcRenderer.invoke('models:runtime-state'),
-      startInstalledLocalModel: (modelId) => ipcRenderer.invoke('models:start-installed', modelId),
       stopLocalModelRuntime: () => ipcRenderer.invoke('models:stop-runtime'),
       onLocalModelRuntimeStateChanged: (listener) => {
         const handler = (_event: IpcRendererEvent, state: LocalModelRuntimeState) => listener(state);
@@ -63,10 +63,62 @@ class PreloadBridge {
       },
       listCloudModelCards: () => ipcRenderer.invoke('models:cloud-cards'),
       connectCloudModel: (cardId) => ipcRenderer.invoke('models:connect-cloud', cardId),
-      restoreCloudModels: () => ipcRenderer.invoke('models:restore-cloud')
+      restoreCloudModels: () => ipcRenderer.invoke('models:restore-cloud'),
+      loadLocalChatWorkspace: () => ipcRenderer.invoke('chat:load-workspace'),
+      createLocalChatSession: () => ipcRenderer.invoke('chat:create-session'),
+      openLocalChatSession: (sessionId) => ipcRenderer.invoke('chat:open-session', sessionId),
+      closeLocalChatSession: (sessionId) => ipcRenderer.invoke('chat:close-session', sessionId),
+      getLocalChatRuntimeState: () => ipcRenderer.invoke('chat:get-runtime-state'),
+      startLocalChatTurn: (request) => ipcRenderer.invoke('chat:start-turn', request),
+      cancelLocalChatTurn: (turnId) => ipcRenderer.invoke('chat:cancel-turn', turnId),
+      onLocalChatEvent: (listener) => {
+        const forwardEvent = (_event: IpcRendererEvent, payload: unknown) => {
+          if (isLocalChatEvent(payload)) {
+            listener(payload);
+          }
+        };
+        ipcRenderer.on('chat:event', forwardEvent);
+        return () => ipcRenderer.removeListener('chat:event', forwardEvent);
+      }
     };
     contextBridge.exposeInMainWorld('tokiie', api);
   }
 }
 
 new PreloadBridge().expose();
+
+function isLocalChatEvent(value: unknown): value is LocalChatEvent {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const event = value as Record<string, unknown>;
+  if (!hasLocalChatEventIdentity(event)) {
+    return false;
+  }
+  switch (event.type) {
+    case 'textDelta':
+      return typeof event.text === 'string';
+    case 'reasoningDelta':
+      return typeof event.text === 'string';
+    case 'usage':
+      return isNullableFiniteNumber(event.inputTokens) && isNullableFiniteNumber(event.outputTokens);
+    case 'completed':
+    case 'cancelled':
+    case 'watchdogTerminated':
+      return true;
+    case 'error':
+      return typeof event.message === 'string' && typeof event.retryable === 'boolean';
+    default:
+      return false;
+  }
+}
+
+function hasLocalChatEventIdentity(event: Record<string, unknown>): boolean {
+  return typeof event.turnId === 'string' &&
+    typeof event.sessionId === 'string' &&
+    typeof event.assistantMessageId === 'string';
+}
+
+function isNullableFiniteNumber(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value));
+}

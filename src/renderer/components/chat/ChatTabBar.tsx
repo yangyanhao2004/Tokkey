@@ -1,20 +1,17 @@
 import { useRef } from 'react';
-import { ICON_BASE_PATH, searchHistory, summarizeSession, type ChatSession } from '../../pages/chatContent';
+import { ICON_BASE_PATH, summarizeSession, type ChatSession } from '../../pages/chatContent';
 import { ChatHistoryPopover } from './ChatHistoryPopover';
 
 interface ChatTabBarProps {
   sessions: ChatSession[];
   activeSessionId: string;
   historyIsOpen: boolean;
-  historyQuery: string;
   historyGroups: { label: 'Today' | '7Days' | 'Earlier'; items: ReturnType<typeof summarizeSession>[] }[];
-  historyResults: ReturnType<typeof searchHistory>;
   onSelectSession: (sessionId: string) => void;
   onCloseSession: (sessionId: string) => void;
   onCreateChat: () => void;
   onOpenHistory: () => void;
   onCloseHistory: () => void;
-  onHistoryQueryChange: (query: string) => void;
 }
 
 function ChatTab({
@@ -49,7 +46,9 @@ function ChatTab({
         aria-current={isActive ? 'page' : undefined}
         aria-label={`Open ${session.title}`}
       >
-        <img className="block h-[13px] w-[14px] shrink-0 max-w-none opacity-75" src={`${ICON_BASE_PATH}/chat-tab-sparkles.svg`} alt="" />
+        <span className="box-border flex size-4 shrink-0 items-center justify-center pb-[1.333px] pl-[1.333px] pr-[0.667px] pt-[1.667px]" aria-hidden="true">
+          <img className="block h-[13px] w-[14px] max-w-none opacity-75" src={`${ICON_BASE_PATH}/chat-tab-sparkles.svg`} alt="" />
+        </span>
         <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-white">{session.title}</span>
       </button>
       <button
@@ -68,15 +67,12 @@ export function ChatTabBar({
   sessions,
   activeSessionId,
   historyIsOpen,
-  historyQuery,
   historyGroups,
-  historyResults,
   onSelectSession,
   onCloseSession,
   onCreateChat,
   onOpenHistory,
-  onCloseHistory,
-  onHistoryQueryChange
+  onCloseHistory
 }: ChatTabBarProps) {
   const historyButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -121,10 +117,7 @@ export function ChatTabBar({
         </button>
         {historyIsOpen && (
           <ChatHistoryPopover
-            query={historyQuery}
             browseGroups={historyGroups}
-            searchResults={historyResults}
-            onQueryChange={onHistoryQueryChange}
             onSelectSession={onSelectSession}
             onClose={onCloseHistory}
             onRestoreFocus={() => historyButtonRef.current?.focus()}
