@@ -64,17 +64,7 @@ export function ChatComposer({ isEmpty, model, modelState, requestState, onSend,
           onKeyDown={handleKeyDown}
           data-testid="chat-input"
         />
-        <div className="flex h-12 items-end justify-between px-2 pb-2 pt-1">
-          <button
-            type="button"
-            disabled
-            className="flex size-8 items-center justify-center rounded-[9px] text-white/70 opacity-80"
-            aria-label="Add document (coming soon)"
-            title="Coming soon"
-            data-testid="chat-add-document"
-          >
-            <img className="block size-4 max-w-none" src={`${ICON_BASE_PATH}/chat-document.svg`} alt="" />
-          </button>
+        <div className="flex h-12 items-end justify-end px-2 pb-2 pt-1">
           <div className="flex items-center gap-2">
             <div
               className="flex h-[30px] max-w-[124px] items-center gap-1.5 truncate rounded-lg border border-chat-model-border bg-chat-model px-2 text-[10px] text-chat-model-label"

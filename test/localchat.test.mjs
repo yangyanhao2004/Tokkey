@@ -678,6 +678,7 @@ test('Chat session store persists user-local timestamps and preserves sortable i
   const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-local-chat-time-'));
   const databasePath = path.join(directory, 'tokiie.db');
   const startedAt = 1_788_000_000_123;
+  const assistantStartedAt = startedAt + 200;
   const endedAt = startedAt + 500;
   let currentTime = startedAt;
   const store = new ChatSessionStore({
@@ -697,6 +698,8 @@ test('Chat session store persists user-local timestamps and preserves sortable i
       createdAt: startedAt
     };
     store.beginTurn({ request, modelLabel: LOCAL_MODEL.label, contextWindowTokens: 4096 });
+    currentTime = assistantStartedAt;
+    store.handleStreamEvent({ type: 'reasoningDelta', ...request, text: 'Working it out.' });
     currentTime = endedAt;
     store.handleStreamEvent({
       type: 'completed',
@@ -707,6 +710,7 @@ test('Chat session store persists user-local timestamps and preserves sortable i
     store.close();
 
     const expectedStartedAt = localTimestampForEpochMilliseconds(startedAt);
+    const expectedAssistantStartedAt = localTimestampForEpochMilliseconds(assistantStartedAt);
     const expectedEndedAt = localTimestampForEpochMilliseconds(endedAt);
     const database = new DatabaseSync(databasePath);
     try {
@@ -718,6 +722,10 @@ test('Chat session store persists user-local timestamps and preserves sortable i
         SELECT started_at, started_at_epoch_ms, started_at_time_zone,
                ended_at, ended_at_epoch_ms, ended_at_time_zone
           FROM chat_turns WHERE id = ?`).get(request.turnId);
+      const assistantMessage = database.prepare(`
+        SELECT created_at, created_at_epoch_ms, created_at_time_zone, typeof(created_at) AS created_at_type,
+               duration_ms
+          FROM chat_messages WHERE id = ?`).get(request.assistantMessageId);
 
       assert.deepEqual({ ...session }, {
         created_at: expectedStartedAt.localDateTime,
@@ -735,6 +743,13 @@ test('Chat session store persists user-local timestamps and preserves sortable i
         ended_at: expectedEndedAt.localDateTime,
         ended_at_epoch_ms: endedAt,
         ended_at_time_zone: expectedEndedAt.timeZone
+      });
+      assert.deepEqual({ ...assistantMessage }, {
+        created_at: expectedAssistantStartedAt.localDateTime,
+        created_at_epoch_ms: assistantStartedAt,
+        created_at_time_zone: expectedAssistantStartedAt.timeZone,
+        created_at_type: 'text',
+        duration_ms: endedAt - startedAt
       });
     } finally {
       database.close();
