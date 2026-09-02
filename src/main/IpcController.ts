@@ -23,6 +23,7 @@ import type {
   InstalledSkill,
   McpAgent,
   RepositorySyncResult,
+  RouterRuntimeState,
   SkillAgent,
   SkillAgentSelection,
   SkillInstallResult,
@@ -60,6 +61,7 @@ import CloudModelConnector from './models/CloudModelConnector';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import HostSnapshotService from './host/HostSnapshotService';
+import RouterProcessManager from './router/RouterProcessManager';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 import AccountRuntime from './account/AccountRuntime';
 import AccountService from './account/AccountService';
@@ -88,6 +90,8 @@ export interface IpcControllerOptions {
   codexGatewayIntegration?: CodexGatewayIntegration;
   /** Keeps Claude Code's model settings in step with the gateway's routes. */
   claudeGatewayIntegration?: ClaudeGatewayIntegration;
+  /** Owns the router subprocess the Router page's switch turns on and off. */
+  routerProcessManager?: RouterProcessManager;
 }
 
 /**
@@ -95,6 +99,15 @@ export interface IpcControllerOptions {
  * Channel names live here and in preload.ts only, so the surface stays auditable.
  */
 export default class IpcController {
+  /** What the Router page shows when the app was built without a router manager. */
+  private static readonly ROUTER_UNAVAILABLE_STATE: RouterRuntimeState = {
+    phase: 'error',
+    port: null,
+    baseUrl: null,
+    dashboardUrl: null,
+    error: 'The router runtime is not available in this build.'
+  };
+
   private readonly handlers: Record<string, IpcHandler>;
   private readonly skillCatalogScanner: LocalSkillCatalogScanner;
   private readonly skillDeployer: SkillDeployer;
@@ -113,6 +126,7 @@ export default class IpcController {
   private readonly cloudModelConnector: CloudModelConnector | null;
   private readonly codexGatewayIntegration: CodexGatewayIntegration | null;
   private readonly claudeGatewayIntegration: ClaudeGatewayIntegration | null;
+  private readonly routerProcessManager: RouterProcessManager | null;
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
   constructor(options: IpcControllerOptions = {}) {
@@ -145,16 +159,20 @@ export default class IpcController {
     this.localChatTurnExecutor = options.localChatTurnExecutor ?? new LocalChatTurnExecutor({
       runtime: this.tokenHubRuntime
     });
-    this.tokenHubRuntime.subscribe((state) => {
-      BrowserWindow.getAllWindows().forEach((window) => {
-        if (!window.isDestroyed()) window.webContents.send('models:runtime-state-changed', state);
-      });
-    });
+    this.tokenHubRuntime.subscribe((state) =>
+      this.broadcast('models:runtime-state-changed', state)
+    );
     this.chatSessionStore = options.chatSessionStore ?? new ChatSessionStore();
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     this.codexGatewayIntegration = options.codexGatewayIntegration ?? null;
     this.claudeGatewayIntegration = options.claudeGatewayIntegration ?? null;
+    this.routerProcessManager = options.routerProcessManager ?? null;
+    // The router can also stop on its own — a crash, or a start that timed out —
+    // so the switch is driven by these events rather than by the click alone.
+    this.routerProcessManager?.subscribe((state) =>
+      this.broadcast('router:state-changed', state)
+    );
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
@@ -242,8 +260,39 @@ export default class IpcController {
       'models:cloud-cards': () => this.listCloudModelCards(),
       'models:restore-cloud': () => this.restoreCloudModels(),
       'models:connect-cloud': (cardId: unknown) =>
-        this.connectCloudModel(this.requireString(cardId, 'Cloud model card ID'))
+        this.connectCloudModel(this.requireString(cardId, 'Cloud model card ID')),
+      'router:get-state': () => this.getRouterRuntimeState(),
+      'router:start': () => this.startRouterRuntime(),
+      'router:stop': () => this.stopRouterRuntime()
     };
+  }
+
+  /** Sends one payload to every live window, for main-process-driven state. */
+  private broadcast(channel: string, payload: unknown): void {
+    BrowserWindow.getAllWindows().forEach((window) => {
+      if (!window.isDestroyed()) window.webContents.send(channel, payload);
+    });
+  }
+
+  /** The router's current phase, which the Router page's switch draws itself from. */
+  private getRouterRuntimeState(): RouterRuntimeState {
+    return this.routerProcessManager?.currentState() ?? IpcController.ROUTER_UNAVAILABLE_STATE;
+  }
+
+  /** Turns the router on. Resolves with the failure state rather than throwing. */
+  private startRouterRuntime(): Promise<RouterRuntimeState> {
+    if (!this.routerProcessManager) {
+      return Promise.resolve(IpcController.ROUTER_UNAVAILABLE_STATE);
+    }
+    return this.routerProcessManager.start();
+  }
+
+  /** Turns the router off at the user's request. */
+  private stopRouterRuntime(): RouterRuntimeState {
+    return (
+      this.routerProcessManager?.stop('switched off from the Router page') ??
+      IpcController.ROUTER_UNAVAILABLE_STATE
+    );
   }
 
   /** Connects native Electron downloads after app.whenReady(). */

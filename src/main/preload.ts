@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
-import type { LocalChatEvent, LocalModelRuntimeState, TokiieApi } from '../shared/types';
+import type {
+  LocalChatEvent,
+  LocalModelRuntimeState,
+  RouterRuntimeState,
+  TokiieApi
+} from '../shared/types';
 
 /**
  * The only bridge between renderer and main process. It exposes a small,
@@ -64,6 +69,14 @@ class PreloadBridge {
       listCloudModelCards: () => ipcRenderer.invoke('models:cloud-cards'),
       connectCloudModel: (cardId) => ipcRenderer.invoke('models:connect-cloud', cardId),
       restoreCloudModels: () => ipcRenderer.invoke('models:restore-cloud'),
+      getRouterRuntimeState: () => ipcRenderer.invoke('router:get-state'),
+      startRouterRuntime: () => ipcRenderer.invoke('router:start'),
+      stopRouterRuntime: () => ipcRenderer.invoke('router:stop'),
+      onRouterRuntimeStateChanged: (listener) => {
+        const handler = (_event: IpcRendererEvent, state: RouterRuntimeState) => listener(state);
+        ipcRenderer.on('router:state-changed', handler);
+        return () => ipcRenderer.removeListener('router:state-changed', handler);
+      },
       loadLocalChatWorkspace: () => ipcRenderer.invoke('chat:load-workspace'),
       createLocalChatSession: () => ipcRenderer.invoke('chat:create-session'),
       openLocalChatSession: (sessionId) => ipcRenderer.invoke('chat:open-session', sessionId),

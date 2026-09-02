@@ -236,6 +236,10 @@ export interface TokiieApi {
   listCloudModelCards(): Promise<CloudModelCard[]>;
   connectCloudModel(cardId: string): Promise<CloudModelConnection>;
   restoreCloudModels(): Promise<CloudModelConnection[]>;
+  getRouterRuntimeState(): Promise<RouterRuntimeState>;
+  startRouterRuntime(): Promise<RouterRuntimeState>;
+  stopRouterRuntime(): Promise<RouterRuntimeState>;
+  onRouterRuntimeStateChanged(listener: (state: RouterRuntimeState) => void): () => void;
   loadLocalChatWorkspace(): Promise<LocalChatWorkspace>;
   createLocalChatSession(): Promise<LocalChatWorkspace>;
   openLocalChatSession(sessionId: string): Promise<LocalChatWorkspace>;
@@ -547,6 +551,23 @@ export interface LocalModelRuntimeState {
   endpoint: string | null;
   error: string | null;
   device: TokenHubDevice | null;
+}
+
+/**
+ * User-visible lifecycle of the router subprocess behind the Router page switch.
+ * `stopped` is both "never started" and "switched off": the switch itself is the
+ * only thing that distinguishes them, and it already knows.
+ */
+export type RouterRuntimePhase = 'stopped' | 'starting' | 'running' | 'error';
+
+export interface RouterRuntimeState {
+  phase: RouterRuntimePhase;
+  port: number | null;
+  /** Loopback address the router serves on, once it is running. */
+  baseUrl: string | null;
+  /** The router's own traffic dashboard, offered beside the switch. */
+  dashboardUrl: string | null;
+  error: string | null;
 }
 
 /** Local machine capability used for download gates and runtime display. */

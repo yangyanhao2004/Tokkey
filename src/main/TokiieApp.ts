@@ -7,6 +7,7 @@ import CodexNativeModelRegistrar from './models/CodexNativeModelRegistrar';
 import ClaudeNativeModelRegistrar from './models/ClaudeNativeModelRegistrar';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
+import RouterProcessManager from './router/RouterProcessManager';
 import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
 import LocalChatTurnExecutor from './chat/LocalChatTurnExecutor';
 import LocalModelManager from './models/LocalModelManager';
@@ -38,6 +39,7 @@ export class TokiieApp {
   private readonly codexGatewayIntegration: CodexGatewayIntegration;
   private readonly claudeGatewayIntegration: ClaudeGatewayIntegration;
   private readonly tokenHubRuntime: TokenHubRuntime;
+  private readonly routerProcessManager: RouterProcessManager;
   private readonly isDev: boolean;
   private readonly evidenceMode: boolean;
   private readonly evidenceCapture: RendererEvidenceCapture | null;
@@ -85,6 +87,12 @@ export class TokiieApp {
     this.localChatTurnExecutor = new LocalChatTurnExecutor({
       runtime: this.tokenHubRuntime
     });
+    // The router forwards to the gateway, so it takes the gateway as its endpoint
+    // rather than being started here: the Router page's switch owns its lifecycle.
+    this.routerProcessManager = new RouterProcessManager({
+      gateway: this.gatewayProcessManager,
+      resourcesPath: app.isPackaged ? process.resourcesPath : undefined
+    });
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
       cloudModelConnector: this.cloudModelConnector,
@@ -92,7 +100,8 @@ export class TokiieApp {
       claudeGatewayIntegration: this.claudeGatewayIntegration,
       localModelManager: this.localModelManager,
       localChatTurnExecutor: this.localChatTurnExecutor,
-      tokenHubRuntime: this.tokenHubRuntime
+      tokenHubRuntime: this.tokenHubRuntime,
+      routerProcessManager: this.routerProcessManager
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
     this.isDev = TokiieApp.shouldOpenDevTools(this.evidenceMode, process.argv);
@@ -156,6 +165,9 @@ export class TokiieApp {
     this.tokenHubRuntime.shutdownNow();
     this.codexGatewayIntegration.deactivate();
     this.claudeGatewayIntegration.deactivate();
+    // The router goes down before the gateway it forwards to, so it never spends
+    // its last moments proxying to an address that has already stopped answering.
+    this.routerProcessManager.stop('application quit');
     this.gatewayProcessManager.stop('application quit');
   }
 

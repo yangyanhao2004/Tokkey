@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import {
   CLOUD_MODELS_EMPTY_MESSAGE,
   CLOUD_MODELS_SUBTITLE,
@@ -14,12 +14,14 @@ import {
   NO_LOCAL_MODEL_NAME,
   ROUTER_TOGGLE_DESCRIPTION,
   ROUTER_TOGGLE_TITLE,
+  routerStatusMessage,
   selectButtonLabel,
   toCloudModel,
   type CloudModel,
   type ModelSummary
 } from './routerContent';
 import { useCloudModelCards, type CloudModelCards } from '../hooks/useCloudModelCards';
+import { useRouterRuntime } from '../hooks/useRouterRuntime';
 import { PageShell } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
 import { Switch } from '../components/Switch';
@@ -65,32 +67,48 @@ function ModelRow({ tile, name, detail }: ModelRowProps) {
 
 interface RouterToggleCardProps {
   isRouterOn: boolean;
+  /** True while the router process is still coming up, which no click may cut into. */
+  isBusy: boolean;
+  /** What the router is doing right now, or null when it is simply off. */
+  status: string | null;
   onChange: (isRouterOn: boolean) => void;
 }
 
 /** The card carrying the whole feature's on/off switch. */
-function RouterToggleCard({ isRouterOn, onChange }: RouterToggleCardProps) {
+function RouterToggleCard({ isRouterOn, isBusy, status, onChange }: RouterToggleCardProps) {
   return (
     <section
-      className="flex w-full shrink-0 items-center justify-between gap-4 overflow-hidden rounded-[12px] border border-surface-card-border bg-surface-card p-4"
+      className="flex w-full shrink-0 flex-col gap-2 overflow-hidden rounded-[12px] border border-surface-card-border bg-surface-card p-4"
       data-testid="router-toggle-card"
     >
-      <div className="flex min-w-0 items-center gap-2">
-        {/* The sparkle asset carries its own recessed tile, unlike `IconTile`. */}
-        <img
-          className="block size-[32px] shrink-0 max-w-none"
-          src={`${ICON_BASE_PATH}/router-sparkle.svg`}
-          alt=""
+      <div className="flex w-full items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-2">
+          {/* The sparkle asset carries its own recessed tile, unlike `IconTile`. */}
+          <img
+            className="block size-[32px] shrink-0 max-w-none"
+            src={`${ICON_BASE_PATH}/router-sparkle.svg`}
+            alt=""
+          />
+          <TitleBlock title={ROUTER_TOGGLE_TITLE} subtitle={ROUTER_TOGGLE_DESCRIPTION} as="h2" />
+        </div>
+
+        <Switch
+          checked={isRouterOn}
+          onChange={onChange}
+          label={ROUTER_TOGGLE_TITLE}
+          disabled={isBusy}
+          testId="router-toggle"
         />
-        <TitleBlock title={ROUTER_TOGGLE_TITLE} subtitle={ROUTER_TOGGLE_DESCRIPTION} as="h2" />
       </div>
 
-      <Switch
-        checked={isRouterOn}
-        onChange={onChange}
-        label={ROUTER_TOGGLE_TITLE}
-        testId="router-toggle"
-      />
+      {status && (
+        <p
+          className="text-[10px] leading-[12px] text-text-secondary"
+          data-testid="router-status"
+        >
+          {status}
+        </p>
+      )}
     </section>
   );
 }
@@ -273,7 +291,10 @@ function buildCloudModelsNotice(cloudModels: CloudModelCards, modelCount: number
  * routes between, and the cloud model it falls back to for complex tasks.
  */
 export function RouterPage() {
-  const [isRouterOn, setIsRouterOn] = useState(true);
+  // The switch reports the router subprocess, so it opens off until the user
+  // turns it on and stays honest if the process later fails or exits.
+  const router = useRouterRuntime();
+  const isRouterOn = router.isOn;
   const cloudModels = useCloudModelCards();
   const models = useMemo(() => (cloudModels.cards ?? []).map(toCloudModel), [cloudModels.cards]);
   // Selecting a card is what connects it, so the connected card is the
@@ -287,7 +308,12 @@ export function RouterPage() {
       subtitle="Simple tasks run on your Tokii. Hard ones go to a cloud model."
       testId="router"
     >
-      <RouterToggleCard isRouterOn={isRouterOn} onChange={setIsRouterOn} />
+      <RouterToggleCard
+        isRouterOn={isRouterOn}
+        isBusy={router.isBusy}
+        status={routerStatusMessage(router.state)}
+        onChange={router.toggle}
+      />
 
       {/* The pair only reports what Router routes between, so it fades with it.
           The cards hold nothing focusable, so dimming alone is enough here. */}

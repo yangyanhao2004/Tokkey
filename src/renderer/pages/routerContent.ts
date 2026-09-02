@@ -7,7 +7,7 @@
  * are drawn from the catalog the main process serves.
  */
 
-import type { CloudModelCard } from '../../shared/types';
+import type { CloudModelCard, RouterRuntimeState } from '../../shared/types';
 
 /** Shared with the sidebar so every page resolves assets from one place. */
 export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
@@ -15,6 +15,27 @@ export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
 export const ROUTER_TOGGLE_TITLE = 'Router';
 export const ROUTER_TOGGLE_DESCRIPTION =
   'Automatically send simple tasks to your Tokii and complex tasks to the selected cloud model.';
+
+/** Said in front of whatever reason the main process gave for a failed start. */
+export const ROUTER_START_FAILED_PREFIX = 'Could not start Router: ';
+
+/**
+ * The line under the switch reporting what the router is actually doing. The
+ * switch itself only shows on or off, so the port it took - which is rarely the
+ * 5033 default when something else already holds it - is reported here.
+ */
+export function routerStatusMessage(state: RouterRuntimeState): string | null {
+  switch (state.phase) {
+    case 'starting':
+      return 'Starting Router...';
+    case 'running':
+      return `Running on port ${state.port}.`;
+    case 'error':
+      return `${ROUTER_START_FAILED_PREFIX}${state.error ?? 'unknown error'}`;
+    default:
+      return null;
+  }
+}
 
 /** One of the two summary cards that report what Router routes between. */
 export interface ModelSummary {
