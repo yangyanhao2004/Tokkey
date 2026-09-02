@@ -28,7 +28,7 @@ export interface DiscoverReposTabProps {
 
 /**
  * The "Repos" tab (Figma 198:9866): every skill published by the GitHub
- * repositories already cloned into Tokiie's cache, plus the button that adds
+ * repositories already cloned into Tokkey's cache, plus the button that adds
  * another.
  *
  * The cards are a reading of the cache rather than a list the page keeps, so a

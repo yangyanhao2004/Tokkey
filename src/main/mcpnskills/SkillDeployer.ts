@@ -259,14 +259,14 @@ export class SkillDeployer {
     const parentPath = path.dirname(destinationPath);
     const temporaryPath = path.join(
       parentPath,
-      `.${path.basename(destinationPath)}.tokiie-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      `.${path.basename(destinationPath)}.tokkey-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`
     );
     mkdirSync(parentPath, { recursive: true });
     let backupPath: string | null = null;
     try {
       cpSync(sourcePath, temporaryPath, { recursive: true, errorOnExist: true, force: false });
       if (this.pathExists(destinationPath)) {
-        backupPath = path.join(parentPath, `.${path.basename(destinationPath)}.tokiie-backup-${Date.now()}`);
+        backupPath = path.join(parentPath, `.${path.basename(destinationPath)}.tokkey-backup-${Date.now()}`);
         renameSync(destinationPath, backupPath);
       }
       renameSync(temporaryPath, destinationPath);

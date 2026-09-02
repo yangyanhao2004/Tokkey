@@ -6,7 +6,7 @@ export interface ClaudeNativeModel {
 }
 
 /**
- * The Claude models Tokiie's gateway advertises.
+ * The Claude models Tokkey's gateway advertises.
  *
  * Unlike the Codex catalog, this list is static. Codex ships a bundled catalog
  * its CLI will print, so `CodexNativeModelCatalog` derives the truth from the

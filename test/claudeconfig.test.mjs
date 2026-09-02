@@ -10,7 +10,7 @@ import { ClaudeGatewayIntegration } from '../dist/main/claude/ClaudeGatewayInteg
 
 /** A throwaway home holding both `.claude` and `.amiswifi`. */
 function makeHome() {
-  return mkdtempSync(path.join(tmpdir(), 'tokiie-claudeconfig-'));
+  return mkdtempSync(path.join(tmpdir(), 'tokkey-claudeconfig-'));
 }
 
 function claudeHomeOf(home) {
@@ -295,8 +295,8 @@ test('a sync without a takeover leaves the file untouched', async () => {
 // Claude Desktop configLibrary
 // ---------------------------------------------------------------------------
 
-/** Tokiie's own entry id; see `ClaudeDesktopConfigLibrary`. */
-const TOKIIE_ENTRY_ID = '00000000-0000-4000-8000-000000157211';
+/** Tokkey's own entry id; see `ClaudeDesktopConfigLibrary`. */
+const TOKKEY_ENTRY_ID = '00000000-0000-4000-8000-000000157211';
 
 /** The name the cloud route is published under in Desktop's picker. */
 const DESKTOP_ALIAS = 'anthropic.c05442';
@@ -306,7 +306,7 @@ function configLibraryOf(home) {
 }
 
 function readDesktopEntry(home) {
-  return JSON.parse(readFileSync(path.join(configLibraryOf(home), `${TOKIIE_ENTRY_ID}.json`), 'utf8'));
+  return JSON.parse(readFileSync(path.join(configLibraryOf(home), `${TOKKEY_ENTRY_ID}.json`), 'utf8'));
 }
 
 function readDesktopMeta(home) {
@@ -354,11 +354,11 @@ test('desktop keeps its own config when no cloud model is connected', async () =
   // A takeover with nothing to offer produces an entry Desktop cannot sign
   // into, so the configLibrary is left exactly as the user had it.
   assert.deepEqual(readDesktopMeta(home), foreign);
-  assert.equal(existsSync(path.join(configLibraryOf(home), `${TOKIIE_ENTRY_ID}.json`)), false);
+  assert.equal(existsSync(path.join(configLibraryOf(home), `${TOKKEY_ENTRY_ID}.json`)), false);
   rmSync(home, { recursive: true, force: true });
 });
 
-test('the meta index points at tokiie without unlisting another tool', async () => {
+test('the meta index points at tokkey without unlisting another tool', async () => {
   const home = makeHome();
   writeSettings(home, USER_SETTINGS);
   const foreignId = '00000000-0000-4000-8000-000000157210';
@@ -368,13 +368,13 @@ test('the meta index points at tokiie without unlisting another tool', async () 
   await integration.activate();
 
   const meta = readDesktopMeta(home);
-  assert.equal(meta.appliedId, TOKIIE_ENTRY_ID);
-  assert.deepEqual(meta.entries.map((entry) => entry.id), [foreignId, TOKIIE_ENTRY_ID]);
+  assert.equal(meta.appliedId, TOKKEY_ENTRY_ID);
+  assert.deepEqual(meta.entries.map((entry) => entry.id), [foreignId, TOKKEY_ENTRY_ID]);
 
-  // Quit hands the whole index back, and takes Tokiie's own entry with it.
+  // Quit hands the whole index back, and takes Tokkey's own entry with it.
   integration.deactivate();
   assert.deepEqual(readDesktopMeta(home), foreign);
-  assert.equal(existsSync(path.join(configLibraryOf(home), `${TOKIIE_ENTRY_ID}.json`)), false);
+  assert.equal(existsSync(path.join(configLibraryOf(home), `${TOKKEY_ENTRY_ID}.json`)), false);
   rmSync(home, { recursive: true, force: true });
 });
 

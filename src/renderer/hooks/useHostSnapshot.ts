@@ -20,7 +20,7 @@ export function useHostSnapshot(): HostSnapshot | null {
 
     const poll = async () => {
       try {
-        const reading = await window.tokiie.getHostSnapshot();
+        const reading = await window.tokkey.getHostSnapshot();
         if (isMounted) {
           setSnapshot(reading);
         }

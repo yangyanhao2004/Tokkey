@@ -2,7 +2,7 @@
  * Line-level edits to Codex's `config.toml`.
  *
  * The document is never re-serialized from a parse. That file is hand-written
- * and holds comments, formatting, and settings Tokiie knows nothing about, all
+ * and holds comments, formatting, and settings Tokkey knows nothing about, all
  * of which a round trip through a TOML library would silently discard. Every
  * edit here therefore touches only the lines it owns and leaves the rest byte
  * for byte as the user wrote it.

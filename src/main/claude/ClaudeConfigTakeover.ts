@@ -8,10 +8,10 @@ import ClaudeSettingsDocument, { type ClaudeModelSelection } from './ClaudeSetti
 const BASE_URL_KEY = 'ANTHROPIC_BASE_URL';
 
 /**
- * Points the Claude Code CLI at the local gateway for as long as Tokiie runs.
+ * Points the Claude Code CLI at the local gateway for as long as Tokkey runs.
  *
  * The mechanism is `~/.claude/settings.json`, whose `env` block Claude applies
- * to every session it starts, and the one entry Tokiie sets there is
+ * to every session it starts, and the one entry Tokkey sets there is
  * `ANTHROPIC_BASE_URL`. Nothing else is touched — no credential, in particular.
  * Claude Code carries its own login and sends it with the request, and the
  * gateway's Claude routes are registered keyless precisely so that credential
@@ -86,7 +86,7 @@ export class ClaudeConfigTakeover {
     return this.file.reapply((original) => this.rewrite(original, baseUrl, selection));
   }
 
-  /** The settings Claude Code should see while Tokiie is running. */
+  /** The settings Claude Code should see while Tokkey is running. */
   private rewrite(
     original: string,
     baseUrl: string,

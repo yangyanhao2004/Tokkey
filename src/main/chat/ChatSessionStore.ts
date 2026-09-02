@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { tokiieDatabasePath } from '../storage/TokiieDatabase';
+import { tokkeyDatabasePath } from '../storage/TokkeyDatabase';
 import {
   epochMillisecondsFromStoredTimestamp,
   isLocalStorageTimestamp,
@@ -127,7 +127,7 @@ export interface ChatSessionStoreOptions {
 }
 
 /**
- * Durable local Chat workspace backed by Tokiie's SQLite database. Business
+ * Durable local Chat workspace backed by Tokkey's SQLite database. Business
  * timestamps retain the operating system's local datetime and timezone, while
  * paired epoch columns keep sorting and duration calculations unambiguous.
  */
@@ -142,7 +142,7 @@ export class ChatSessionStore {
 
   constructor(options: ChatSessionStoreOptions = {}) {
     const homeDirectory = options.homeDirectory ?? os.homedir();
-    this.databasePath = options.databasePath ?? tokiieDatabasePath(homeDirectory);
+    this.databasePath = options.databasePath ?? tokkeyDatabasePath(homeDirectory);
     this.openDatabase = options.openDatabase ?? ChatSessionStore.openSqliteDatabase;
     this.now = options.now ?? Date.now;
     this.createId = options.createId ?? randomUUID;

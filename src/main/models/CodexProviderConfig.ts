@@ -5,7 +5,7 @@ import CodexHome from '../codex/CodexHome';
 /** The provider Codex uses when `config.toml` names none. */
 const DEFAULT_PROVIDER_ID = 'openai';
 
-/** One provider as `config.toml` describes it, reduced to what Tokiie routes on. */
+/** One provider as `config.toml` describes it, reduced to what Tokkey routes on. */
 export interface CodexProviderEndpoint {
   baseUrl: string;
   /**
@@ -21,12 +21,12 @@ export interface CodexProviderEndpoint {
  *
  * A Codex user who has pointed the CLI at a subscription relay or a self-hosted
  * proxy has already answered "where do these models come from" once, in the file
- * the CLI reads. Tokiie serves the same models from the same place rather than
+ * the CLI reads. Tokkey serves the same models from the same place rather than
  * asking again, so a model that works in `codex` works here.
  *
  * This reads the file and nothing more: whether the endpoint it names is one
- * Tokiie should adopt is `CodexUpstreamEndpoint`'s decision, because the file
- * is writable by anything on this machine — including Tokiie itself.
+ * Tokkey should adopt is `CodexUpstreamEndpoint`'s decision, because the file
+ * is writable by anything on this machine — including Tokkey itself.
  *
  * Every failure path yields null, which means "no endpoint configured" and
  * leaves the gateway on its own defaults. The file belongs to another program
@@ -46,7 +46,7 @@ export class CodexProviderConfig {
     return new CodexHome({ homeDirectory }).configPath;
   }
 
-  /** The active provider, or null when the file names none Tokiie can use. */
+  /** The active provider, or null when the file names none Tokkey can use. */
   read(): Promise<CodexProviderEndpoint | null> {
     this.lookup ??= this.readProvider();
     return this.lookup;

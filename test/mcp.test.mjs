@@ -20,7 +20,7 @@ import { McpConfigurationFileWriter } from '../dist/main/mcp/McpConfigurationFil
 /** Owns an isolated home directory for one MCP scanner test. */
 class TestHome {
   constructor() {
-    this.root = mkdtempSync(path.join(os.tmpdir(), 'tokiie-mcp-test-'));
+    this.root = mkdtempSync(path.join(os.tmpdir(), 'tokkey-mcp-test-'));
   }
 
   write(relativePath, contents) {

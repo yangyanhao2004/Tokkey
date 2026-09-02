@@ -6,7 +6,7 @@ interface PushButtonProps {
    * `filled` is the black primary button ("Add model", "Start", "Download");
    * `tinted` is the 5% black chip with a dark label used for secondary actions
    * on an opaque card ("Remove" on the Add Model page); `plain` carries no fill
-   * and only a grey label ("Remove" on the Tokiie page); `plain-dark` is the
+   * and only a grey label ("Remove" on the Tokkey page); `plain-dark` is the
    * same unfilled button with a full-strength label, used where it has to hold
    * its own against a card's content ("Manage" on the Agent Hub page).
    */

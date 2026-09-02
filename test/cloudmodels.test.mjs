@@ -472,12 +472,12 @@ const sqliteAvailable = await import('node:sqlite').then(
 );
 const skipWithoutSqlite = sqliteAvailable ? false : 'node:sqlite is unavailable on this runtime';
 
-test('the store round-trips a profile through Tokiie local timestamp storage', { skip: skipWithoutSqlite }, async () => {
+test('the store round-trips a profile through Tokkey local timestamp storage', { skip: skipWithoutSqlite }, async () => {
   const { SqliteModelProfileStore } = await import('../dist/main/models/ModelProfileStore.js');
   const { localTimestampForEpochMilliseconds } = await import('../dist/main/storage/LocalTimestamp.js');
   const { DatabaseSync } = await import('node:sqlite');
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-profiles-'));
-  const databasePath = path.join(directory, 'tokiie.db');
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokkey-profiles-'));
+  const databasePath = path.join(directory, 'tokkey.db');
   const store = new SqliteModelProfileStore({ databasePath });
   try {
     const profile = {
@@ -526,12 +526,12 @@ test('the store round-trips a profile through Tokiie local timestamp storage', {
   }
 });
 
-test('the store leaves Amis-Wifi profiles isolated from Tokiie storage', { skip: skipWithoutSqlite }, async () => {
+test('the store leaves Amis-Wifi profiles isolated from Tokkey storage', { skip: skipWithoutSqlite }, async () => {
   const { SqliteModelProfileStore } = await import('../dist/main/models/ModelProfileStore.js');
-  const homeDirectory = mkdtempSync(path.join(tmpdir(), 'tokiie-profile-isolation-'));
+  const homeDirectory = mkdtempSync(path.join(tmpdir(), 'tokkey-profile-isolation-'));
   const legacyDatabasePath = path.join(homeDirectory, '.amiswifi', 'dbs', 'amis_wifi.db');
   const legacyStore = new SqliteModelProfileStore({ databasePath: legacyDatabasePath });
-  let tokiieStore = null;
+  let tokkeyStore = null;
   let legacyVerificationStore = null;
   const profile = {
     id: CARD.id,
@@ -550,14 +550,14 @@ test('the store leaves Amis-Wifi profiles isolated from Tokiie storage', { skip:
     await legacyStore.save(profile);
     legacyStore.close();
 
-    tokiieStore = new SqliteModelProfileStore({ homeDirectory });
-    assert.equal(await tokiieStore.find(profile.id), null);
+    tokkeyStore = new SqliteModelProfileStore({ homeDirectory });
+    assert.equal(await tokkeyStore.find(profile.id), null);
 
     legacyVerificationStore = new SqliteModelProfileStore({ databasePath: legacyDatabasePath });
     assert.deepEqual(await legacyVerificationStore.find(profile.id), profile);
   } finally {
     legacyStore.close();
-    tokiieStore?.close();
+    tokkeyStore?.close();
     legacyVerificationStore?.close();
     rmSync(homeDirectory, { recursive: true, force: true });
   }
@@ -567,8 +567,8 @@ test('the store upgrades legacy Unix-second profile timestamps to local storage'
   const { SqliteModelProfileStore } = await import('../dist/main/models/ModelProfileStore.js');
   const { localTimestampForEpochMilliseconds } = await import('../dist/main/storage/LocalTimestamp.js');
   const { DatabaseSync } = await import('node:sqlite');
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-profile-time-migration-'));
-  const databasePath = path.join(directory, 'tokiie.db');
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokkey-profile-time-migration-'));
+  const databasePath = path.join(directory, 'tokkey.db');
   const profile = {
     id: 'legacy-profile',
     name: 'Legacy profile',
@@ -642,7 +642,7 @@ test('the store upgrades legacy Unix-second profile timestamps to local storage'
 test('the store degrades unreadable columns instead of failing the read', { skip: skipWithoutSqlite }, async () => {
   const { SqliteModelProfileStore } = await import('../dist/main/models/ModelProfileStore.js');
   const { DatabaseSync } = await import('node:sqlite');
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-profiles-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokkey-profiles-'));
   const databasePath = path.join(directory, 'amis_wifi.db');
   const store = new SqliteModelProfileStore({ databasePath });
   try {

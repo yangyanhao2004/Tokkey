@@ -8,7 +8,7 @@ def model_payload(name: str = "agent-model", model: str = "openai/upstream") -> 
     return {
         "model_name": name,
         "litellm_params": {"model": model, "api_key": "secret"},
-        "model_info": {"created_by": "tokiie", "profile_id": "profile"},
+        "model_info": {"created_by": "tokkey", "profile_id": "profile"},
     }
 
 

@@ -125,7 +125,7 @@ function AssistantMessage({
 
   return (
     <article className="flex flex-col gap-3" data-testid="chat-assistant-message">
-      <h2 className="py-1 text-[12px] leading-[18px] font-semibold text-white">Tokiie</h2>
+      <h2 className="py-1 text-[12px] leading-[18px] font-semibold text-white">Tokkey</h2>
       <ThinkingDisclosure message={message} />
       {message.content && (
         <p className="whitespace-pre-wrap break-words py-1 text-[12px] leading-[1.8] text-white">

@@ -39,14 +39,14 @@ export function useInstalledModels(): InstalledModels {
   useEffect(() => {
     isMountedRef.current = true;
     const initialRuntimeVersion = runtimeEventVersionRef.current;
-    const unsubscribe = window.tokiie.onLocalModelRuntimeStateChanged((next) => {
+    const unsubscribe = window.tokkey.onLocalModelRuntimeStateChanged((next) => {
       runtimeEventVersionRef.current += 1;
       setRuntime(next);
     });
     void Promise.all([
-      window.tokiie.listInstalledLocalModels(),
-      window.tokiie.getLocalChatRuntimeState(),
-      window.tokiie.getLocalModelRuntimeState()
+      window.tokkey.listInstalledLocalModels(),
+      window.tokkey.getLocalChatRuntimeState(),
+      window.tokkey.getLocalModelRuntimeState()
     ]).then(([nextModels, chatRuntime, nextRuntime]) => {
       if (!isMountedRef.current) return;
       setModels(nextModels);
@@ -68,8 +68,8 @@ export function useInstalledModels(): InstalledModels {
 
   const loadSnapshot = useCallback(async () => {
     const [nextModels, runtimeState] = await Promise.all([
-      window.tokiie.listInstalledLocalModels(),
-      window.tokiie.getLocalChatRuntimeState()
+      window.tokkey.listInstalledLocalModels(),
+      window.tokkey.getLocalChatRuntimeState()
     ]);
     return {
       models: nextModels,
@@ -106,14 +106,14 @@ export function useInstalledModels(): InstalledModels {
 
   const start = useCallback(
     (modelId: string) => {
-      void run(() => window.tokiie.startInstalledLocalModel(modelId), modelId);
+      void run(() => window.tokkey.startInstalledLocalModel(modelId), modelId);
     },
     [run]
   );
 
   const remove = useCallback(
     (modelId: string) => {
-      void run(() => window.tokiie.removeInstalledLocalModel(modelId), modelId);
+      void run(() => window.tokkey.removeInstalledLocalModel(modelId), modelId);
     },
     [run]
   );

@@ -67,7 +67,7 @@ export class NativeModelDownloadManager {
   }
 
   /**
-   * Everything already on disk, for the Tokiie page's installed list.
+   * Everything already on disk, for the Tokkey page's installed list.
    *
    * A resumed transfer grows the artifact in place — `createInterruptedDownload`
    * is handed the final path — so a partial file can look exactly like a
@@ -328,7 +328,7 @@ export class NativeModelDownloadManager {
         entry.progress = 1;
         entry.error = null;
         this.persisted.delete(modelId);
-        // The manifest is what lets the Tokiie page name this model offline.
+        // The manifest is what lets the Tokkey page name this model offline.
         void this.store.writeManifest(entry.descriptor);
       } else if (state === 'cancelled') {
         entry.state = 'downloadable';

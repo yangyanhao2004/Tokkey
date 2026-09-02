@@ -86,7 +86,7 @@ export function useLocalModelCatalog(): LocalModelCatalog {
 
   // Loads on mount and reloads whenever the provider filter changes.
   useEffect(() => {
-    void run(() => window.tokiie.listLocalModels({ provider }));
+    void run(() => window.tokkey.listLocalModels({ provider }));
   }, [provider, run]);
 
   const isDownloading = scan?.models.some((model) => model.lifecycle === 'downloading') ?? false;
@@ -94,13 +94,13 @@ export function useLocalModelCatalog(): LocalModelCatalog {
   useEffect(() => {
     if (!isDownloading) return;
     const timer = setInterval(() => {
-      void run(() => window.tokiie.listLocalModels({ provider }));
+      void run(() => window.tokkey.listLocalModels({ provider }));
     }, DOWNLOAD_POLL_INTERVAL_MS);
     return () => clearInterval(timer);
   }, [isDownloading, provider, run]);
 
   const refresh = useCallback(() => {
-    void run(() => window.tokiie.refreshLocalModels({ provider }));
+    void run(() => window.tokkey.refreshLocalModels({ provider }));
   }, [provider, run]);
 
   const runAction = useCallback(
@@ -109,10 +109,10 @@ export function useLocalModelCatalog(): LocalModelCatalog {
       // back filtered the same way the visible list is.
       const request = { provider };
       const calls: Record<CatalogActionKind, () => Promise<LocalModelCatalogScan>> = {
-        download: () => window.tokiie.startLocalModelDownload(modelId, request),
-        cancel: () => window.tokiie.cancelLocalModelDownload(modelId, request),
-        deploy: () => window.tokiie.deployLocalModel(modelId, request),
-        remove: () => window.tokiie.deleteLocalModel(modelId, request)
+        download: () => window.tokkey.startLocalModelDownload(modelId, request),
+        cancel: () => window.tokkey.cancelLocalModelDownload(modelId, request),
+        deploy: () => window.tokkey.deployLocalModel(modelId, request),
+        remove: () => window.tokkey.deleteLocalModel(modelId, request)
       };
       void run(calls[kind], modelId);
     },

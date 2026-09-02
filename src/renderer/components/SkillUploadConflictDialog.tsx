@@ -16,7 +16,7 @@ const CHOICE_VARIANTS: Record<SkillUploadConflictChoice, 'filled' | 'tinted' | '
 };
 
 export interface SkillUploadConflictDialogProps {
-  /** The folder name already taken inside Tokiie's skills folder. */
+  /** The folder name already taken inside Tokkey's skills folder. */
   folderName: string;
   /** Re-runs the held upload with the chosen strategy. */
   onChoose: (choice: SkillUploadConflictChoice) => void;

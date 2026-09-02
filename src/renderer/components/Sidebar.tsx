@@ -35,10 +35,10 @@ function SidebarBrand({ isDarkTheme }: { isDarkTheme: boolean }) {
           />
         </div>
       </div>
-      {/* The wordmark is "Tokiie" (node 227:3801); only the nav row and the
-          account block spell the product "Tokiie". */}
+      {/* The wordmark is "Tokkey" (node 227:3801); only the nav row and the
+          account block spell the product "Tokkey". */}
       <span className={`text-[16px] leading-[19px] font-bold tracking-[-0.2992px] ${isDarkTheme ? 'text-white' : 'text-text-primary'}`}>
-        Tokiie
+        Tokkey
       </span>
     </div>
   );
@@ -86,7 +86,7 @@ interface SidebarAccountProps {
 function SidebarAccount({ isDarkTheme, profile, onSelect }: SidebarAccountProps) {
   const accountTextClasses = isDarkTheme ? 'text-white' : 'text-text-primary';
   const accountSecondaryClasses = isDarkTheme ? 'text-white/60' : 'text-text-secondary';
-  const displayName = profile?.displayName?.trim() || 'Tokiie Account';
+  const displayName = profile?.displayName?.trim() || 'Tokkey Account';
   const secondaryText = profile?.email ?? 'Sign In';
   const initial = profile ? displayName.charAt(0).toUpperCase() : 'IN';
 
@@ -135,7 +135,7 @@ export function Sidebar({
   return (
     <aside
       className={`flex h-full w-[216px] shrink-0 flex-col gap-6 rounded-[20px] p-3 backdrop-blur-[16px] ${surfaceClasses}`}
-      aria-label="Tokiie navigation"
+      aria-label="Tokkey navigation"
       data-testid="sidebar"
     >
       <WindowControlsSpacer />

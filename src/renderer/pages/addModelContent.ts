@@ -119,7 +119,7 @@ const RETRY_START_ACTION: CatalogModelAction = { kind: 'deploy', label: 'Retry s
  * invite a press that has to fail.
  *
  * A finished download offers none either — this page's job ends once the bytes
- * are on disk, and deleting them belongs to the Tokiie page's installed list,
+ * are on disk, and deleting them belongs to the Tokkey page's installed list,
  * so the row reports "Downloaded" instead.
  */
 const LIFECYCLE_ACTIONS: Record<LocalModelLifecycle, CatalogModelAction | null> = {

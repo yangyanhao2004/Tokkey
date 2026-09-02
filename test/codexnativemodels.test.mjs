@@ -57,7 +57,7 @@ class FakeShellRunner {
 }
 
 function makeHome() {
-  const home = mkdtempSync(path.join(tmpdir(), 'tokiie-codex-'));
+  const home = mkdtempSync(path.join(tmpdir(), 'tokkey-codex-'));
   return home;
 }
 
@@ -90,7 +90,7 @@ test('keeps only listed models and drops the instruction blobs', async () => {
     'slug',
     'supportedInApi'
   ]);
-  // The cache behind it keeps the rows whole, because the catalog Tokiie
+  // The cache behind it keeps the rows whole, because the catalog Tokkey
   // generates for Codex is built by cloning one of them.
   const cached = readFileSync(path.join(home, '.amiswifi', 'codex-bundled-catalog.json'), 'utf8');
   assert.ok(cached.includes('instructions_template'));
@@ -216,13 +216,13 @@ test('reads the base url of the provider codex is configured to use', async () =
 });
 
 test('carries the key of the environment variable the provider names', async () => {
-  process.env.TOKIIE_TEST_RELAY_KEY = 'sk-relay-issued';
+  process.env.TOKKEY_TEST_RELAY_KEY = 'sk-relay-issued';
   const { config, home } = providerConfigFor(
     [
       'model_provider = "relay"',
       '[model_providers.relay]',
       'base_url = "https://relay.example/v1"',
-      'env_key = "TOKIIE_TEST_RELAY_KEY"'
+      'env_key = "TOKKEY_TEST_RELAY_KEY"'
     ].join('\n')
   );
 
@@ -230,7 +230,7 @@ test('carries the key of the environment variable the provider names', async () 
     baseUrl: 'https://relay.example/v1',
     apiKey: 'sk-relay-issued'
   });
-  delete process.env.TOKIIE_TEST_RELAY_KEY;
+  delete process.env.TOKKEY_TEST_RELAY_KEY;
   rmSync(home, { recursive: true, force: true });
 });
 

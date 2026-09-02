@@ -39,7 +39,7 @@ export type AccountOperationResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: AccountOperationError };
 
-/** The coding agents Tokiie detects, each named after its executable. */
+/** The coding agents Tokkey detects, each named after its executable. */
 export type CodingAgent = 'codex' | 'claude';
 
 /** One agent's presence on this machine, as a PATH lookup found it. */
@@ -187,7 +187,7 @@ export interface HostSnapshot {
 }
 
 /** Renderer-facing API exposed by the preload bridge. */
-export interface TokiieApi {
+export interface TokkeyApi {
   getAppInfo(): Promise<AppInfo>;
   getAccountState(): Promise<AccountOperationResult<AccountState>>;
   requestEmailVerificationCode(email: string): Promise<AccountOperationResult<null>>;
@@ -518,7 +518,7 @@ export interface LocalModelRow extends LocalModelDescriptor {
 
 /**
  * A GGUF whose bytes are on this Mac, found recursively under
- * `~/.amiswifi/models`. Independent of the remote catalog, so the Tokiie page
+ * `~/.amiswifi/models`. Independent of the remote catalog, so the Tokkey page
  * can list what is installed while offline.
  */
 export interface InstalledLocalModel {

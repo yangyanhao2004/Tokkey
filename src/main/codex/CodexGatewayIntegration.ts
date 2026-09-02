@@ -8,11 +8,11 @@ import CodexConfigTakeover from './CodexConfigTakeover';
 import CodexHome from './CodexHome';
 
 /**
- * Makes the Codex CLI see everything the gateway serves, while Tokiie runs.
+ * Makes the Codex CLI see everything the gateway serves, while Tokkey runs.
  *
  * Two files do the work together and neither is useful without the other. The
  * catalog lists the models — the ones Codex ships with, plus one row per route
- * Tokiie has registered — and `config.toml` points Codex at both the catalog
+ * Tokkey has registered — and `config.toml` points Codex at both the catalog
  * and the gateway that answers for it. So they are written as a pair, and the
  * catalog is written first: pointing Codex at a catalog that turned out empty
  * would cost the user their model picker, which is worse than not taking over

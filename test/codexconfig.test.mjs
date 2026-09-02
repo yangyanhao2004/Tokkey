@@ -11,7 +11,7 @@ import { CodexGatewayIntegration } from '../dist/main/codex/CodexGatewayIntegrat
 
 /** A throwaway home holding both `.codex` and `.amiswifi`. */
 function makeHome() {
-  return mkdtempSync(path.join(tmpdir(), 'tokiie-codexconfig-'));
+  return mkdtempSync(path.join(tmpdir(), 'tokkey-codexconfig-'));
 }
 
 function codexHomeOf(home) {
@@ -43,9 +43,9 @@ url = "https://example.invalid/mcp"
 // ---------------------------------------------------------------------------
 
 test('replaces a root key in place and leaves comments and tables alone', () => {
-  const rewritten = new CodexTomlDocument(USER_CONFIG).setRootKey('model_provider', 'tokiie').toString();
+  const rewritten = new CodexTomlDocument(USER_CONFIG).setRootKey('model_provider', 'tokkey').toString();
 
-  assert.ok(rewritten.startsWith('# hand written\nmodel_provider = "tokiie"\n'));
+  assert.ok(rewritten.startsWith('# hand written\nmodel_provider = "tokkey"\n'));
   assert.ok(rewritten.includes('model = "gpt-5.5"'));
   assert.ok(rewritten.includes('[mcp_servers.testhttp]'));
 });
@@ -62,14 +62,14 @@ test('inserts a new root key before the first table, never after it', () => {
 
 test('appends and removes a table without touching its neighbours', () => {
   const withTable = new CodexTomlDocument(USER_CONFIG).appendTable(
-    ['model_providers', 'tokiie'],
-    [['name', 'Tokiie'], ['base_url', 'http://127.0.0.1:4000/v1'], ['requires_openai_auth', true]]
+    ['model_providers', 'tokkey'],
+    [['name', 'Tokkey'], ['base_url', 'http://127.0.0.1:4000/v1'], ['requires_openai_auth', true]]
   );
 
-  assert.ok(withTable.toString().endsWith('[model_providers.tokiie]\nname = "Tokiie"\nbase_url = "http://127.0.0.1:4000/v1"\nrequires_openai_auth = true\n'));
+  assert.ok(withTable.toString().endsWith('[model_providers.tokkey]\nname = "Tokkey"\nbase_url = "http://127.0.0.1:4000/v1"\nrequires_openai_auth = true\n'));
 
-  const removed = withTable.removeTable(['model_providers', 'tokiie']).toString();
-  assert.ok(!removed.includes('tokiie'));
+  const removed = withTable.removeTable(['model_providers', 'tokkey']).toString();
+  assert.ok(!removed.includes('tokkey'));
   assert.ok(removed.includes('[model_providers.openai]'));
   assert.ok(removed.includes('[mcp_servers.testhttp]'));
 });
@@ -77,9 +77,9 @@ test('appends and removes a table without touching its neighbours', () => {
 test('a key inside a table is not mistaken for the root key of the same name', () => {
   const document = new CodexTomlDocument('[profiles.work]\nmodel_provider = "work"\n');
 
-  const rewritten = document.setRootKey('model_provider', 'tokiie').toString();
+  const rewritten = document.setRootKey('model_provider', 'tokkey').toString();
 
-  assert.ok(rewritten.startsWith('model_provider = "tokiie"\n'));
+  assert.ok(rewritten.startsWith('model_provider = "tokkey"\n'));
   assert.ok(rewritten.includes('[profiles.work]\nmodel_provider = "work"'));
 });
 
@@ -100,7 +100,7 @@ test('points codex at the gateway and hands the original file back at quit', () 
   assert.equal(takeover.activate('http://127.0.0.1:4173', '/tmp/amis-catalog.json'), true);
 
   const taken = readFileSync(configPath, 'utf8');
-  assert.ok(taken.includes('model_provider = "tokiie"'));
+  assert.ok(taken.includes('model_provider = "tokkey"'));
   assert.ok(taken.includes('model_catalog_json = "/tmp/amis-catalog.json"'));
   assert.ok(taken.includes('base_url = "http://127.0.0.1:4173/v1"'));
   assert.ok(taken.includes('wire_api = "responses"'));
@@ -119,7 +119,7 @@ test('restores a config the previous run was killed before restoring', () => {
   // A session that never reached its restore: the file is taken over and the
   // backup is still on disk.
   makeTakeover(home).activate('http://127.0.0.1:4173', null);
-  assert.ok(readFileSync(configPath, 'utf8').includes('model_provider = "tokiie"'));
+  assert.ok(readFileSync(configPath, 'utf8').includes('model_provider = "tokkey"'));
 
   const recovered = makeTakeover(home).recoverInterruptedSession();
 
@@ -137,7 +137,7 @@ test('a second takeover declares the provider table once, not twice', () => {
   makeTakeover(home).activate('http://127.0.0.1:4999', null);
 
   const taken = readFileSync(configPath, 'utf8');
-  assert.equal(taken.split('[model_providers.tokiie]').length - 1, 1);
+  assert.equal(taken.split('[model_providers.tokkey]').length - 1, 1);
   assert.ok(taken.includes('base_url = "http://127.0.0.1:4999/v1"'));
   rmSync(home, { recursive: true, force: true });
 });
@@ -148,7 +148,7 @@ test('leaves no config.toml behind when there was none to begin with', () => {
   const takeover = makeTakeover(home);
 
   assert.equal(takeover.activate('http://127.0.0.1:4173', null), true);
-  assert.ok(readFileSync(takeover.configPath, 'utf8').includes('[model_providers.tokiie]'));
+  assert.ok(readFileSync(takeover.configPath, 'utf8').includes('[model_providers.tokkey]'));
 
   takeover.restore();
   assert.equal(existsSync(takeover.configPath), false);
@@ -310,7 +310,7 @@ test('still produces a usable row when no native template exists', () => {
 
   assert.deepEqual(result.models.map((entry) => entry.slug), ['first']);
   assert.equal(result.models[0].auto_compact_token_limit, 115200);
-  assert.equal(CatalogEntryFactory.isTokiieAuthored(result.models[0]), true);
+  assert.equal(CatalogEntryFactory.isTokkeyAuthored(result.models[0]), true);
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -374,7 +374,7 @@ test('catalogues the routes the gateway serves and points codex at the file', as
     'gpt-5.5',
     'custom-gpt-5.6-terra-openai-c05442'
   ]);
-  assert.equal(CatalogEntryFactory.isTokiieAuthored(catalog.models[0]), false);
+  assert.equal(CatalogEntryFactory.isTokkeyAuthored(catalog.models[0]), false);
   // The card behind the route names it, so the picker reads as the user connected it.
   assert.equal(catalog.models[1].display_name, 'custom/gpt-5.6-terra');
 
@@ -416,6 +416,6 @@ test('does not point codex at a catalog that came out empty', async () => {
   const config = readFileSync(configPath, 'utf8');
   assert.ok(!config.includes('model_catalog_json'));
   // The gateway is still wired up: only the model list could not be built.
-  assert.ok(config.includes('model_provider = "tokiie"'));
+  assert.ok(config.includes('model_provider = "tokkey"'));
   rmSync(home, { recursive: true, force: true });
 });

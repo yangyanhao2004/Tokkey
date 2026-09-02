@@ -34,7 +34,7 @@ export const PAGE_TITLE = 'Discover skills';
  * the designer's to change rather than ours.
  */
 export const PAGE_SUBTITLE =
-  'Install the coding agents you use while Tokiie keeps local and cloud models available in the background.';
+  'Install the coding agents you use while Tokkey keeps local and cloud models available in the background.';
 
 /** The two halves of the pane: cloned GitHub repos, and the skills.sh listing. */
 export type DiscoverTab = 'repos' | 'skillsSh';
@@ -170,7 +170,7 @@ export function describeSkillInstallFailure(error: string): CatalogNotice {
 }
 
 /**
- * The skills published by the repositories already cloned into Tokiie's cache
+ * The skills published by the repositories already cloned into Tokkey's cache
  * (Figma 198:9936), flattened into one grid: a repository is how a skill got
  * here, not a heading the design draws, so each card names its own source.
  *

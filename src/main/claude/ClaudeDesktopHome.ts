@@ -31,7 +31,7 @@ export class ClaudeDesktopHome {
     return path.join(this.homeDirectory, 'Library', 'Application Support', 'Claude-3p', 'configLibrary');
   }
 
-  /** Where the `_meta.json` backup is kept while Tokiie's takeover is in force. */
+  /** Where the `_meta.json` backup is kept while Tokkey's takeover is in force. */
   get metaBackupPath(): string {
     return path.join(this.homeDirectory, '.amiswifi', 'desktop-config-meta-backup.json');
   }

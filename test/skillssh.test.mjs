@@ -13,7 +13,7 @@ import { SkillFilesystemLayout } from '../dist/main/mcpnskills/SkillFilesystem.j
 
 class TestWorkspace {
   constructor() {
-    this.root = mkdtempSync(path.join(os.tmpdir(), 'tokiie-directory-test-'));
+    this.root = mkdtempSync(path.join(os.tmpdir(), 'tokkey-directory-test-'));
   }
 
   resolve(...segments) {

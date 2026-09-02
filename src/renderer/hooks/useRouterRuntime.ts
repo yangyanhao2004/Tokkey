@@ -36,11 +36,11 @@ export function useRouterRuntime(): RouterRuntime {
   useEffect(() => {
     isMountedRef.current = true;
     const initialVersion = eventVersionRef.current;
-    const unsubscribe = window.tokiie.onRouterRuntimeStateChanged((next) => {
+    const unsubscribe = window.tokkey.onRouterRuntimeStateChanged((next) => {
       eventVersionRef.current += 1;
       if (isMountedRef.current) setState(next);
     });
-    void window.tokiie
+    void window.tokkey
       .getRouterRuntimeState()
       .then((snapshot) => {
         if (!isMountedRef.current) return;
@@ -60,7 +60,7 @@ export function useRouterRuntime(): RouterRuntime {
     // Both calls resolve with the resulting state, and the same state also
     // arrives as an event; applying it here keeps the switch responsive when the
     // window was not focused enough to receive the broadcast first.
-    const call = nextOn ? window.tokiie.startRouterRuntime() : window.tokiie.stopRouterRuntime();
+    const call = nextOn ? window.tokkey.startRouterRuntime() : window.tokkey.stopRouterRuntime();
     void Promise.resolve(call).then((next) => {
       if (isMountedRef.current) setState(next);
     });

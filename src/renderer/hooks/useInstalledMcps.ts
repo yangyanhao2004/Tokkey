@@ -49,7 +49,7 @@ export function useInstalledMcps(): InstalledMcps {
   const refresh = useCallback(() => {
     void (async () => {
       try {
-        const scan = await window.tokiie.scanInstalledMcps();
+        const scan = await window.tokkey.scanInstalledMcps();
         if (!isMountedRef.current) return;
         setServers(scan.servers);
         setFailures(scan.failures);
@@ -79,7 +79,7 @@ export function useInstalledMcps(): InstalledMcps {
 
   const applyAgentSelection = useCallback(
     (mcpId: string, selectedAgents: McpAgent[]) =>
-      mutate(() => window.tokiie.applyMcpAgentSelection(mcpId, selectedAgents)),
+      mutate(() => window.tokkey.applyMcpAgentSelection(mcpId, selectedAgents)),
     [mutate]
   );
 

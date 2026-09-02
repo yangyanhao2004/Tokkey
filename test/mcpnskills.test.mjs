@@ -23,7 +23,7 @@ import { SkillUploadService } from '../dist/main/mcpnskills/SkillUploadService.j
 /** Owns an isolated temporary filesystem tree for one test. */
 class TestWorkspace {
   constructor() {
-    this.root = mkdtempSync(path.join(os.tmpdir(), 'tokiie-test-'));
+    this.root = mkdtempSync(path.join(os.tmpdir(), 'tokkey-test-'));
   }
 
   resolve(...segments) {
@@ -503,7 +503,7 @@ test('downloads a repository into the cache and reports the skills it added', as
 test('an uninstalled agent removes its own skill root but not the shared ones', async () => {
   const workspace = new TestWorkspace();
   try {
-    workspace.write('.amis/skills/owned/SKILL.md', '---\nname: owned\ndescription: Tokiie\n---\n');
+    workspace.write('.amis/skills/owned/SKILL.md', '---\nname: owned\ndescription: Tokkey\n---\n');
     workspace.write('.claude/skills/claude-only/SKILL.md', '---\nname: claude-only\ndescription: Claude\n---\n');
     workspace.write('.codex/skills/codex-only/SKILL.md', '---\nname: codex-only\ndescription: Codex\n---\n');
     workspace.write('.agents/skills/shared/SKILL.md', '---\nname: shared\ndescription: Shared\n---\n');

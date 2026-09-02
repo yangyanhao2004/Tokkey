@@ -66,18 +66,18 @@ function PageHeader() {
         data-testid="connection-pill"
       >
         <span className="size-[6px] shrink-0 rounded-[3px] bg-status-live" />
-        <span className="text-[11px] leading-[13px] font-bold text-pill-text">Tokiie connected</span>
+        <span className="text-[11px] leading-[13px] font-bold text-pill-text">Tokkey connected</span>
       </span>
     </header>
   );
 }
 
 interface PageShellProps {
-  /** Page heading, e.g. "Tokiie". */
+  /** Page heading, e.g. "Tokkey". */
   title: string;
   /** Sentence under the heading. */
   subtitle: string;
-  /** Identifies the page in tests, e.g. `tokiie` renders `page-tokiie`. */
+  /** Identifies the page in tests, e.g. `tokkey` renders `page-tokkey`. */
   testId: string;
   children: ReactNode;
 }

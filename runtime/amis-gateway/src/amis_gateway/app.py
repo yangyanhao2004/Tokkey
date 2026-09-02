@@ -1,4 +1,4 @@
-"""ASGI application exposing Tokiie's focused LiteLLM SDK gateway surface."""
+"""ASGI application exposing Tokkey's focused LiteLLM SDK gateway surface."""
 
 from __future__ import annotations
 
@@ -30,9 +30,9 @@ from .streaming import NativeResponsesProxyError, NativeResponsesSSEProxy
 JSONMapping = dict[str, Any]
 AsyncCall = Callable[..., Awaitable[Any]]
 LOGGER = logging.getLogger(__name__)
-# Tokiie's gateway surface starts a fresh lineage at 1: it drops the router
+# Tokkey's gateway surface starts a fresh lineage at 1: it drops the router
 # difficulty endpoint that the Amis-era version 3 exposed, and no previously
-# shipped Tokiie helper exists that a supervisor would need to stay compatible
+# shipped Tokkey helper exists that a supervisor would need to stay compatible
 # with. Bump this whenever the request or response contract changes so the
 # supervisor can evict an orphaned helper left behind by an older app build.
 GATEWAY_RUNTIME_PROTOCOL_VERSION = 1
@@ -102,7 +102,7 @@ class LiteLLMSDKCompatibility:
 
 
 class LiteLLMModelCapabilityRegistrar:
-    """Register Tokiie-controlled native streaming capabilities with LiteLLM."""
+    """Register Tokkey-controlled native streaming capabilities with LiteLLM."""
 
     def __init__(self, register_model: Callable[[dict[str, Any]], Any] | None = None) -> None:
         self._register_model = register_model or litellm.register_model
@@ -125,7 +125,7 @@ class LiteLLMModelCapabilityRegistrar:
             if registration_key in self._registered_models:
                 return
             # LiteLLM otherwise buffers unknown OpenAI-compatible Responses models,
-            # even when Tokiie owns the runtime and has recorded its streaming support.
+            # even when Tokkey owns the runtime and has recorded its streaming support.
             self._register_model({
                 model: {
                     "litellm_provider": provider,
@@ -241,12 +241,12 @@ class ResponsesToolOutputNormalizer:
     The image is deliberately not re-attached as a user message: an endpoint without
     vision rejects that too (llama.cpp answers HTTP 500 "image input is not
     supported"), so it would only trade one dead turn for another. It is not lost
-    either -- `view_image` exists to show a file to the *user*, and the Tokiie app
+    either -- `view_image` exists to show a file to the *user*, and the Tokkey app
     renders that file in the transcript from the same call. The note tells the model
     so, which is what stops it from apologizing for a QR code the user can see.
 
     That last sentence is a claim about the caller, and this process cannot verify
-    it: the note is true because the Tokiie app is the only client of this gateway's
+    it: the note is true because the Tokkey app is the only client of this gateway's
     Codex routes and it renders every `view_image` row. A different client that
     forwards Codex traffic here without rendering would make it a lie.
     """
@@ -354,7 +354,7 @@ class ModelDiscoveryCatalog:
     """Answer `/v1/models` for clients that build their model picker from a gateway.
 
     This is the read-only public face of the same routes `/model/info` reports.
-    The two are deliberately not one endpoint: `/model/info` is Tokiie's own
+    The two are deliberately not one endpoint: `/model/info` is Tokkey's own
     management view and returns the endpoint and marker behind each route, which
     an inference caller has no business seeing.
 
@@ -411,10 +411,10 @@ class ModelDiscoveryCatalog:
 class UnregisteredClaudeRoute:
     """Serve a Claude model the caller named that no route was seeded for.
 
-    Tokiie seeds a route per Claude model from a list this build ships with, so
+    Tokkey seeds a route per Claude model from a list this build ships with, so
     that list is stale the day Anthropic releases a model. Without this, the
     release reaches the user as a local 404 for a model their own client just
-    offered them, which reads as Tokiie being broken rather than behind.
+    offered them, which reads as Tokkey being broken rather than behind.
 
     The synthesized route is exactly what the seeding registrar would have
     created -- `anthropic/<alias>`, no key, no endpoint -- and is never stored.
@@ -470,9 +470,9 @@ class UnregisteredClaudeRoute:
 
 
 class PickerModelAlias:
-    """Undo the name Tokiie publishes cloud routes under in Claude's pickers.
+    """Undo the name Tokkey publishes cloud routes under in Claude's pickers.
 
-    Neither Claude surface will show a bare route name, so Tokiie publishes each
+    Neither Claude surface will show a bare route name, so Tokkey publishes each
     cloud route under an `anthropic.`-prefixed alias and the prefix comes back
     off here, before the registry lookup.
 
@@ -798,7 +798,7 @@ class AmisGatewayApplication:
         unseeded Claude model from being refused locally. A `KeyError` still
         leaves here for every other alias, so the 404 path is unchanged.
 
-        Claude's pickers reject bare cloud route names, so Tokiie publishes them
+        Claude's pickers reject bare cloud route names, so Tokkey publishes them
         under a `PickerModelAlias`. The prefix is stripped here so the real route
         can be found in the registry — the route's own `litellm_params` still
         carry the correct model identifier sent upstream.
@@ -926,7 +926,7 @@ class AmisGatewayApplication:
         route: ModelRoute,
         target: UpstreamTarget,
     ) -> JSONMapping:
-        """Prevent callers from overriding the endpoint and credential selected by Tokiie."""
+        """Prevent callers from overriding the endpoint and credential selected by Tokkey."""
         arguments = dict(payload)
         arguments.pop("extra_headers", None)
         arguments["model"] = route.litellm_params["model"]
@@ -955,7 +955,7 @@ class AmisGatewayApplication:
             and str(tool.get("server_url", "")).startswith("litellm_proxy")
             for tool in tools
         ):
-            raise ValueError("LiteLLM Proxy-managed MCP tools are not supported by the local Tokiie gateway")
+            raise ValueError("LiteLLM Proxy-managed MCP tools are not supported by the local Tokkey gateway")
         # LiteLLM 1.92 imports its Proxy MCP handler for Chat and Responses tools
         # before checking tool types. Messages uses a separate Anthropic SDK path
         # that does not accept this private compatibility flag.
@@ -985,7 +985,7 @@ class AmisGatewayApplication:
     @staticmethod
     def _cancellation_id(request: Request) -> str | None:
         """Read the private Codex correlation header without forwarding it upstream."""
-        value = request.headers.get("x-tokiie-thread-id", "").strip()
+        value = request.headers.get("x-tokkey-thread-id", "").strip()
         if not value:
             return None
         # Oversized untrusted identifiers are intentionally not registered. The

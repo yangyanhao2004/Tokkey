@@ -19,7 +19,7 @@ const { default: CountdownTimer } = CountdownTimerModule;
 const TEST_PROFILE = {
   id: 42,
   email: 'user@example.com',
-  displayName: 'Tokiie User',
+  displayName: 'Tokkey User',
   emailVerified: true
 };
 
@@ -167,7 +167,7 @@ class LoopbackBrowserProbe {
     successUrl.searchParams.set('code', 'google-authorization-code');
     const successResponse = await fetch(successUrl);
     assert.equal(successResponse.status, 200);
-    assert.match(await successResponse.text(), /return to Tokiie/);
+    assert.match(await successResponse.text(), /return to Tokkey/);
   }
 }
 
@@ -242,7 +242,7 @@ test('Account API maps a non-JSON server failure to temporary unavailability', a
 });
 
 test('credential vault replaces one encrypted record and clears it', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'tokiie-account-'));
+  const directory = await mkdtemp(path.join(tmpdir(), 'tokkey-account-'));
   const credentialPath = path.join(directory, 'account-session.enc');
   const vault = new AccountCredentialVault(() => credentialPath, new TestCredentialCodec());
   try {

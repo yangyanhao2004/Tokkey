@@ -6,7 +6,7 @@ the prompt or already emitting tokens. Everywhere the app owns that socket it
 simply closes it and needs nothing from this module.
 
 Direct chat is the case where it does not. Codex is configured to call this
-gateway itself, so Tokiie injects an opaque cancellation id into the provider
+gateway itself, so Tokkey injects an opaque cancellation id into the provider
 request and later sends the same id to `POST /_amis/cancel`. The registry closes
 only the exchange carrying that id, never sibling sessions using the same model.
 

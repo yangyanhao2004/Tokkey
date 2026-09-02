@@ -8,7 +8,7 @@ import type {
 } from '../../shared/types';
 
 /**
- * How an install answers a name already taken in Tokiie's skills folder.
+ * How an install answers a name already taken in Tokkey's skills folder.
  * `reportConflict` neither overwrites nor renames: an identical folder is
  * reused and only its agent selection is applied, and a different folder under
  * the same name comes back as a conflict for the tab to report. Choosing
@@ -69,7 +69,7 @@ export function useCachedRepositories(): CachedRepositories {
   const refresh = useCallback(() => {
     void (async () => {
       try {
-        const scanned = await window.tokiie.listCachedRepositories();
+        const scanned = await window.tokkey.listCachedRepositories();
         if (!isMountedRef.current) return;
         setRepositories(scanned);
         setError(null);
@@ -88,7 +88,7 @@ export function useCachedRepositories(): CachedRepositories {
 
   const installSkill = useCallback(
     async (skill: CachedRepositorySkill, enabledAgents: SkillAgent[]) => {
-      const result = await window.tokiie.installRepositorySkill({
+      const result = await window.tokkey.installRepositorySkill({
         source: skill.source,
         relativePath: skill.relativePath,
         enabledAgents,
@@ -104,7 +104,7 @@ export function useCachedRepositories(): CachedRepositories {
 
   const addRepository = useCallback(
     async (input: string, branch: string) => {
-      const result = await window.tokiie.addRepository(input, branch);
+      const result = await window.tokkey.addRepository(input, branch);
       // The download answers with one repository; the grid draws them all, so
       // the cache is re-read rather than having this one spliced into it.
       refresh();

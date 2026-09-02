@@ -40,7 +40,7 @@ export class LocalMcpConfigurationFileOperations implements McpConfigurationFile
   async replaceAtomically(filePath: string, bytes: Uint8Array, mode: number | null): Promise<void> {
     const parentDirectory = path.dirname(filePath);
     await mkdir(parentDirectory, { recursive: true });
-    const temporaryPath = path.join(parentDirectory, `.${path.basename(filePath)}.tokiie-${randomUUID()}.tmp`);
+    const temporaryPath = path.join(parentDirectory, `.${path.basename(filePath)}.tokkey-${randomUUID()}.tmp`);
     let handle: Awaited<ReturnType<typeof open>> | null = null;
     try {
       handle = await open(temporaryPath, 'wx', mode ?? 0o600);

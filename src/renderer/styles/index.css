@@ -30,7 +30,7 @@
 }
 
 /*
-  Design tokens from the Tokiie Figma library. Names mirror the Figma variable
+  Design tokens from the Tokkey Figma library. Names mirror the Figma variable
   they come from so a value can be traced back to the design.
 */
 @theme {
@@ -71,11 +71,11 @@
   --color-chat-glass: rgb(84 84 84 / 67%);
 
   /*
-    The Tokiie page's values are raw fills in Figma rather than published
+    The Tokkey page's values are raw fills in Figma rather than published
     variables, so they are named here instead of being repeated per element.
   */
 
-  /* Translucent card surface shared by both Tokiie page sections. */
+  /* Translucent card surface shared by both Tokkey page sections. */
   --color-surface-card: rgba(255, 255, 255, 0.72);
   --color-surface-card-border: rgba(0, 0, 0, 0.12);
   /* Recessed tile behind list icons and the footnote strip. */

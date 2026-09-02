@@ -28,7 +28,7 @@ interface LocatedManifest {
  * Owns `~/.amiswifi/models`: where a model's bytes land, whether they are all
  * there, and how to describe what is on disk without the remote catalog.
  *
- * The Tokiie page lists installed models on launch, long before — and often
+ * The Tokkey page lists installed models on launch, long before — and often
  * without — a catalog fetch, so a completed download leaves a manifest next to
  * its artifact. Hand-placed GGUF files count too, wherever they are nested
  * under the models root.

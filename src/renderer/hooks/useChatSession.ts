@@ -200,7 +200,7 @@ export function useChatSession(): ChatSessionController {
 
   const loadWorkspace = useCallback(async () => {
     try {
-      applyWorkspace(await window.tokiie.loadLocalChatWorkspace());
+      applyWorkspace(await window.tokkey.loadLocalChatWorkspace());
     } catch (error) {
       handleWorkspaceError(error);
     }
@@ -208,7 +208,7 @@ export function useChatSession(): ChatSessionController {
 
   const refreshRuntimeState = useCallback(async () => {
     try {
-      const nextState = await window.tokiie.getLocalChatRuntimeState();
+      const nextState = await window.tokkey.getLocalChatRuntimeState();
       if (mountedRef.current) {
         setRuntimeState(nextState);
       }
@@ -386,7 +386,7 @@ export function useChatSession(): ChatSessionController {
 
   useEffect(() => {
     mountedRef.current = true;
-    const removeLocalChatEventListener = window.tokiie.onLocalChatEvent(handleLocalChatEvent);
+    const removeLocalChatEventListener = window.tokkey.onLocalChatEvent(handleLocalChatEvent);
     void Promise.all([refreshRuntimeState(), loadWorkspace()]);
     return () => {
       mountedRef.current = false;
@@ -395,7 +395,7 @@ export function useChatSession(): ChatSessionController {
         window.cancelAnimationFrame(messageFlushFrameRef.current);
       }
       [...activeTurnsByIdRef.current.keys()].forEach((turnId) => {
-        void window.tokiie.cancelLocalChatTurn(turnId).catch(() => undefined);
+        void window.tokkey.cancelLocalChatTurn(turnId).catch(() => undefined);
       });
       activeTurnsByIdRef.current.clear();
       turnIdBySessionIdRef.current.clear();
@@ -432,7 +432,7 @@ export function useChatSession(): ChatSessionController {
   const cancelTurnForSession = useCallback((sessionId: string) => {
     const turnId = turnIdBySessionIdRef.current.get(sessionId);
     if (!turnId) return;
-    void window.tokiie.cancelLocalChatTurn(turnId).catch((error: unknown) => {
+    void window.tokkey.cancelLocalChatTurn(turnId).catch((error: unknown) => {
       markTurnFailed(turnId, describeError(error));
     });
   }, [markTurnFailed]);
@@ -445,21 +445,21 @@ export function useChatSession(): ChatSessionController {
 
   const selectSession = useCallback((sessionId: string) => {
     setHistoryMode('closed');
-    void window.tokiie.openLocalChatSession(sessionId)
+    void window.tokkey.openLocalChatSession(sessionId)
       .then(applyWorkspace)
       .catch(handleWorkspaceError);
   }, [applyWorkspace, handleWorkspaceError]);
 
   const createNewChat = useCallback(() => {
     setHistoryMode('closed');
-    void window.tokiie.createLocalChatSession()
+    void window.tokkey.createLocalChatSession()
       .then(applyWorkspace)
       .catch(handleWorkspaceError);
   }, [applyWorkspace, handleWorkspaceError]);
 
   const closeSession = useCallback((sessionId: string) => {
     cancelTurnForSession(sessionId);
-    void window.tokiie.closeLocalChatSession(sessionId)
+    void window.tokkey.closeLocalChatSession(sessionId)
       .then(applyWorkspace)
       .catch(handleWorkspaceError);
   }, [applyWorkspace, cancelTurnForSession, handleWorkspaceError]);
@@ -521,7 +521,7 @@ export function useChatSession(): ChatSessionController {
       : session));
     setRequestStateBySessionId((currentStates) => ({ ...currentStates, [sessionId]: 'sending' }));
 
-    void window.tokiie.startLocalChatTurn(request).catch((error: unknown) => {
+    void window.tokkey.startLocalChatTurn(request).catch((error: unknown) => {
       markTurnFailed(turnId, describeError(error));
       void refreshRuntimeState();
     });

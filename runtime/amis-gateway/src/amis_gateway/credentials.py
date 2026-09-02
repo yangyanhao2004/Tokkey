@@ -91,7 +91,7 @@ class UpstreamTargetPolicy:
     The gateway itself is unauthenticated -- it listens on loopback only, so a
     key checked here would guard nothing the operating system does not already
     guard. What an incoming `Authorization` header is good for is the upstream
-    call, and only when Tokiie has nothing better:
+    call, and only when Tokkey has nothing better:
 
     1. A Codex native model is served from whichever OpenAI-compatible service
        the user actually has: the endpoint the Codex CLI is configured with
@@ -100,11 +100,11 @@ class UpstreamTargetPolicy:
     2. A local model server needs no credential and is called without one.
     3. A route pointing at the canonical ChatGPT Codex backend spends the user's
        ChatGPT login from `~/.codex/auth.json`, whatever the caller sent.
-    4. The key stored on the route is Tokiie's own choice for that model and
+    4. The key stored on the route is Tokkey's own choice for that model and
        wins over anything a caller sends, so an agent cannot redirect a paid
        provider call onto someone else's account.
     5. Otherwise the caller's own header is forwarded, which is what lets an
-       agent bring its own key for a route Tokiie holds no key for.
+       agent bring its own key for a route Tokkey holds no key for.
 
     Step 3 sits above the stored and caller keys rather than acting as a
     fallback for a request that happens to arrive without one. The ChatGPT
@@ -162,7 +162,7 @@ class UpstreamTargetPolicy:
         The credential decides the destination here, because these two backends
         accept nothing but their own kind of credential:
 
-        1. A key stored on the route is Tokiie's own choice for this model and
+        1. A key stored on the route is Tokkey's own choice for this model and
            is spent on the route's endpoint, whatever the caller sent.
         2. Otherwise a caller who brought an OpenAI-shaped key gets the API-key
            endpoint -- the route's own, which is the one the Codex CLI is

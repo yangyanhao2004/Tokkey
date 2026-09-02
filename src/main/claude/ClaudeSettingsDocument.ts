@@ -5,7 +5,7 @@ interface ClaudeSettings {
 }
 
 /**
- * The model list Tokiie imposes on Claude Code while it holds the settings file.
+ * The model list Tokkey imposes on Claude Code while it holds the settings file.
  *
  * Both fields name gateway routes, not Anthropic model ids: what Claude Code
  * sends as `model` goes to the gateway, so a name it does not serve is a name

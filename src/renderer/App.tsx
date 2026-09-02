@@ -8,7 +8,7 @@ import { AddModelPage } from './pages/AddModelPage';
 import { AgentHubPage } from './pages/AgentHubPage';
 import { DiscoverSkillsPage } from './pages/DiscoverSkillsPage';
 import { RouterPage } from './pages/RouterPage';
-import { TokiiePage } from './pages/TokiiePage';
+import { TokkeyPage } from './pages/TokkeyPage';
 import { ChatPage } from './pages/ChatPage';
 import { UnbuiltPage } from './pages/UnbuiltPage';
 import { SignInPage } from './pages/SignInPage';
@@ -19,7 +19,7 @@ import { AccountProvider, useAccount } from './components/AccountProvider';
  * lands on the generic placeholder below, so rows and pages can land apart.
  */
 const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
-  tokiie: TokiiePage,
+  tokkey: TokkeyPage,
   router: RouterPage,
   'agent-hub': AgentHubPage,
   chat: ChatPage,

@@ -385,7 +385,7 @@ export class TokenHubRuntime implements LocalModelRuntime {
     model: LocalModelLaunchRequest,
     apiKey: string
   ): Promise<RunningProcess> {
-    const workingDirectory = await mkdtemp(path.join(os.tmpdir(), 'tokiie-tokenhub-'));
+    const workingDirectory = await mkdtemp(path.join(os.tmpdir(), 'tokkey-tokenhub-'));
     await copyFile(resources.templatePath, path.join(workingDirectory, 'qwen3_codex_compatible.jinja'));
     const args = [
       '-m', model.filePath,

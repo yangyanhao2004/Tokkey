@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { tokiieDatabasePath } from '../storage/TokiieDatabase';
+import { tokkeyDatabasePath } from '../storage/TokkeyDatabase';
 import {
   epochMillisecondsFromStoredTimestamp,
   isLocalStorageTimestamp,
@@ -28,7 +28,7 @@ const CLOUD_API_FORMATS: readonly CloudApiFormat[] = [
 const MODEL_PROFILE_TYPES: readonly ModelProfileType[] = ['cloud', 'local', 'hub', 'tokenbox'];
 
 /**
- * Tokiie keeps local business time in readable ISO text with the user's system
+ * Tokkey keeps local business time in readable ISO text with the user's system
  * timezone. A paired epoch column remains available for stable comparisons.
  */
 const MODEL_PROFILES_SCHEMA = `
@@ -53,7 +53,7 @@ SELECT id, name, provider, api_url, api_key, model_name, type,
   FROM "model_profiles"
  WHERE id = ?`;
 
-// INSERT OR REPLACE keeps a profile's stable ID idempotent within Tokiie's database.
+// INSERT OR REPLACE keeps a profile's stable ID idempotent within Tokkey's database.
 const UPSERT_PROFILE = `
 INSERT OR REPLACE INTO "model_profiles"
   (id, name, provider, api_url, api_key, model_name, type,
@@ -77,7 +77,7 @@ export interface SqliteModelProfileStoreOptions {
 }
 
 /**
- * Reads and writes Tokiie's `model_profiles` in `~/.tokiie/dbs/tokiie.db`.
+ * Reads and writes Tokkey's `model_profiles` in `~/.tokkey/dbs/tokkey.db`.
  */
 export class SqliteModelProfileStore implements ModelProfileStoring {
   private readonly databasePath: string;
@@ -86,7 +86,7 @@ export class SqliteModelProfileStore implements ModelProfileStoring {
 
   constructor(options: SqliteModelProfileStoreOptions = {}) {
     const homeDirectory = options.homeDirectory ?? os.homedir();
-    this.databasePath = options.databasePath ?? tokiieDatabasePath(homeDirectory);
+    this.databasePath = options.databasePath ?? tokkeyDatabasePath(homeDirectory);
     this.openDatabase = options.openDatabase ?? SqliteModelProfileStore.openSqliteDatabase;
   }
 

@@ -9,7 +9,7 @@
  * page lookup honest: a page can only be registered for a row that exists.
  */
 export type NavItemId =
-  | 'tokiie'
+  | 'tokkey'
   | 'router'
   | 'agent-hub'
   | 'memory'
@@ -19,7 +19,7 @@ export type NavItemId =
   | 'settings';
 
 /** The row selected when the window opens. */
-export const DEFAULT_NAV_ITEM_ID: NavItemId = 'tokiie';
+export const DEFAULT_NAV_ITEM_ID: NavItemId = 'tokkey';
 
 /** A single navigation row. */
 export interface SidebarNavItem {
@@ -32,7 +32,7 @@ export interface SidebarNavItem {
    * class because the renderer's CSP forbids inline style attributes.
    */
   readonly iconSizeClass: string;
-  /** Trailing status word, e.g. the "Ready" on the Tokiie row (node 192:2727). */
+  /** Trailing status word, e.g. the "Ready" on the Tokkey row (node 192:2727). */
   readonly badge?: string;
 }
 
@@ -51,9 +51,9 @@ export const NAV_SECTIONS: readonly SidebarNavSection[] = [
     title: 'Core',
     items: [
       {
-        id: 'tokiie',
-        label: 'Tokiie',
-        iconFile: 'nav-tokiie.svg',
+        id: 'tokkey',
+        label: 'Tokkey',
+        iconFile: 'nav-tokkey.svg',
         iconSizeClass: DEFAULT_ICON_SIZE_CLASS,
         badge: 'Ready'
       },

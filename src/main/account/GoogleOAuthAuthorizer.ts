@@ -169,7 +169,7 @@ class GoogleOAuthAttempt {
   /** Returns a fixed local page without reflecting callback values into HTML. */
   private respond(response: ServerResponse, isSuccess: boolean, onFlushed?: () => void): void {
     const title = isSuccess ? 'Google sign-in complete' : 'Google sign-in request rejected';
-    const body = `<html><body><h3>${title}</h3><p>You can return to Tokiie.</p></body></html>`;
+    const body = `<html><body><h3>${title}</h3><p>You can return to Tokkey.</p></body></html>`;
     response.writeHead(isSuccess ? 200 : 400, {
       'Content-Type': 'text/html; charset=utf-8',
       'Content-Length': Buffer.byteLength(body),

@@ -104,7 +104,7 @@ export class LocalModelManager {
 
   /**
    * What is on disk right now. Deliberately never touches the remote catalog:
-   * the Tokiie page opens on launch and must list installed models offline.
+   * the Tokkey page opens on launch and must list installed models offline.
    */
   listInstalled(): Promise<InstalledLocalModel[]> {
     return this.downloader.listInstalled();

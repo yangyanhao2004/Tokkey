@@ -83,7 +83,7 @@ async function waitFor(condition, attempts = 100) {
 }
 
 function createHomeDirectory() {
-  const home = mkdtempSync(path.join(tmpdir(), 'tokiie-models-'));
+  const home = mkdtempSync(path.join(tmpdir(), 'tokkey-models-'));
   test.after(() => rmSync(home, { recursive: true, force: true }));
   return home;
 }

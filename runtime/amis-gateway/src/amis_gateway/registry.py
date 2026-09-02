@@ -1,4 +1,4 @@
-"""Thread-safe in-memory model route registry owned by the Tokiie gateway."""
+"""Thread-safe in-memory model route registry owned by the Tokkey gateway."""
 
 from __future__ import annotations
 

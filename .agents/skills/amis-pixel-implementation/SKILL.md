@@ -1,6 +1,6 @@
 ---
 name: amis-pixel-implementation
-description: Implement or fix Amis Electron renderer interfaces from Figma with measured visual and interaction fidelity using TypeScript and Tailwind. Use when a Figma node must be reproduced in the Tokiie renderer, when DOM geometry, typography, icons, design tokens, hover, focus, disabled, accessibility, loading, or error states must match, or when evidence is needed to verify a visual change.
+description: Implement or fix Amis Electron renderer interfaces from Figma with measured visual and interaction fidelity using TypeScript and Tailwind. Use when a Figma node must be reproduced in the Tokkey renderer, when DOM geometry, typography, icons, design tokens, hover, focus, disabled, accessibility, loading, or error states must match, or when evidence is needed to verify a visual change.
 ---
 
 # Amis Pixel Implementation
@@ -27,7 +27,7 @@ bindings, product behavior, and repository conventions are the contract.
   manifest and `error.txt` before exiting nonzero.
   `--width` and `--height` are required and describe the Figma renderer/content
   frame, not the OS title-bar-inclusive bounds.
-- The renderer reaches the main process only through `window.tokiie`
+- The renderer reaches the main process only through `window.tokkey`
   (`src/main/preload.ts`, typed in `src/shared/types.ts`). Never add a direct
   `ipcRenderer` call or Node API in view code.
 - `index.html` sets a strict CSP (`script-src 'self'; style-src 'self'`).
@@ -92,7 +92,7 @@ as the ledger and evidence format.
   Figma frame.
 - Keep rendering and user-intent forwarding separate from state and business
   rules; business rules that touch the filesystem, gateway, or config belong in
-  the main process behind `window.tokiie`.
+  the main process behind `window.tokkey`.
 - Open the current app at the same window size and state as Figma. Classify
   mismatches by structure, geometry, tokens, typography, assets, effects,
   interaction, and preserved exceptions.

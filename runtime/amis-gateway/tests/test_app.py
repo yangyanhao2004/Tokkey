@@ -1,4 +1,4 @@
-"""Protocol and management tests for the focused Tokiie gateway surface."""
+"""Protocol and management tests for the focused Tokkey gateway surface."""
 
 from __future__ import annotations
 
@@ -112,7 +112,7 @@ def model_payload() -> dict[str, Any]:
             "api_base": "https://provider.example/v1",
         },
         "model_info": {
-            "created_by": "tokiie",
+            "created_by": "tokkey",
             "profile_id": "profile-id",
             "api_format": "openai_chat",
         },
@@ -356,7 +356,7 @@ async def test_management_crud_and_atomic_restore() -> None:
 
 
 async def test_chat_request_uses_route_credentials_and_streams_openai_sse() -> None:
-    """Agent-supplied routing values cannot override Tokiie's selected upstream."""
+    """Agent-supplied routing values cannot override Tokkey's selected upstream."""
     captured: dict[str, Any] = {}
 
     async def chat_call(**kwargs: Any) -> FakeAsyncStream:
@@ -430,7 +430,7 @@ async def test_stored_route_key_wins_over_the_caller_header() -> None:
 
 
 async def test_public_route_without_a_stored_key_forwards_the_caller_header() -> None:
-    """Codex may bring its own key for a route Tokiie holds no key for."""
+    """Codex may bring its own key for a route Tokkey holds no key for."""
     route = model_payload()
     del route["litellm_params"]["api_key"]
 
@@ -501,7 +501,7 @@ async def test_local_provider_stream_carries_no_authorization_header() -> None:
 
 async def test_responses_registers_explicit_native_streaming_before_sdk_call() -> None:
     """Controlled runtimes bypass LiteLLM's fake stream for unknown model names."""
-    real_model = "tokiie-unknown-native-streaming-model"
+    real_model = "tokkey-unknown-native-streaming-model"
     observed: dict[str, bool] = {}
 
     async def responses_call(**_: Any) -> FakeAsyncStream:
@@ -537,7 +537,7 @@ async def test_responses_registers_explicit_native_streaming_before_sdk_call() -
 
 async def test_messages_registers_explicit_native_responses_streaming_before_sdk_call() -> None:
     """Messages routes register before LiteLLM dispatches them through Responses."""
-    real_model = "tokiie-unknown-messages-native-streaming-model"
+    real_model = "tokkey-unknown-messages-native-streaming-model"
     observed: dict[str, bool] = {}
 
     async def messages_call(**_: Any) -> FakeAsyncStream:
@@ -575,7 +575,7 @@ async def test_messages_registers_explicit_native_responses_streaming_before_sdk
 
 async def test_responses_does_not_assume_streaming_for_unmarked_routes() -> None:
     """Custom endpoints remain governed by LiteLLM when capability is unknown."""
-    real_model = "tokiie-unknown-custom-model"
+    real_model = "tokkey-unknown-custom-model"
     observed: dict[str, bool] = {}
 
     async def responses_call(**_: Any) -> FakeAsyncStream:

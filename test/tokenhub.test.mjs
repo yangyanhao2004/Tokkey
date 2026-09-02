@@ -204,7 +204,7 @@ test('manifest, CRC32, and ML-DSA input wrapping preserve the trust contract', (
 });
 
 test('runtime rejects Start without a connected Dongle and publishes failed state', async () => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-tokenhub-test-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokkey-tokenhub-test-'));
   test.after(() => rmSync(directory, { recursive: true, force: true }));
   const filePath = path.join(directory, 'model.gguf');
   writeFileSync(filePath, 'GGUF');

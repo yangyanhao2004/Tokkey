@@ -23,7 +23,7 @@ export interface BundledCatalogCache {
  * The model catalog compiled into the installed Codex CLI, cached on disk.
  *
  * Two very different callers need it. The Router page needs a handful of
- * descriptive fields per model, and the catalog Tokiie writes for Codex needs
+ * descriptive fields per model, and the catalog Tokkey writes for Codex needs
  * the rows in full — the agent instructions, the tool contract, and the dozens
  * of capability flags that make a model behave like a first-class Codex model.
  * Both are served from one cache so the 30-second CLI call happens once.

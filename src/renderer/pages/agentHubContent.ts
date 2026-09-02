@@ -6,7 +6,7 @@
  * Neither catalog is fixed content: both are whatever the main process scanners
  * find installed. Nor is the agent list — detection decides that, and every
  * function here that takes an `AgentAvailability` reads it. OpenCode is
- * deliberately absent — Tokiie only manages Codex and Claude Code.
+ * deliberately absent — Tokkey only manages Codex and Claude Code.
  */
 
 import type {
@@ -30,7 +30,7 @@ export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
 
 export const PAGE_TITLE = 'Agent Hub';
 export const PAGE_SUBTITLE =
-  'Install the coding agents you use while Tokiie keeps local and cloud models available in the background.';
+  'Install the coding agents you use while Tokkey keeps local and cloud models available in the background.';
 
 /** Every coding agent the hub can install. */
 export type AgentId = 'codex' | 'claude-code';
@@ -180,11 +180,11 @@ export interface CatalogEntry {
 
 /**
  * Where an installed skill lives, said in the words the page uses elsewhere.
- * The Amis root is Tokiie's own store, so it reads as the app rather than as a
+ * The Amis root is Tokkey's own store, so it reads as the app rather than as a
  * directory nobody outside the code recognizes.
  */
 const SKILL_ROOT_LABELS: Readonly<Record<SkillRoot, string>> = {
-  amis: 'Tokiie',
+  amis: 'Tokkey',
   claudeCode: 'Claude Code',
   codex: 'Codex',
   agents: 'Agents'
@@ -305,7 +305,7 @@ export function selectCatalogEntries(
 
 /**
  * The Manage dialog (Figma 225:1301), which both catalogs open and which says
- * above the name which of them asked. OpenCode is drawn there too, but Tokiie
+ * above the name which of them asked. OpenCode is drawn there too, but Tokkey
  * does not manage it, so the dialog lists `HUB_AGENTS` like the rest of the page.
  */
 export const MANAGE_SKILL_DIALOG_EYEBROW = 'MANAGE SKILL';
@@ -419,7 +419,7 @@ export const UPLOAD_CONFLICT_CHOICES: readonly { value: SkillUploadConflictChoic
 ];
 
 export function describeUploadConflict(folderName: string): string {
-  return `A skill named “${folderName}” is already installed in Tokiie’s skills folder.`;
+  return `A skill named “${folderName}” is already installed in Tokkey’s skills folder.`;
 }
 
 /** The last path segment, which is the name Keep Both actually settled on. */

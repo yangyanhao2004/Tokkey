@@ -5,7 +5,7 @@ import {
   type CatalogEntry
 } from './CodexCatalogFile';
 
-/** One model Tokiie wants Codex to offer, before it becomes a catalog row. */
+/** One model Tokkey wants Codex to offer, before it becomes a catalog row. */
 export interface CatalogModelInput {
   /**
    * The name Codex sends upstream, which is also the row's slug. It must be a
@@ -36,12 +36,12 @@ export interface CatalogGenerationResult {
 }
 
 /**
- * Marks a row as one Tokiie wrote. Rows are identified by this prefix rather
- * than by the shape of their slug, because a Tokiie route name looks exactly
+ * Marks a row as one Tokkey wrote. Rows are identified by this prefix rather
+ * than by the shape of their slug, because a Tokkey route name looks exactly
  * like a native one: it carries no provider prefix, since the slug has to be
  * the name the gateway registered the route under.
  */
-const ROUTED_DESCRIPTION_PREFIX = 'Routed via Tokiie → ';
+const ROUTED_DESCRIPTION_PREFIX = 'Routed via Tokkey → ';
 
 /** Codex's hardcoded GPT-5 identity sentence, which routed rows must not inherit. */
 const CODEX_GPT5_IDENTITY_PATTERN =
@@ -59,7 +59,7 @@ const COMPACTION_HEADROOM = 0.9;
 /**
  * Fields stripped from every row before the catalog is written.
  *
- * Each one is a value Tokiie would be guessing at. A routed row is cloned from
+ * Each one is a value Tokkey would be guessing at. A routed row is cloned from
  * a native model, so its window describes that model rather than the one the
  * gateway forwards to, and a guess that is wrong is worse than no answer: Codex
  * falls back to its own per-model metadata for an absent field, and that
@@ -69,7 +69,7 @@ const COMPACTION_HEADROOM = 0.9;
  *
  * The reasoning ladder — `supported_reasoning_levels` and the
  * `default_reasoning_level` that indexes into it — is not here: it is rewritten
- * on Tokiie's own rows and left untouched on the native ones, whose ladder is
+ * on Tokkey's own rows and left untouched on the native ones, whose ladder is
  * the model's own and correct as Codex wrote it. See `ensureStrictFields`.
  *
  * They are removed at the end, after the merge, so the rule holds for every row
@@ -87,7 +87,7 @@ const OMITTED_FIELDS: readonly string[] = [
  *
  * The clone is what makes a routed model behave like a first-class Codex model:
  * the native row carries the agent instructions, the tool contract, and the
- * dozens of capability flags Codex expects, none of which Tokiie could
+ * dozens of capability flags Codex expects, none of which Tokkey could
  * reconstruct. Everything specific to the native model is then stripped, so the
  * clone inherits behaviour without inheriting identity.
  */
@@ -97,8 +97,8 @@ export class CatalogEntryFactory {
     return `${ROUTED_DESCRIPTION_PREFIX}${model.ownedBy ?? model.slug}.`;
   }
 
-  /** Whether Tokiie is the author of this row. */
-  static isTokiieAuthored(entry: CatalogEntry): boolean {
+  /** Whether Tokkey is the author of this row. */
+  static isTokkeyAuthored(entry: CatalogEntry): boolean {
     return (
       typeof entry.description === 'string' &&
       entry.description.startsWith(ROUTED_DESCRIPTION_PREFIX)
@@ -107,7 +107,7 @@ export class CatalogEntryFactory {
 
   /**
    * The native row to clone: one that carries `base_instructions` and was not
-   * written by Tokiie itself, since cloning our own clone would compound every
+   * written by Tokkey itself, since cloning our own clone would compound every
    * field the first pass stripped.
    */
   static findTemplate(document: CatalogDocument | null): CatalogEntry | null {
@@ -116,7 +116,7 @@ export class CatalogEntryFactory {
         (entry) =>
           typeof entry.slug === 'string' &&
           'base_instructions' in entry &&
-          !CatalogEntryFactory.isTokiieAuthored(entry)
+          !CatalogEntryFactory.isTokkeyAuthored(entry)
       ) ?? null
     );
   }
@@ -216,7 +216,7 @@ export class CatalogEntryFactory {
    * rather than the offending one. Every row goes through it, freshly built or
    * preserved from disk.
    *
-   * `routed` marks a row Tokiie authored. Only those rows have their reasoning
+   * `routed` marks a row Tokkey authored. Only those rows have their reasoning
    * ladder rewritten; every other field is normalized the same way for all rows.
    */
   static ensureStrictFields(
@@ -260,7 +260,7 @@ export class CatalogEntryFactory {
     entry.input_modalities = accepted.length > 0 ? accepted : ['text'];
 
     if (typeof entry.effective_context_window_percent !== 'number') entry.effective_context_window_percent = 95;
-    if (typeof entry.comp_hash !== 'string') entry.comp_hash = 'tokiie';
+    if (typeof entry.comp_hash !== 'string') entry.comp_hash = 'tokkey';
     if (typeof entry.auto_compact_token_limit !== 'number') {
       // The window itself is never written, so the row it was read from cannot
       // supply one either: the threshold falls back to the assumed window.
@@ -277,9 +277,9 @@ export class CatalogEntryFactory {
 /**
  * Combines the rows built this run with whatever the catalog already holds.
  *
- * Rows Tokiie did not write are always kept: the native rows Codex ships carry
+ * Rows Tokkey did not write are always kept: the native rows Codex ships carry
  * per-model state nothing here could rebuild, and a row another tool wrote is
- * that tool's business. Rows Tokiie did write are replaced by this run's set,
+ * that tool's business. Rows Tokkey did write are replaced by this run's set,
  * which is what makes a disconnected model disappear.
  */
 export class CatalogMerger {
@@ -289,7 +289,7 @@ export class CatalogMerger {
     );
     const preserved = existing.filter(
       (entry) =>
-        !CatalogEntryFactory.isTokiieAuthored(entry) &&
+        !CatalogEntryFactory.isTokkeyAuthored(entry) &&
         !(typeof entry.slug === 'string' && freshSlugs.has(entry.slug))
     );
     // Preserved rows bypassed the factory, so the invariants they may predate
@@ -309,7 +309,7 @@ export class CatalogMerger {
  * Codex builds a static model list from that file and never refreshes it, so
  * the file has to carry everything the user should see: the native models Codex
  * ships with, seeded once from its own bundled catalog, plus one row per model
- * Tokiie routes through the gateway.
+ * Tokkey routes through the gateway.
  */
 export class CodexCatalogGenerator {
   private readonly catalogPath: string;
@@ -340,11 +340,11 @@ export class CodexCatalogGenerator {
   generate(models: readonly CatalogModelInput[]): CatalogGenerationResult {
     const existing = this.store.read(this.catalogPath);
     const existingModels = existing?.models ?? [];
-    // The seed only fills a catalog that carries no rows but Tokiie's own. Rows
+    // The seed only fills a catalog that carries no rows but Tokkey's own. Rows
     // already on disk always win: they hold per-account state a bundled dump
     // cannot know about, and a catalog holding only our rows would leave the
     // user without the native models and without a template to clone.
-    const natives = existingModels.some((entry) => !CatalogEntryFactory.isTokiieAuthored(entry))
+    const natives = existingModels.some((entry) => !CatalogEntryFactory.isTokkeyAuthored(entry))
       ? []
       : this.readNatives();
     const available: CatalogDocument = { models: [...existingModels, ...natives] };
@@ -355,7 +355,7 @@ export class CodexCatalogGenerator {
       .merge(available.models ?? [], routed)
       .map((entry) => CodexCatalogGenerator.omitDerivedFields(entry));
 
-    // Unknown top-level keys are preserved: a Codex setting Tokiie does not
+    // Unknown top-level keys are preserved: a Codex setting Tokkey does not
     // model must survive a rewrite of this file.
     const document: CatalogDocument = { ...(existing ?? {}), models: merged };
     const written = this.store.writeIfChanged(this.catalogPath, this.serializer.render(document));

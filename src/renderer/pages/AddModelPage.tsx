@@ -252,7 +252,7 @@ function CatalogCard() {
   );
 }
 
-/** The panel behind the Tokiie page's "Add model" button. */
+/** The panel behind the Tokkey page's "Add model" button. */
 export function AddModelPage() {
   return (
     <PageShell

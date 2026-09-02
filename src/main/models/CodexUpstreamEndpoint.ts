@@ -15,7 +15,7 @@ const PROBE_TIMEOUT_MS = 5000;
 export type EndpointFetch = (input: string, init: RequestInit) => Promise<Response>;
 
 /**
- * Asks an OpenAI-compatible endpoint whether it serves the models Tokiie routes.
+ * Asks an OpenAI-compatible endpoint whether it serves the models Tokkey routes.
  *
  * A base URL alone proves nothing — anything can answer on a port. Listing the
  * models is the cheapest question whose answer distinguishes a real upstream
@@ -76,10 +76,10 @@ export class OpenAiModelsProbe {
 }
 
 /**
- * The endpoint Tokiie serves Codex native models from, remembered across launches.
+ * The endpoint Tokkey serves Codex native models from, remembered across launches.
  *
  * `config.toml` cannot be trusted to still name the user's own upstream, because
- * pointing the Codex CLI at Tokiie rewrites that file with this gateway's own
+ * pointing the Codex CLI at Tokkey rewrites that file with this gateway's own
  * address. Reading it back on the next launch would register the gateway as its
  * own upstream — a loop that then feeds itself, since every later launch reads
  * what the previous one adopted.
@@ -136,7 +136,7 @@ export class CodexUpstreamEndpoint {
     const candidate = await this.config.read();
     if (candidate === null || this.isGatewayItself(candidate.baseUrl)) {
       // Either Codex names no endpoint, or it names the gateway that is asking
-      // — which is what pointing the Codex CLI at Tokiie writes into that file.
+      // — which is what pointing the Codex CLI at Tokkey writes into that file.
       return remembered;
     }
 

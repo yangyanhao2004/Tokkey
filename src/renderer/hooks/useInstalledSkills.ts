@@ -46,7 +46,7 @@ export function useInstalledSkills(): InstalledSkills {
   const refresh = useCallback(() => {
     void (async () => {
       try {
-        const scanned = await window.tokiie.getInstalledSkills();
+        const scanned = await window.tokkey.getInstalledSkills();
         if (!isMountedRef.current) return;
         setSkills(scanned);
         setError(null);
@@ -74,12 +74,12 @@ export function useInstalledSkills(): InstalledSkills {
 
   const applyAgentSelection = useCallback(
     (skillId: string, selectedAgents: SkillAgent[]) =>
-      mutate(() => window.tokiie.applySkillAgentSelection(skillId, selectedAgents)),
+      mutate(() => window.tokkey.applySkillAgentSelection(skillId, selectedAgents)),
     [mutate]
   );
 
   const uninstall = useCallback(
-    (skillId: string) => mutate(() => window.tokiie.uninstallSkill(skillId)),
+    (skillId: string) => mutate(() => window.tokkey.uninstallSkill(skillId)),
     [mutate]
   );
 

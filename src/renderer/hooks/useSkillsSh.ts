@@ -8,7 +8,7 @@ import type {
 import { SEARCH_MIN_LENGTH } from '../pages/discoverSkillsContent';
 
 /**
- * How an install answers a name already taken in Tokiie's skills folder, the
+ * How an install answers a name already taken in Tokkey's skills folder, the
  * same way the Repos tab answers it: an identical folder is reused and only its
  * agent selection is applied, and a different folder under the same name comes
  * back as a conflict for the tab to report.
@@ -97,11 +97,11 @@ export function useSkillsSh(query: string): SkillsShListing {
     void (async () => {
       try {
         const result = request.query.length > 0
-          ? await window.tokiie.searchSkillsPage(request.query, request.page)
-          : await window.tokiie.fetchSkillsPage(request.page);
+          ? await window.tokkey.searchSkillsPage(request.query, request.page)
+          : await window.tokkey.fetchSkillsPage(request.page);
         // The listing says nothing about this machine, so what a card draws is
         // read separately — once for the whole page rather than once per card.
-        const states = await window.tokiie.getSkillCardStates(result.skills);
+        const states = await window.tokkey.getSkillCardStates(result.skills);
         if (requestIdRef.current !== requestId) return;
         setCardStates(states);
         setTotal(result.total);
@@ -126,7 +126,7 @@ export function useSkillsSh(query: string): SkillsShListing {
 
   const install = useCallback(
     async (listing: SkillsShSkill, enabledAgents: SkillAgent[]) => {
-      const result = await window.tokiie.installSkill({
+      const result = await window.tokkey.installSkill({
         listing,
         enabledAgents,
         conflictStrategy: INSTALL_CONFLICT_STRATEGY

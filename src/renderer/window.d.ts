@@ -1,8 +1,8 @@
-import type { TokiieApi } from '../shared/types';
+import type { TokkeyApi } from '../shared/types';
 
 declare global {
   interface Window {
-    tokiie: TokiieApi;
+    tokkey: TokkeyApi;
   }
 }
 

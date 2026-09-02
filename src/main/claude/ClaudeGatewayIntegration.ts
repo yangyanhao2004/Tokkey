@@ -10,7 +10,7 @@ import ClaudeModelAlias from './ClaudeModelAlias';
 import type { ClaudeModelSelection } from './ClaudeSettingsDocument';
 
 /**
- * Makes the Claude Code CLI see everything the gateway serves, while Tokiie
+ * Makes the Claude Code CLI see everything the gateway serves, while Tokkey
  * runs.
  *
  * One file does the work — `~/.claude/settings.json` — and it carries two
@@ -20,7 +20,7 @@ import type { ClaudeModelSelection } from './ClaudeSettingsDocument';
  * half would leave its picker offering Anthropic ids the gateway holds no route
  * for, so the picker is narrowed to exactly the routes that exist: Anthropic's
  * own models, plus the cloud models the user has connected — which is the whole
- * reason to route Claude Code through Tokiie at all, so one of them is what the
+ * reason to route Claude Code through Tokkey at all, so one of them is what the
  * session starts on.
  *
  * This is the Claude-side counterpart of `CodexGatewayIntegration`, and reads
@@ -92,7 +92,7 @@ export class ClaudeGatewayIntegration {
    *
    * A gateway that never came up leaves the file alone. An `ANTHROPIC_BASE_URL`
    * pointing at nothing would break Claude Code outright, which is far worse
-   * than not routing it through Tokiie at all.
+   * than not routing it through Tokkey at all.
    */
   async activate(): Promise<boolean> {
     const baseUrl = this.gateway.baseUrl();

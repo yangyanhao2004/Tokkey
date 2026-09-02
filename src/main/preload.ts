@@ -3,18 +3,18 @@ import type {
   LocalChatEvent,
   LocalModelRuntimeState,
   RouterRuntimeState,
-  TokiieApi
+  TokkeyApi
 } from '../shared/types';
 
 /**
  * The only bridge between renderer and main process. It exposes a small,
- * explicit API on `window.tokiie` instead of handing the renderer ipcRenderer,
+ * explicit API on `window.tokkey` instead of handing the renderer ipcRenderer,
  * which keeps context isolation meaningful.
  */
 class PreloadBridge {
   /** Exposes the API object on the isolated renderer window. */
   expose(): void {
-    const api: TokiieApi = {
+    const api: TokkeyApi = {
       getAppInfo: () => ipcRenderer.invoke('app:get-info'),
       getAccountState: () => ipcRenderer.invoke('account:get-state'),
       requestEmailVerificationCode: (email) =>
@@ -94,7 +94,7 @@ class PreloadBridge {
         return () => ipcRenderer.removeListener('chat:event', forwardEvent);
       }
     };
-    contextBridge.exposeInMainWorld('tokiie', api);
+    contextBridge.exposeInMainWorld('tokkey', api);
   }
 }
 

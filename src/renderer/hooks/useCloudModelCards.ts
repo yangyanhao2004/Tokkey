@@ -47,7 +47,7 @@ export function useCloudModelCards(): CloudModelCards {
   useEffect(() => {
     const list = async () => {
       try {
-        const listed = await window.tokiie.listCloudModelCards();
+        const listed = await window.tokkey.listCloudModelCards();
         if (!isMountedRef.current) return;
         setCards(listed);
         setListError(null);
@@ -64,7 +64,7 @@ export function useCloudModelCards(): CloudModelCards {
     // gateway that never came up must not hide the catalog.
     const restore = async () => {
       try {
-        const restored = await window.tokiie.restoreCloudModels();
+        const restored = await window.tokkey.restoreCloudModels();
         if (!isMountedRef.current) return;
         // Router routes to one cloud model, and which one is not itself
         // persisted, so the first restored card stands in for the selection.
@@ -90,7 +90,7 @@ export function useCloudModelCards(): CloudModelCards {
       const run = async () => {
         setConnectingCardId(cardId);
         try {
-          const connection = await window.tokiie.connectCloudModel(cardId);
+          const connection = await window.tokkey.connectCloudModel(cardId);
           if (!isMountedRef.current) return;
           setConnectedCardId(connection.card.id);
           setConnectError(null);

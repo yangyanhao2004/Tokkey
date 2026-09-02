@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 
-/** The catalog Tokiie writes, next to Codex's own state. */
+/** The catalog Tokkey writes, next to Codex's own state. */
 const CATALOG_FILE_NAME = 'amis-catalog.json';
 
 /**
@@ -9,7 +9,7 @@ const CATALOG_FILE_NAME = 'amis-catalog.json';
  *
  * `CODEX_HOME` wins over `~/.codex` because that is the override the CLI
  * honours; a user who moved their Codex state expects everything that writes
- * into it to follow, and a Tokiie that wrote to the wrong home would configure
+ * into it to follow, and a Tokkey that wrote to the wrong home would configure
  * a Codex nobody runs.
  */
 export class CodexHome {
@@ -43,7 +43,7 @@ export class CodexHome {
     return path.join(this.home, 'config.toml');
   }
 
-  /** Where Tokiie writes the model catalog it points `model_catalog_json` at. */
+  /** Where Tokkey writes the model catalog it points `model_catalog_json` at. */
   get catalogPath(): string {
     return path.join(this.home, CATALOG_FILE_NAME);
   }

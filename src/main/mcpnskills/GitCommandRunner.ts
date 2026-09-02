@@ -156,7 +156,7 @@ export class GitCommandRunner {
 
   /** GUI-launched apps often have a short PATH, so prefer a concrete executable path. */
   private resolveGitExecutable(): string {
-    const configuredExecutable = process.env.TOKIIE_GIT_EXECUTABLE;
+    const configuredExecutable = process.env.TOKKEY_GIT_EXECUTABLE;
     if (configuredExecutable && existsSync(configuredExecutable)) {
       return configuredExecutable;
     }

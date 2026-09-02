@@ -1,4 +1,4 @@
-"""Tokiie local gateway package."""
+"""Tokkey local gateway package."""
 
 __all__ = ["__version__"]
 

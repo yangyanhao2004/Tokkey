@@ -1,6 +1,6 @@
-import TokiieApp from './TokiieApp';
+import TokkeyApp from './TokkeyApp';
 import EvidenceCommandLine from './evidence/EvidenceCommandLine';
 
-// Entry point: the whole main process is driven by the TokiieApp instance.
+// Entry point: the whole main process is driven by the TokkeyApp instance.
 const evidenceOptions = EvidenceCommandLine.parse(process.argv);
-new TokiieApp(evidenceOptions ? { ...evidenceOptions, evidenceMode: true } : {}).start();
+new TokkeyApp(evidenceOptions ? { ...evidenceOptions, evidenceMode: true } : {}).start();

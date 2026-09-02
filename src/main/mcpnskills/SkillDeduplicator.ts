@@ -33,7 +33,7 @@ const ROOT_AGENTS: Readonly<Record<SkillRoot, readonly SkillAgent[]>> = {
 
 /**
  * The agent whose own installation owns a root, or null for a root that is
- * nobody's to own: `amis` is Tokiie's store, and `~/.agents` is a shared
+ * nobody's to own: `amis` is Tokkey's store, and `~/.agents` is a shared
  * convention more tools than Codex write to. Only an owned root is left behind
  * by an uninstall, so only an owned root is worth skipping when its CLI is gone.
  */

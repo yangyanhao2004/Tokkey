@@ -2,16 +2,16 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync
 import path from 'node:path';
 
 /**
- * Lends Tokiie one configuration file belonging to another tool, and gives it
+ * Lends Tokkey one configuration file belonging to another tool, and gives it
  * back.
  *
- * Both CLIs Tokiie points at its gateway — Codex and Claude Code — are
+ * Both CLIs Tokkey points at its gateway — Codex and Claude Code — are
  * configured by a file that is the user's: hand-written, shared with every
  * other tool that configures that CLI, and expected to be exactly as they left
  * it. So the takeover is a loan, not a migration. The original is copied aside
- * before the first edit and copied back when the app quits, which makes "Tokiie
+ * before the first edit and copied back when the app quits, which makes "Tokkey
  * is running" the only window in which the CLI talks to the gateway, and leaves
- * a machine where Tokiie has never run indistinguishable from one where it has.
+ * a machine where Tokkey has never run indistinguishable from one where it has.
  *
  * A crash is the case the backup really exists for. Nothing runs at quit time
  * when the process is killed, so the backup outlives the session, and the next
@@ -60,7 +60,7 @@ export class BackedUpConfigFile {
    * Undoes a takeover a previous run never got to undo.
    *
    * Call before anything reads the file, so a crashed session cannot leave
-   * Tokiie's own configuration to be mistaken for the user's.
+   * Tokkey's own configuration to be mistaken for the user's.
    *
    * @returns whether a leftover backup was found and restored
    */
@@ -76,7 +76,7 @@ export class BackedUpConfigFile {
    * Backs the file up and replaces it with what `rewrite` makes of it.
    *
    * @param rewrite receives the current text — empty when there is no file —
-   *   and returns the document the CLI should see while Tokiie runs
+   *   and returns the document the CLI should see while Tokkey runs
    * @returns whether the file was taken over
    */
   activate(rewrite: (original: string) => string): boolean {
@@ -101,8 +101,8 @@ export class BackedUpConfigFile {
    *
    * The rewrite is applied to the *backed up* original rather than to what is
    * on disk, so every run produces the same document as the first one would
-   * have: nothing Tokiie wrote earlier can accumulate, and nothing the user
-   * owns is read back out of a file Tokiie is currently holding.
+   * have: nothing Tokkey wrote earlier can accumulate, and nothing the user
+   * owns is read back out of a file Tokkey is currently holding.
    *
    * A no-op when no takeover is in force — without a backup there is no
    * original to rewrite, and taking the file over is `activate`'s decision.
@@ -125,7 +125,7 @@ export class BackedUpConfigFile {
 
   /** Puts `rewrite`'s document where the CLI reads it. */
   private writeRewritten(original: string, rewrite: (original: string) => string): void {
-    // The CLI's home may not exist yet: Tokiie can be the first thing on this
+    // The CLI's home may not exist yet: Tokkey can be the first thing on this
     // machine to configure it.
     mkdirSync(path.dirname(this.filePath), { recursive: true });
     writeFileSync(this.filePath, rewrite(original), 'utf8');

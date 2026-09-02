@@ -69,7 +69,7 @@ def codex_route(**overrides: Any) -> dict[str, Any]:
         "model_name": "codex-model",
         "litellm_params": params,
         "model_info": {
-            "created_by": "tokiie",
+            "created_by": "tokkey",
             "profile_id": "codex-profile",
             "api_format": "openai_responses",
             "supports_native_streaming": True,
@@ -500,7 +500,7 @@ async def test_streamed_codex_turn_posts_to_the_backend_path_without_v1(
         "authorization": f"Bearer {document['tokens']['access_token']}",
         "account_id": ACCOUNT_ID,
         "originator": "codex_cli_rs",
-        # The LiteLLM provider prefix is Tokiie's routing detail, not a model name.
+        # The LiteLLM provider prefix is Tokkey's routing detail, not a model name.
         "model": "gpt-5-codex",
     }
     await client.aclose()
@@ -553,7 +553,7 @@ def native_route(**overrides: Any) -> dict[str, Any]:
         "model_name": "gpt-5.5",
         "litellm_params": {"model": "openai/gpt-5.5", "api_key": "", "api_base": ""},
         "model_info": {
-            "created_by": "tokiie",
+            "created_by": "tokkey",
             "upstream": CodexNativeRoute.MARKER,
             "api_format": "openai_responses",
             "supports_native_streaming": True,
@@ -815,7 +815,7 @@ async def test_a_configured_endpoint_wins_over_the_public_api(tmp_path: Path) ->
 async def test_a_configured_endpoint_uses_its_stored_key_over_the_callers(
     tmp_path: Path,
 ) -> None:
-    """Tokiie's own choice of key for a relay outranks whatever an agent sends."""
+    """Tokkey's own choice of key for a relay outranks whatever an agent sends."""
     auth_file = write_auth_file(tmp_path / "auth.json", logged_in_document())
 
     captured = await native_route_call(

@@ -29,7 +29,7 @@ export interface SkillInstallerOptions {
  */
 export interface ResolvedSkillInstallRequest {
   sourcePath: string;
-  /** The name the folder is published under in Tokiie's skills folder. */
+  /** The name the folder is published under in Tokkey's skills folder. */
   skillName: string;
   enabledAgents: SkillAgent[];
   conflictStrategy: SkillConflictStrategy;
@@ -82,7 +82,7 @@ export class SkillInstaller {
   }
 
   /**
-   * Publishes one already-resolved folder into Tokiie's skills folder and then
+   * Publishes one already-resolved folder into Tokkey's skills folder and then
    * applies its complete agent selection.
    *
    * Every install ends here — a repository card, and a skills.sh listing once

@@ -43,13 +43,13 @@ export interface DesktopInferenceModel {
 const GATEWAY_TOKEN = 'tokie-local';
 
 /**
- * The UUID Tokiie uses for its configLibrary entry.
+ * The UUID Tokkey uses for its configLibrary entry.
  *
  * Chosen to be one step above cc-switch's `...157210` so they never collide
  * if both tools are installed on the same machine.
  */
-const TOKIIE_ENTRY_ID = '00000000-0000-4000-8000-000000157211';
-const TOKIIE_ENTRY_NAME = 'Tokiie';
+const TOKKEY_ENTRY_ID = '00000000-0000-4000-8000-000000157211';
+const TOKKEY_ENTRY_NAME = 'Tokkey';
 
 /** JSON indent width — matches what Claude Desktop itself writes. */
 const INDENT_WIDTH = 2;
@@ -62,16 +62,16 @@ const INDENT_WIDTH = 2;
  *
  * - `_meta.json` — an index that names the currently applied entry via
  *   `appliedId`. It may already point at a cc-switch entry when the user has
- *   that tool installed; Tokiie backs it up before overwriting it and restores
+ *   that tool installed; Tokkey backs it up before overwriting it and restores
  *   it on quit.
- * - `<TOKIIE_ENTRY_ID>.json` — Tokiie's own inference config: the gateway URL
- *   and the model list. This file is purely Tokiie's and is deleted on restore
+ * - `<TOKKEY_ENTRY_ID>.json` — Tokkey's own inference config: the gateway URL
+ *   and the model list. This file is purely Tokkey's and is deleted on restore
  *   rather than reverted, since there is no "original" state to return to.
  *
  * The backup/restore contract mirrors {@link BackedUpConfigFile}: the original
  * `_meta.json` is kept at a stable path outside the configLibrary, and the
  * next launch restores it before anything reads the directory, so a crash
- * cannot leave Tokiie's configuration in place indefinitely.
+ * cannot leave Tokkey's configuration in place indefinitely.
  */
 export class ClaudeDesktopConfigLibrary {
   private readonly configLibraryDir: string;
@@ -88,7 +88,7 @@ export class ClaudeDesktopConfigLibrary {
    * Undoes a takeover an interrupted run never undid.
    *
    * Call before anything reads the configLibrary directory so a crashed session
-   * cannot leave Tokiie's own configuration in the user's Claude Desktop.
+   * cannot leave Tokkey's own configuration in the user's Claude Desktop.
    *
    * @returns whether a leftover backup was found and restored
    */
@@ -101,7 +101,7 @@ export class ClaudeDesktopConfigLibrary {
   }
 
   /**
-   * Backs up `_meta.json`, writes Tokiie's entry, and points the meta index at it.
+   * Backs up `_meta.json`, writes Tokkey's entry, and points the meta index at it.
    *
    * An empty model list is left alone rather than written. Desktop signs in by
    * running one inference call against a model from this list, so an entry with
@@ -153,7 +153,7 @@ export class ClaudeDesktopConfigLibrary {
   }
 
   /**
-   * Deletes Tokiie's entry and puts the original `_meta.json` back.
+   * Deletes Tokkey's entry and puts the original `_meta.json` back.
    * Synchronous, for Electron's `will-quit`.
    *
    * @returns whether a restore happened
@@ -167,7 +167,7 @@ export class ClaudeDesktopConfigLibrary {
     return restored;
   }
 
-  /** Builds the inference config object Tokiie writes to its entry file. */
+  /** Builds the inference config object Tokkey writes to its entry file. */
   private buildEntryConfig(
     gatewayBaseUrl: string,
     models: DesktopInferenceModel[]
@@ -191,26 +191,26 @@ export class ClaudeDesktopConfigLibrary {
   }
 
   private writeEntry(gatewayBaseUrl: string, models: DesktopInferenceModel[]): void {
-    const entryPath = path.join(this.configLibraryDir, `${TOKIIE_ENTRY_ID}.json`);
+    const entryPath = path.join(this.configLibraryDir, `${TOKKEY_ENTRY_ID}.json`);
     const content = JSON.stringify(this.buildEntryConfig(gatewayBaseUrl, models), null, INDENT_WIDTH);
     writeFileSync(entryPath, `${content}\n`, 'utf8');
   }
 
   /**
-   * Points the meta index at Tokiie's entry, keeping every entry already there.
+   * Points the meta index at Tokkey's entry, keeping every entry already there.
    *
    * The index is a shared file: a user running cc-switch has their own entries
-   * listed in it, and their config files stay on disk beside Tokiie's. Listing
-   * only Tokiie's would unlist configs whose files still exist — and Desktop
+   * listed in it, and their config files stay on disk beside Tokkey's. Listing
+   * only Tokkey's would unlist configs whose files still exist — and Desktop
    * rewrites this file itself, so a restore is not guaranteed to be what puts
    * them back.
    */
   private writeMeta(): void {
     const metaPath = path.join(this.configLibraryDir, '_meta.json');
-    const existing = this.readMetaEntries(metaPath).filter((entry) => entry.id !== TOKIIE_ENTRY_ID);
+    const existing = this.readMetaEntries(metaPath).filter((entry) => entry.id !== TOKKEY_ENTRY_ID);
     const meta = {
-      appliedId: TOKIIE_ENTRY_ID,
-      entries: [...existing, { id: TOKIIE_ENTRY_ID, name: TOKIIE_ENTRY_NAME }]
+      appliedId: TOKKEY_ENTRY_ID,
+      entries: [...existing, { id: TOKKEY_ENTRY_ID, name: TOKKEY_ENTRY_NAME }]
     };
     writeFileSync(metaPath, `${JSON.stringify(meta, null, INDENT_WIDTH)}\n`, 'utf8');
   }
@@ -260,7 +260,7 @@ export class ClaudeDesktopConfigLibrary {
   }
 
   private deleteEntry(): void {
-    this.deleteFile(path.join(this.configLibraryDir, `${TOKIIE_ENTRY_ID}.json`));
+    this.deleteFile(path.join(this.configLibraryDir, `${TOKKEY_ENTRY_ID}.json`));
   }
 
   private deleteFile(filePath: string): void {

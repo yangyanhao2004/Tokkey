@@ -4,15 +4,15 @@ import BackedUpConfigFile from '../config/BackedUpConfigFile';
 import CodexHome from './CodexHome';
 import CodexTomlDocument from './CodexTomlDocument';
 
-/** The provider table Tokiie owns. Everything else in the file belongs to the user. */
-const TOKIIE_PROVIDER_ID = 'tokiie';
+/** The provider table Tokkey owns. Everything else in the file belongs to the user. */
+const TOKKEY_PROVIDER_ID = 'tokkey';
 
 /** Root keys the takeover writes, and the restore therefore has to account for. */
 const MODEL_PROVIDER_KEY = 'model_provider';
 const MODEL_CATALOG_KEY = 'model_catalog_json';
 
 /**
- * Points the Codex CLI at the local gateway for as long as Tokiie is running.
+ * Points the Codex CLI at the local gateway for as long as Tokkey is running.
  *
  * Codex reads one file, `~/.codex/config.toml`, and that file is the user's:
  * hand-written, full of comments, and shared with every other tool that
@@ -22,7 +22,7 @@ const MODEL_CATALOG_KEY = 'model_catalog_json';
  *
  * Restoring before anything reads the file matters here beyond tidiness:
  * `CodexUpstreamEndpoint` learns the user's real upstream from this same file,
- * and reading it while Tokiie's own address is still in there would teach it
+ * and reading it while Tokkey's own address is still in there would teach it
  * that the gateway is its own upstream.
  */
 export class CodexConfigTakeover {
@@ -52,7 +52,7 @@ export class CodexConfigTakeover {
    * Undoes a takeover a previous run never got to undo.
    *
    * Called before anything reads `config.toml`, so a crashed session cannot
-   * leave Tokiie's own configuration to be mistaken for the user's.
+   * leave Tokkey's own configuration to be mistaken for the user's.
    *
    * @returns whether a leftover backup was found and restored
    */
@@ -88,21 +88,21 @@ export class CodexConfigTakeover {
     return this.file.restore();
   }
 
-  /** The document Codex should see while Tokiie is running. */
+  /** The document Codex should see while Tokkey is running. */
   private rewrite(original: string, gatewayBaseUrl: string, catalogPath: string | null): string {
     let document = new CodexTomlDocument(original)
       // Removed first so a table left by an interrupted session is replaced
       // rather than declared twice, which Codex rejects outright.
-      .removeTable(['model_providers', TOKIIE_PROVIDER_ID])
-      .setRootKey(MODEL_PROVIDER_KEY, TOKIIE_PROVIDER_ID);
+      .removeTable(['model_providers', TOKKEY_PROVIDER_ID])
+      .setRootKey(MODEL_PROVIDER_KEY, TOKKEY_PROVIDER_ID);
     if (catalogPath !== null) {
       document = document.setRootKey(MODEL_CATALOG_KEY, catalogPath);
     }
     return document
       .appendTable(
-        ['model_providers', TOKIIE_PROVIDER_ID],
+        ['model_providers', TOKKEY_PROVIDER_ID],
         [
-          ['name', 'Tokiie'],
+          ['name', 'Tokkey'],
           ['base_url', this.providerBaseUrl(gatewayBaseUrl)],
           // The gateway speaks the Responses wire, which is what lets a Codex
           // turn reach it unchanged.

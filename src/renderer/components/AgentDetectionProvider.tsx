@@ -41,7 +41,7 @@ export function AgentDetectionProvider({ children }: { children: ReactNode }) {
 
   const detect = useCallback(async (): Promise<void> => {
     try {
-      const detected = await window.tokiie.detectAgents();
+      const detected = await window.tokkey.detectAgents();
       if (isMountedRef.current) {
         setInstallations(detected);
       }

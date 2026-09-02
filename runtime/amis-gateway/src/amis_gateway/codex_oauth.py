@@ -11,7 +11,7 @@ Two facts shape everything here:
   sending it anywhere else would hand the user's ChatGPT account to whoever
   configured that route. `CanonicalCodexEndpoint` is the only thing standing
   between those two outcomes.
-* The token expires roughly hourly, while a Tokiie session does not. The
+* The token expires roughly hourly, while a Tokkey session does not. The
   refresh grant therefore lives here rather than in the app, and the refreshed
   pair is written back to the same file so the Codex CLI keeps working too.
 """
@@ -63,7 +63,7 @@ class CodexOAuthUnavailable(Exception):
 
 
 class CodexNativeRoute:
-    """Recognize a route Tokiie serves from the Codex model catalog.
+    """Recognize a route Tokkey serves from the Codex model catalog.
 
     A native route stores no endpoint and no key: which of OpenAI's two backends
     answers it is decided per request, from the credential the caller brought.
@@ -86,7 +86,7 @@ class OpenAiApiKey:
     This decides one thing only: whether an unconfigured native route falls back
     to the public API or to the ChatGPT login. "The caller sent something" is
     not a safe test there, because agents pointed at this gateway routinely
-    carry a placeholder and Tokiie's own admission tokens are bearer tokens too,
+    carry a placeholder and Tokkey's own admission tokens are bearer tokens too,
     and shipping either to OpenAI would leak a local secret for a confusing 401.
     An unrecognized token falls through to the ChatGPT login instead, which is
     both the safe direction and the one that costs the user nothing.
@@ -288,7 +288,7 @@ class CodexAuthFile:
             },
             "last_refresh": self._timestamp(),
         }
-        temporary_path = self._path.with_name(f"{self._path.name}.tokiie.tmp")
+        temporary_path = self._path.with_name(f"{self._path.name}.tokkey.tmp")
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             # The file holds a live credential, so it is created unreadable by

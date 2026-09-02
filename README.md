@@ -1,4 +1,4 @@
-# Tokiie
+# Tokkey
 
 Desktop application built with [Electron](https://www.electronjs.org/).
 
@@ -31,10 +31,10 @@ diagnostic evidence; it is not an automatic Figma pixel-diff assertion.
 ```
 src/
 ├── main/                 # main process (Node side)
-│   ├── main.ts           # entry point, boots TokiieApp
-│   ├── TokiieApp.ts      # app lifecycle + main window
+│   ├── main.ts           # entry point, boots TokkeyApp
+│   ├── TokkeyApp.ts      # app lifecycle + main window
 │   ├── IpcController.ts  # all IPC handlers exposed to the renderer
-│   ├── preload.ts        # context bridge, exposes window.tokiie
+│   ├── preload.ts        # context bridge, exposes window.tokkey
 │   ├── gateway/          # local inference gateway subprocess supervisor
 │   ├── mcp/              # MCP catalog scanning and configuration
 │   ├── mcpnskills/       # skill discovery, install, and deployment
@@ -137,7 +137,7 @@ folder — `process.arch` names the folder verbatim, so Intel macOS is `x64/`.
 ## Adding a renderer API
 
 1. Add the handler to `IpcController.handlers` in `src/main/IpcController.ts`.
-2. Expose it on `window.tokiie` in `src/main/preload.ts`.
+2. Expose it on `window.tokkey` in `src/main/preload.ts`.
 
 Context isolation is on and node integration is off, so the renderer can only
 reach the main process through the channels listed in those two files.

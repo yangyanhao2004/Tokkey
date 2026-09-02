@@ -13,12 +13,12 @@ export type RouteId = NavItemId | SubRouteId;
 
 /**
  * The row that stays highlighted while a sub-page is open, so opening "Add
- * model" from Tokiie still reads as being inside Tokiie.
+ * model" from Tokkey still reads as being inside Tokkey.
  */
 const NAV_ITEM_BY_SUB_ROUTE: Record<SubRouteId, NavItemId> = {
-  'add-model': 'tokiie',
+  'add-model': 'tokkey',
   'discover-skills': 'agent-hub',
-  'sign-in': 'tokiie'
+  'sign-in': 'tokkey'
 };
 
 /** The sidebar row a route belongs to. Nav routes are their own row. */

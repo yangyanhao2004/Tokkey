@@ -34,7 +34,7 @@ export function useSkillAgentSelection(skillId: string | null): SkillAgentSelect
 
     void (async () => {
       try {
-        const selection = await window.tokiie.getSkillAgentSelection(skillId);
+        const selection = await window.tokkey.getSkillAgentSelection(skillId);
         if (isCurrent) {
           setSelectedAgents(selection.selectedAgents);
         }

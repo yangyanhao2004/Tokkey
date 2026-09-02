@@ -91,7 +91,7 @@ export function useSkillUpload({ onCatalogScanned }: SkillUploadOptions): SkillU
   );
 
   const start = useCallback(() => {
-    run(() => window.tokiie.uploadSkillFolder());
+    run(() => window.tokkey.uploadSkillFolder());
   }, [run]);
 
   const resolveConflict = useCallback(
@@ -102,7 +102,7 @@ export function useSkillUpload({ onCatalogScanned }: SkillUploadOptions): SkillU
       const { pendingUploadId } = conflict;
       // Closing the prompt now keeps a second answer from reaching a spent token.
       setConflict(null);
-      run(() => window.tokiie.resolveSkillUploadConflict(pendingUploadId, choice));
+      run(() => window.tokkey.resolveSkillUploadConflict(pendingUploadId, choice));
     },
     [conflict, run]
   );

@@ -96,7 +96,7 @@ const sqliteAvailable = await import('node:sqlite').then(
 const skipWithoutSqlite = sqliteAvailable ? false : 'node:sqlite is unavailable on this runtime';
 
 test('deploying a downloaded model starts the shared local runtime before it becomes running', async () => {
-  const homeDirectory = mkdtempSync(path.join(tmpdir(), 'tokiie-local-runtime-'));
+  const homeDirectory = mkdtempSync(path.join(tmpdir(), 'tokkey-local-runtime-'));
   test.after(() => rmSync(homeDirectory, { recursive: true, force: true }));
   const descriptor = {
     id: 'deployable-local-model',
@@ -465,7 +465,7 @@ test('local turn watchdog cancels a stalled stream and emits one terminal event'
 
 test('Chat session store restores durable history, tabs, and interrupted turns', { skip: skipWithoutSqlite }, async () => {
   const { ChatSessionStore } = await import('../dist/main/chat/ChatSessionStore.js');
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-chat-sessions-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokkey-chat-sessions-'));
   const databasePath = path.join(directory, 'amis_wifi.db');
   let currentTime = 1_788_000_000_000;
   let nextId = 0;
@@ -581,8 +581,8 @@ test('Chat session store migrates token usage from assistant messages onto Chat 
     import('node:sqlite'),
     import('../dist/main/storage/LocalTimestamp.js')
   ]);
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-chat-token-usage-'));
-  const databasePath = path.join(directory, 'tokiie.db');
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokkey-chat-token-usage-'));
+  const databasePath = path.join(directory, 'tokkey.db');
   const createdAt = 1_788_000_000_000;
   const timestamp = localTimestampForEpochMilliseconds(createdAt);
   const initialStore = new ChatSessionStore({
@@ -675,8 +675,8 @@ test('Chat session store persists user-local timestamps and preserves sortable i
   const { ChatSessionStore } = await import('../dist/main/chat/ChatSessionStore.js');
   const { localTimestampForEpochMilliseconds } = await import('../dist/main/storage/LocalTimestamp.js');
   const { DatabaseSync } = await import('node:sqlite');
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-local-chat-time-'));
-  const databasePath = path.join(directory, 'tokiie.db');
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokkey-local-chat-time-'));
+  const databasePath = path.join(directory, 'tokkey.db');
   const startedAt = 1_788_000_000_123;
   const assistantStartedAt = startedAt + 200;
   const endedAt = startedAt + 500;
@@ -764,8 +764,8 @@ test('Chat session store upgrades legacy integer timestamps without losing histo
   const { ChatSessionStore } = await import('../dist/main/chat/ChatSessionStore.js');
   const { localTimestampForEpochMilliseconds } = await import('../dist/main/storage/LocalTimestamp.js');
   const { DatabaseSync } = await import('node:sqlite');
-  const directory = mkdtempSync(path.join(tmpdir(), 'tokiie-chat-time-migration-'));
-  const databasePath = path.join(directory, 'tokiie.db');
+  const directory = mkdtempSync(path.join(tmpdir(), 'tokkey-chat-time-migration-'));
+  const databasePath = path.join(directory, 'tokkey.db');
   const createdAt = 1_788_000_000_123;
   const database = new DatabaseSync(databasePath);
   database.exec(`
@@ -818,15 +818,15 @@ test('Chat session store upgrades legacy integer timestamps without losing histo
   }
 });
 
-test('Chat session store leaves Amis-Wifi history isolated from Tokiie storage', { skip: skipWithoutSqlite }, async () => {
+test('Chat session store leaves Amis-Wifi history isolated from Tokkey storage', { skip: skipWithoutSqlite }, async () => {
   const { ChatSessionStore } = await import('../dist/main/chat/ChatSessionStore.js');
-  const homeDirectory = mkdtempSync(path.join(tmpdir(), 'tokiie-chat-isolation-'));
+  const homeDirectory = mkdtempSync(path.join(tmpdir(), 'tokkey-chat-isolation-'));
   const legacyDatabasePath = path.join(homeDirectory, '.amiswifi', 'dbs', 'amis_wifi.db');
   const legacyStore = new ChatSessionStore({
     databasePath: legacyDatabasePath,
     createId: () => 'legacy-session'
   });
-  let tokiieStore = null;
+  let tokkeyStore = null;
   let legacyVerificationStore = null;
 
   try {
@@ -843,9 +843,9 @@ test('Chat session store leaves Amis-Wifi history isolated from Tokiie storage',
     legacyStore.handleStreamEvent({ type: 'completed', ...request });
     legacyStore.close();
 
-    tokiieStore = new ChatSessionStore({ homeDirectory });
-    const tokiieWorkspace = tokiieStore.loadWorkspace();
-    assert.equal(tokiieWorkspace.sessions.some((session) => session.id === sessionId), false);
+    tokkeyStore = new ChatSessionStore({ homeDirectory });
+    const tokkeyWorkspace = tokkeyStore.loadWorkspace();
+    assert.equal(tokkeyWorkspace.sessions.some((session) => session.id === sessionId), false);
 
     legacyVerificationStore = new ChatSessionStore({ databasePath: legacyDatabasePath });
     const legacySession = legacyVerificationStore.loadWorkspace().sessions.find((session) => session.id === sessionId);
@@ -855,7 +855,7 @@ test('Chat session store leaves Amis-Wifi history isolated from Tokiie storage',
     assert.equal(legacySession.messages[1].content, 'Migrated reply.');
   } finally {
     legacyStore.close();
-    tokiieStore?.close();
+    tokkeyStore?.close();
     legacyVerificationStore?.close();
     rmSync(homeDirectory, { recursive: true, force: true });
   }

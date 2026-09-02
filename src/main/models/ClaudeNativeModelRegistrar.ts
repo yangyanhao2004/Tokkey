@@ -27,8 +27,8 @@ const ANTHROPIC_PREFIX = 'anthropic';
  *   token and bill an API account for a request the subscription already covers.
  *
  * The consequence is that these routes serve a caller who brings a credential
- * and nobody else: Tokiie's own chat UI sends none, so it gets a 401 naming the
- * missing key rather than a silent charge. Giving Tokiie itself access to Claude
+ * and nobody else: Tokkey's own chat UI sends none, so it gets a 401 naming the
+ * missing key rather than a silent charge. Giving Tokkey itself access to Claude
  * models is a separate decision requiring its own Anthropic login.
  */
 export class ClaudeNativeModelRegistrar {

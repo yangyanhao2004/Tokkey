@@ -131,7 +131,7 @@ export function SignInPage() {
   return (
     <PageShell
       title="Account"
-      subtitle="Sign in to manage your Tokiie account and services."
+      subtitle="Sign in to manage your Tokkey account and services."
       testId="sign-in"
     >
       <section className="flex min-h-0 flex-1 items-center justify-center overflow-auto py-2" data-testid="sign-in-pane">
@@ -192,7 +192,7 @@ function SignInHeading() {
         <img className="block size-[21px] max-w-none" src={SIGN_IN_ICON} alt="" />
       </div>
       <div className="flex flex-col items-center gap-2 text-center">
-        <h2 className="text-[20px] leading-6 font-bold text-account-heading">Sign in to Tokiie</h2>
+        <h2 className="text-[20px] leading-6 font-bold text-account-heading">Sign in to Tokkey</h2>
         <p className="text-[13px] leading-4 text-label-eyebrow">
           Use email or Google to access your account.
         </p>
@@ -361,7 +361,7 @@ interface SignedInAccountProps {
 
 /** Authenticated account presentation, without access to any credential fields. */
 function SignedInAccount({ displayName, email, isBusy, message, isError, onSignOut }: SignedInAccountProps) {
-  const resolvedName = displayName?.trim() || 'Tokiie User';
+  const resolvedName = displayName?.trim() || 'Tokkey User';
   const initial = resolvedName.charAt(0).toUpperCase();
   return (
     <div className="flex w-full max-w-[430px] flex-col items-center gap-4 rounded-[8px] border border-surface-panel-border bg-white p-6" data-testid="signed-in-account">

@@ -7,7 +7,7 @@ import { SkillsShTab } from '../components/SkillsShTab';
 
 /**
  * The pane behind the Agent Hub's "Discover Skill" button (Figma 198:9865):
- * skills Tokiie can install, from cloned repositories or from skills.sh.
+ * skills Tokkey can install, from cloned repositories or from skills.sh.
  *
  * Only the open tab is mounted, so each one owns its own search box and its own
  * listing — and switching tabs leaves neither behind. Every card's chips read

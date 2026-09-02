@@ -1,4 +1,4 @@
-"""Command-line entry point for the bundled Tokiie gateway helper."""
+"""Command-line entry point for the bundled Tokkey gateway helper."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from .app import create_app
 
 def parse_args() -> argparse.Namespace:
     """Parse the intentionally small process-launch contract owned by Swift."""
-    parser = argparse.ArgumentParser(description="Run the local Tokiie LiteLLM SDK gateway.")
+    parser = argparse.ArgumentParser(description="Run the local Tokkey LiteLLM SDK gateway.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=4033)
     return parser.parse_args()

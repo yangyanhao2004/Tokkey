@@ -51,7 +51,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let isCurrent = true;
-    void window.tokiie.getAccountState()
+    void window.tokkey.getAccountState()
       .then((result) => {
         if (!isCurrent) return;
         if (result.ok) {
@@ -72,11 +72,11 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const requestEmailCode = useCallback((email: string) => {
-    return AccountOperationFallback.run(() => window.tokiie.requestEmailVerificationCode(email));
+    return AccountOperationFallback.run(() => window.tokkey.requestEmailVerificationCode(email));
   }, []);
 
   const verifyEmail = useCallback(async (email: string, code: string) => {
-    const result = await AccountOperationFallback.run(() => window.tokiie.verifyEmailSignIn(email, code));
+    const result = await AccountOperationFallback.run(() => window.tokkey.verifyEmailSignIn(email, code));
     if (result.ok) {
       setState(result.value);
       setRestoreError(null);
@@ -85,7 +85,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
-    const result = await AccountOperationFallback.run(() => window.tokiie.signInWithGoogle());
+    const result = await AccountOperationFallback.run(() => window.tokkey.signInWithGoogle());
     if (result.ok) {
       setState(result.value);
       setRestoreError(null);
@@ -94,11 +94,11 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const cancelGoogleSignIn = useCallback(async () => {
-    await window.tokiie.cancelGoogleSignIn().catch(() => undefined);
+    await window.tokkey.cancelGoogleSignIn().catch(() => undefined);
   }, []);
 
   const signOut = useCallback(async () => {
-    const result = await AccountOperationFallback.run(() => window.tokiie.signOutAccount());
+    const result = await AccountOperationFallback.run(() => window.tokkey.signOutAccount());
     if (result.ok) {
       setState(result.value);
       setRestoreError(null);
