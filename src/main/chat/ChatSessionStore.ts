@@ -99,6 +99,7 @@ interface ActivePersistedTurn {
   request: LocalChatTurnRequest;
   modelLabel: string;
   contextWindowTokens: number | null;
+  assistantStartedAt: LocalStorageTimestamp | null;
   text: string;
   reasoningContent: string;
   inputTokens: number | null;
@@ -321,6 +322,7 @@ export class ChatSessionStore {
 
     this.activeTurns.set(request.turnId, {
       ...start,
+      assistantStartedAt: null,
       text: '',
       reasoningContent: '',
       inputTokens: null,
@@ -338,13 +340,15 @@ export class ChatSessionStore {
     }
 
     if (event.type === 'textDelta') {
-      this.activeTurns.set(event.turnId, { ...activeTurn, text: `${activeTurn.text}${event.text}` });
+      const assistantTurn = this.markAssistantMessageStarted(activeTurn);
+      this.activeTurns.set(event.turnId, { ...assistantTurn, text: `${assistantTurn.text}${event.text}` });
       return;
     }
     if (event.type === 'reasoningDelta') {
+      const assistantTurn = this.markAssistantMessageStarted(activeTurn);
       this.activeTurns.set(event.turnId, {
-        ...activeTurn,
-        reasoningContent: `${activeTurn.reasoningContent}${event.text}`
+        ...assistantTurn,
+        reasoningContent: `${assistantTurn.reasoningContent}${event.text}`
       });
       return;
     }
@@ -368,6 +372,25 @@ export class ChatSessionStore {
     if (!activeTurn) return;
     this.finishTurn(activeTurn, 'error', message);
     this.activeTurns.delete(turnId);
+  }
+
+  /** Gives a pre-inserted assistant placeholder the time its stream actually began. */
+  private markAssistantMessageStarted(activeTurn: ActivePersistedTurn): ActivePersistedTurn {
+    if (activeTurn.assistantStartedAt) return activeTurn;
+
+    const assistantStartedAt = this.timestampFor(this.now());
+    this.databaseOrThrow().prepare(`
+      UPDATE "chat_messages"
+         SET created_at = ?, created_at_epoch_ms = ?, created_at_time_zone = ?
+       WHERE id = ? AND session_id = ? AND role = 'assistant' AND status = 'streaming'`)
+      .run(
+        assistantStartedAt.localDateTime,
+        assistantStartedAt.epochMilliseconds,
+        assistantStartedAt.timeZone,
+        activeTurn.request.assistantMessageId,
+        activeTurn.request.sessionId
+      );
+    return { ...activeTurn, assistantStartedAt };
   }
 
   private finishTurn(activeTurn: ActivePersistedTurn, status: LocalChatTurnStatus, errorMessage: string | null): void {

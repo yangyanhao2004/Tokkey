@@ -35,6 +35,7 @@ interface ActiveChatTurn {
   sessionId: string;
   assistantMessageId: string;
   startedAt: number;
+  assistantStartedAt: number | null;
 }
 
 interface PendingMessageDeltas {
@@ -284,6 +285,17 @@ export function useChatSession(): ChatSessionController {
       return;
     }
 
+    if ((event.type === 'textDelta' || event.type === 'reasoningDelta') && activeTurn.assistantStartedAt === null) {
+      const assistantStartedAt = Date.now();
+      activeTurnsByIdRef.current.set(event.turnId, { ...activeTurn, assistantStartedAt });
+      setSessions((currentSessions) => updateAssistantMessage(
+        currentSessions,
+        event.sessionId,
+        event.assistantMessageId,
+        (assistantMessage) => ({ ...assistantMessage, createdAt: assistantStartedAt })
+      ));
+    }
+
     if (event.type === 'textDelta') {
       const currentDeltas = pendingMessageDeltasRef.current.get(event.assistantMessageId) ?? {
         text: '',
@@ -492,7 +504,12 @@ export function useChatSession(): ChatSessionController {
         .map((message) => ({ role: message.role, content: message.content }))
     };
 
-    activeTurnsByIdRef.current.set(turnId, { sessionId, assistantMessageId, startedAt: createdAt });
+    activeTurnsByIdRef.current.set(turnId, {
+      sessionId,
+      assistantMessageId,
+      startedAt: createdAt,
+      assistantStartedAt: null
+    });
     turnIdBySessionIdRef.current.set(sessionId, turnId);
     setSessions((currentSessions) => currentSessions.map((session) => session.id === sessionId
       ? {
