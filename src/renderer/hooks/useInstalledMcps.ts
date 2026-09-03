@@ -22,6 +22,13 @@ export interface InstalledMcps {
    * the Manage dialog — is the one that reports the failure.
    */
   applyAgentSelection: (mcpId: string, selectedAgents: McpAgent[]) => Promise<void>;
+  /**
+   * Writes one new server, given as the canonical one-server envelope, into
+   * exactly `selectedAgents`. Rejects when a configuration file refuses it, so
+   * the caller that asked for it — the Add MCP dialog — reports the failure and
+   * keeps the draft that produced it.
+   */
+  applyConfiguration: (configurationJson: string, selectedAgents: McpAgent[]) => Promise<void>;
 }
 
 /**
@@ -83,5 +90,11 @@ export function useInstalledMcps(): InstalledMcps {
     [mutate]
   );
 
-  return { servers, failures, isLoading, error, refresh, applyAgentSelection };
+  const applyConfiguration = useCallback(
+    (configurationJson: string, selectedAgents: McpAgent[]) =>
+      mutate(() => window.tokkey.applyMcpConfiguration({ configurationJson, selectedAgents })),
+    [mutate]
+  );
+
+  return { servers, failures, isLoading, error, refresh, applyAgentSelection, applyConfiguration };
 }

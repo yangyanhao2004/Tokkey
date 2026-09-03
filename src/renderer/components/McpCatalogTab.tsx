@@ -9,6 +9,7 @@ import {
   toMcpCatalogEntries
 } from '../pages/agentHubContent';
 import { useInstalledMcps } from '../hooks/useInstalledMcps';
+import { AddMcpDialog } from './AddMcpDialog';
 import { CatalogGrid, CatalogMessage, CatalogTabLayout } from './CatalogTabLayout';
 import { ManageMcpDialog } from './ManageMcpDialog';
 import { PushButton } from './PushButton';
@@ -19,13 +20,15 @@ import { PushButton } from './PushButton';
  *
  * A chip is checked exactly when that agent's file already carries the server,
  * so the cards are a reading of those files rather than a list the page keeps.
- * "+ Add MCP" is drawn for the layout the design asks for and does nothing
- * until the Add MCP dialog exists.
+ * "+ Add MCP" opens the sheet that writes a new server into those same files,
+ * after which the grid is whatever the rescan reports.
  */
 export function McpCatalogTab() {
   const [query, setQuery] = useState('');
   const [managedMcpId, setManagedMcpId] = useState<string | null>(null);
-  const { servers, failures, isLoading, error, applyAgentSelection } = useInstalledMcps();
+  const [isAddingMcp, setIsAddingMcp] = useState(false);
+  const { servers, failures, isLoading, error, applyAgentSelection, applyConfiguration } =
+    useInstalledMcps();
 
   // Mapping a whole scan is wasted work on every keystroke of the search box.
   const mcpEntries = useMemo(() => toMcpCatalogEntries(servers ?? []), [servers]);
@@ -38,7 +41,11 @@ export function McpCatalogTab() {
       <CatalogTabLayout
         query={query}
         onQueryChange={setQuery}
-        actions={<PushButton testId="catalog-add-mcp">{ADD_MCP_LABEL}</PushButton>}
+        actions={
+          <PushButton onClick={() => setIsAddingMcp(true)} testId="catalog-add-mcp">
+            {ADD_MCP_LABEL}
+          </PushButton>
+        }
       >
         {isLoading && <CatalogMessage testId="catalog-loading">{MCP_SCAN_LOADING_TEXT}</CatalogMessage>}
 
@@ -62,6 +69,10 @@ export function McpCatalogTab() {
 
         <CatalogGrid entries={entries} onAction={setManagedMcpId} />
       </CatalogTabLayout>
+
+      {isAddingMcp && (
+        <AddMcpDialog onAdd={applyConfiguration} onClose={() => setIsAddingMcp(false)} />
+      )}
 
       {managedMcp && (
         <ManageMcpDialog

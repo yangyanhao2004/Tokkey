@@ -18,6 +18,7 @@ import type {
   McpAgent,
   McpAgentBadge,
   McpCatalogFailure,
+  McpConfigurationDraft,
   McpConnectionType,
   SkillAgent,
   SkillAgentBadge,
@@ -394,6 +395,109 @@ export function describeDiscoverAction(tab: CatalogTab): string {
  * Upload and Discover pair.
  */
 export const ADD_MCP_LABEL = '+ Add MCP';
+
+/**
+ * The Add MCP dialog (Figma 531:2979 "Config Wizard", 531:3240 "Full JSON").
+ * The same sheet in two modes: guided fields, or the raw one-server envelope.
+ */
+export const ADD_MCP_DIALOG_TITLE = 'Add MCP';
+export const ADD_MCP_CONFIRM_LABEL = 'Add MCP';
+export const ADD_MCP_BUSY_LABEL = 'Adding…';
+
+/** Which editor the sheet is showing; the two halves of `McpConfigurationDraft`. */
+export type McpEditorMode = McpConfigurationDraft['mode'];
+
+export const ADD_MCP_MODE_LABEL = 'Describe this MCP with the wizard or with JSON';
+export const ADD_MCP_MODES: readonly { value: McpEditorMode; label: string }[] = [
+  { value: 'wizard', label: 'Config Wizard' },
+  { value: 'json', label: 'Full JSON' }
+];
+
+export const MCP_NAME_FIELD_LABEL = 'Name';
+export const MCP_NAME_PLACEHOLDER = 'e.g. GitHub MCP';
+export const MCP_CONNECTION_FIELD_LABEL = 'Connection Type';
+
+/**
+ * How each transport is offered in the wizard. "Command" is what the design
+ * calls stdio, since that is what the field under it asks for; the remote two
+ * are named after the protocol because nothing else distinguishes them.
+ */
+export const MCP_CONNECTION_OPTIONS: readonly { value: McpConnectionType; label: string }[] = [
+  { value: 'stdio', label: 'Command' },
+  { value: 'streamable_http', label: 'Streamable HTTP' },
+  { value: 'sse', label: 'SSE' }
+];
+
+export const MCP_COMMAND_FIELD_LABEL = 'Command';
+export const MCP_COMMAND_PLACEHOLDER = 'npx -y @modelcontextprotocol/server-filesystem ~/Documents';
+export const MCP_URL_FIELD_LABEL = 'Server URL';
+export const MCP_URL_PLACEHOLDER = 'https://mcp.example.com/mcp';
+
+/**
+ * A stdio server receives its credentials as environment variables, so the
+ * field the design labels "API Key / Token" collects `KEY=VALUE` pairs rather
+ * than a bare secret — the placeholder says so, since the label cannot.
+ */
+export const MCP_ENVIRONMENT_FIELD_LABEL = 'API Key / Token (Optional)';
+export const MCP_ENVIRONMENT_PLACEHOLDER = 'KEY=VALUE, e.g. GITHUB_TOKEN=ghp_…';
+
+export const MCP_JSON_FIELD_LABEL = 'Full JSON Configuration';
+
+/**
+ * The design's sample is a bare server entry; the envelope the agents' own
+ * files use wraps it in `mcpServers`, which is what this actually accepts.
+ */
+export const MCP_JSON_PLACEHOLDER = `{
+  "mcpServers": {
+    "fetch": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    }
+  }
+}`;
+
+export const MCP_FORMAT_LABEL = 'Format';
+export const MCP_VALIDATE_LABEL = 'Validate';
+export const MCP_JSON_VALID_TEXT = 'This configuration looks valid.';
+
+/** The agent row's heading, which asks a different question than "Enable for". */
+export const ADD_MCP_AVAILABLE_HEADING = 'Available to';
+
+/** Reports why nothing was written, leaving the sheet open over the draft. */
+export function describeMcpAddFailure(error: string): CatalogNotice {
+  return { tone: 'error', message: `Could not add that MCP: ${error}` };
+}
+
+export const ADD_MCP_NO_AGENT_REASON = 'Choose at least one agent.';
+
+/**
+ * Why "Add MCP" cannot be confirmed yet, in the order the contract asks for:
+ * a missing agent first, then whatever the configuration itself is still wrong
+ * about, then an agent that cannot reach this transport. `null` means nothing
+ * is blocking it.
+ *
+ * Only the first reason is reported. A draft early in the typing fails several
+ * checks at once, and listing them all says less than naming the next one.
+ */
+export function describeMcpBlockingReason(
+  hasSelectedAgent: boolean,
+  configurationError: string | null,
+  unsupportedSelectedAgents: readonly CatalogAgent[]
+): string | null {
+  if (!hasSelectedAgent) {
+    return ADD_MCP_NO_AGENT_REASON;
+  }
+  if (configurationError) {
+    return configurationError;
+  }
+  const [blockedAgent] = unsupportedSelectedAgents;
+  if (blockedAgent) {
+    const name = findAgentByCatalogAgent(blockedAgent)?.name ?? blockedAgent;
+    return `${name} cannot load this connection type.`;
+  }
+  return null;
+}
 
 /** Held while the first filesystem scan is still running. */
 export const SKILL_SCAN_LOADING_TEXT = 'Scanning installed skills…';
