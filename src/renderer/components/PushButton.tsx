@@ -17,6 +17,8 @@ interface PushButtonProps {
   testId?: string;
   /** Moves keyboard focus to the primary dialog exit when it opens. */
   autoFocus?: boolean;
+  /** Lets the button share a row's width evenly instead of hugging its label. */
+  stretch?: boolean;
 }
 
 const VARIANT_CLASSES = {
@@ -36,7 +38,8 @@ export function PushButton({
   onClick,
   disabled = false,
   testId,
-  autoFocus = false
+  autoFocus = false,
+  stretch = false
 }: PushButtonProps) {
   return (
     <button
@@ -44,7 +47,7 @@ export function PushButton({
       onClick={onClick}
       disabled={disabled}
       autoFocus={autoFocus}
-      className={`flex h-[24px] shrink-0 items-center justify-center rounded-[6px] px-2 text-[10px] leading-[16px] font-medium focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-text-primary disabled:opacity-40 ${VARIANT_CLASSES[variant]}`}
+      className={`flex h-[24px] ${stretch ? 'flex-1' : 'shrink-0'} items-center justify-center rounded-[6px] px-2 text-[10px] leading-[16px] font-medium focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-text-primary disabled:opacity-40 ${VARIANT_CLASSES[variant]}`}
       data-testid={testId}
     >
       {children}

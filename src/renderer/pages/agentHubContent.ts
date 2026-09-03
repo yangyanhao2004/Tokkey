@@ -342,6 +342,14 @@ export function describeAgentSupport(isUnsupported: boolean, isUnavailable: bool
 }
 export const UNINSTALL_LABEL = 'Uninstall';
 export const CANCEL_LABEL = 'Cancel';
+
+/**
+ * The confirmation in front of Uninstall (Figma 531:3986). Removing a skill
+ * deletes its folder, which no dialog can put back, so it is the one action on
+ * the page that asks twice — and says that asking again is all it costs.
+ */
+export const UNINSTALL_SKILL_CONFIRM_TITLE = 'Uninstall this skill?';
+export const UNINSTALL_SKILL_CONFIRM_MESSAGE = 'You can install this later.';
 export const SAVE_LABEL = 'Save changes';
 
 /** The counter opposite the "Enable for" heading. */

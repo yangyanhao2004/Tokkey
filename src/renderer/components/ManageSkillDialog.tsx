@@ -1,5 +1,9 @@
 import type { SkillAgent } from '../../shared/types';
-import { MANAGE_SKILL_DIALOG_EYEBROW } from '../pages/agentHubContent';
+import {
+  MANAGE_SKILL_DIALOG_EYEBROW,
+  UNINSTALL_SKILL_CONFIRM_MESSAGE,
+  UNINSTALL_SKILL_CONFIRM_TITLE
+} from '../pages/agentHubContent';
 import { useSkillAgentSelection } from '../hooks/useSkillAgentSelection';
 import { ManageAgentsDialog } from './ManageAgentsDialog';
 
@@ -28,6 +32,10 @@ export interface ManageSkillDialogProps {
  * repository card has nothing installed to read, so it opens on an empty
  * selection and its Save becomes the install — one dialog either way, since
  * "which agents load this skill" is the same question both times.
+ *
+ * Uninstall deletes the skill's folder, so it is the one button here that asks
+ * before it acts; the wording of that question is this dialog's to supply,
+ * since the generic manage dialog does not know a skill from an MCP.
  */
 export function ManageSkillDialog({
   name,
@@ -47,6 +55,10 @@ export function ManageSkillDialog({
       readError={error}
       onApply={onApply}
       onUninstall={onUninstall}
+      uninstallConfirm={{
+        title: UNINSTALL_SKILL_CONFIRM_TITLE,
+        message: UNINSTALL_SKILL_CONFIRM_MESSAGE
+      }}
       onClose={onClose}
       applyLabel={applyLabel}
       testId="manage-skill"

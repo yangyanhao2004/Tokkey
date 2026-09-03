@@ -16,6 +16,7 @@ import {
 } from '../pages/agentHubContent';
 import { useAgentAvailability } from './AgentDetectionProvider';
 import { AgentMarkTile } from './AgentMark';
+import { ConfirmDialog } from './ConfirmDialog';
 import { PushButton } from './PushButton';
 
 interface AgentToggleProps {
@@ -84,6 +85,12 @@ export interface ManageAgentsDialogProps {
   onApply: (selectedAgents: CatalogAgent[]) => Promise<void>;
   /** Omitted when there is nothing installed to remove, which hides the button. */
   onUninstall?: () => Promise<void>;
+  /**
+   * What the confirmation in front of Uninstall asks. The dialog does not know
+   * what it is removing, so the caller that owns the button owns its wording;
+   * without it Uninstall runs on the first click.
+   */
+  uninstallConfirm?: { title: string; message: string };
   onClose: () => void;
   /** What the confirming button says; installing from a repository says "Install". */
   applyLabel?: string;
@@ -113,6 +120,7 @@ export function ManageAgentsDialog({
   readError = null,
   onApply,
   onUninstall,
+  uninstallConfirm,
   onClose,
   applyLabel = SAVE_LABEL,
   testId
@@ -120,6 +128,7 @@ export function ManageAgentsDialog({
   const [selection, setSelection] = useState<Set<CatalogAgent> | null>(null);
   const [pendingAction, setPendingAction] = useState<'save' | 'uninstall' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [isConfirmingUninstall, setIsConfirmingUninstall] = useState(false);
   const availability = useAgentAvailability();
 
   // The reading is the starting point; edits afterwards belong to the dialog.
@@ -129,16 +138,17 @@ export function ManageAgentsDialog({
     }
   }, [currentAgents]);
 
-  // Escape closes, as every dialog on this platform does.
+  // Escape closes, as every dialog on this platform does — but it belongs to the
+  // confirmation while that is up, which answers it without closing this dialog.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !isConfirmingUninstall) {
         onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [onClose, isConfirmingUninstall]);
 
   const toggleAgent = useCallback((agent: CatalogAgent) => {
     setSelection((current) => {
@@ -250,7 +260,13 @@ export function ManageAgentsDialog({
             <PushButton
               variant="plain"
               disabled={isBusy}
-              onClick={() => void run('uninstall', onUninstall)}
+              onClick={() => {
+                if (uninstallConfirm) {
+                  setIsConfirmingUninstall(true);
+                  return;
+                }
+                void run('uninstall', onUninstall);
+              }}
               testId="manage-uninstall"
             >
               {UNINSTALL_LABEL}
@@ -273,6 +289,22 @@ export function ManageAgentsDialog({
           </div>
         </div>
       </div>
+
+      {/* Answering it leaves the manage dialog standing, so a refused uninstall
+          still reports itself where the button that started it lives. */}
+      {isConfirmingUninstall && uninstallConfirm && onUninstall && (
+        <ConfirmDialog
+          title={uninstallConfirm.title}
+          message={uninstallConfirm.message}
+          confirmLabel={UNINSTALL_LABEL}
+          onConfirm={() => {
+            setIsConfirmingUninstall(false);
+            void run('uninstall', onUninstall);
+          }}
+          onCancel={() => setIsConfirmingUninstall(false)}
+          testId={`${testId}-uninstall-confirm`}
+        />
+      )}
     </div>
   );
 }
