@@ -28,10 +28,12 @@ import TokenHubRuntimeLocator from './TokenHubRuntimeLocator';
 import TokenHubSerialTransport, {
   type TokenHubCommandTransport
 } from './TokenHubSerialTransport';
+import LocalPortResolver from '../../process/LocalPortResolver';
 
-const SERVER_PORT = 8081;
-const SERVER_ENDPOINT = `http://127.0.0.1:${SERVER_PORT}/v1`;
-const SERVER_CHAT_COMPLETIONS_ENDPOINT = `${SERVER_ENDPOINT}/chat/completions`;
+const DEFAULT_SERVER_PORT = 8081;
+function serverEndpoint(port: number): string {
+  return `http://127.0.0.1:${port}/v1`;
+}
 const SERVER_CONTEXT_WINDOW_TOKENS = 16_384;
 const DEVICE_SCAN_INTERVAL_MS = 1_000;
 const SERVER_READINESS_TIMEOUT_MS = 180_000;
@@ -85,6 +87,7 @@ export class TokenHubRuntime implements LocalModelRuntime {
   private readonly deviceProbe: DeviceProbing;
   private readonly transportFactory: TransportFactory;
   private readonly runtimeLocator: RuntimeLocating;
+  private readonly portResolver: LocalPortResolver;
   private readonly profileConnector: HubModelConnecting | null;
   private state: LocalModelRuntimeState = {
     phase: 'idle',
@@ -99,6 +102,7 @@ export class TokenHubRuntime implements LocalModelRuntime {
   private activeChatServer: {
     modelId: string;
     apiKey: string;
+    endpoint: string;
   } | null = null;
   private selectedChatModel: LocalChatRuntimeModel | null = null;
   private generation = 0;
@@ -107,6 +111,7 @@ export class TokenHubRuntime implements LocalModelRuntime {
     deviceProbe?: DeviceProbing;
     transportFactory?: TransportFactory;
     runtimeLocator?: RuntimeLocating;
+    portResolver?: LocalPortResolver;
     profileConnector?: HubModelConnecting | null;
   } = {}) {
     this.deviceProbe = options.deviceProbe ?? new TokenHubDeviceProbe();
@@ -116,6 +121,10 @@ export class TokenHubRuntime implements LocalModelRuntime {
       return transport;
     });
     this.runtimeLocator = options.runtimeLocator ?? new TokenHubRuntimeLocator();
+    this.portResolver = options.portResolver ?? new LocalPortResolver({
+      preferredPort: DEFAULT_SERVER_PORT,
+      logLabel: 'TokenHub'
+    });
     this.profileConnector = options.profileConnector ?? null;
   }
 
@@ -153,8 +162,8 @@ export class TokenHubRuntime implements LocalModelRuntime {
 
   /** Resolves the Chat route only for the currently authenticated Hub model. */
   chatCompletionsUrl(modelId: string): string {
-    this.requireActiveChatServer(modelId);
-    return SERVER_CHAT_COMPLETIONS_ENDPOINT;
+    const server = this.requireActiveChatServer(modelId);
+    return `${server.endpoint}/chat/completions`;
   }
 
   /** Keeps the Hub-derived inference credential in the main process. */
@@ -275,26 +284,31 @@ export class TokenHubRuntime implements LocalModelRuntime {
       this.assertCurrent(attempt);
 
       const resources = await this.runtimeLocator.resolve();
-      const running = await this.launchServer(resources, device, model, credential.apiKey);
+      const port = await this.portResolver.resolve(resources.serverPath);
+      const running = await this.launchServer(resources, device, model, credential.apiKey, port);
       try {
         this.assertCurrent(attempt);
         this.activeProcess = running;
         console.info(`[TokenHub] llama-server launched with pid ${running.child.pid ?? 'unknown'}.`);
-        await this.waitUntilReady(running, credential.apiKey, attempt);
+        await this.waitUntilReady(running, credential.apiKey, port, attempt);
         console.info('[TokenHub] llama-server readiness check passed.');
         const runningModel: RunningHubModel = {
           deviceId: deviceId.toString('hex'),
           displayName: model.label,
           modelName: model.fileName,
-          endpoint: SERVER_ENDPOINT,
+          endpoint: serverEndpoint(port),
           apiKey: credential.apiKey
         };
         this.assertCurrent(attempt);
-        this.activeChatServer = { modelId: model.id, apiKey: credential.apiKey };
+        this.activeChatServer = {
+          modelId: model.id,
+          apiKey: credential.apiKey,
+          endpoint: serverEndpoint(port)
+        };
         this.setState({
           phase: 'running',
           modelId: model.id,
-          endpoint: SERVER_ENDPOINT,
+          endpoint: serverEndpoint(port),
           error: null,
           device
         });
@@ -383,14 +397,15 @@ export class TokenHubRuntime implements LocalModelRuntime {
     resources: { serverPath: string; templatePath: string },
     device: TokenHubDevice,
     model: LocalModelLaunchRequest,
-    apiKey: string
+    apiKey: string,
+    port: number
   ): Promise<RunningProcess> {
     const workingDirectory = await mkdtemp(path.join(os.tmpdir(), 'tokkey-tokenhub-'));
     await copyFile(resources.templatePath, path.join(workingDirectory, 'qwen3_codex_compatible.jinja'));
     const args = [
       '-m', model.filePath,
       '--host', '0.0.0.0',
-      '--port', String(SERVER_PORT),
+      '--port', String(port),
       '--parallel', '1',
       '-ngl', '99',
       '-t', '2',
@@ -441,6 +456,7 @@ export class TokenHubRuntime implements LocalModelRuntime {
   private async waitUntilReady(
     running: RunningProcess,
     apiKey: string,
+    port: number,
     attempt: number
   ): Promise<void> {
     const deadline = Date.now() + SERVER_READINESS_TIMEOUT_MS;
@@ -451,7 +467,7 @@ export class TokenHubRuntime implements LocalModelRuntime {
         throw this.exitedServerError(running);
       }
       try {
-        const response = await fetch(`${SERVER_ENDPOINT}/models`, {
+        const response = await fetch(`${serverEndpoint(port)}/models`, {
           headers: { Authorization: `Bearer ${apiKey}` },
           signal: AbortSignal.timeout(2_000)
         });
@@ -553,7 +569,11 @@ export class TokenHubRuntime implements LocalModelRuntime {
     if (this.generation !== attempt) throw new Error('The Amis Hub model startup was stopped.');
   }
 
-  private requireActiveChatServer(modelId: string): { modelId: string; apiKey: string } {
+  private requireActiveChatServer(modelId: string): {
+    modelId: string;
+    apiKey: string;
+    endpoint: string;
+  } {
     const server = this.activeChatServer;
     if (
       !server ||

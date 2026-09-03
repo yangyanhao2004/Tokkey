@@ -33,8 +33,9 @@ export interface LocalPortResolverOptions {
  * this app terminate a live helper belonging to one of them. Only a process
  * running *this* app's copy of the executable can be ours.
  *
- * Shared by every helper this app supervises — the gateway and the router — so
- * the eviction rule and the fallback behaviour stay identical across them.
+ * Shared by every helper this app supervises — the gateway, router, and
+ * Dongle-backed model server — so the eviction rule and fallback behaviour
+ * stay identical across them.
  */
 export class LocalPortResolver {
   private readonly preferredPort: number;
