@@ -146,7 +146,8 @@ export function describeRecommendedButtons({
 
   switch (row?.lifecycle) {
     case 'downloading':
-      return [{ kind: 'cancel', label: 'Cancel', variant: 'progress', disabled: false }];
+      // Named for the state, not the press — see the Add Model row it matches.
+      return [{ kind: 'cancel', label: 'Downloading...', variant: 'progress', disabled: false }];
     case 'downloadFailed':
       return [{ kind: 'download', label: 'Retry', variant: 'filled', disabled: false }];
     case 'downloadable':

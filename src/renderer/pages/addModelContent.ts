@@ -108,7 +108,13 @@ export function describeEmptyCatalog(isLoading: boolean, query: string): string 
 }
 
 const DOWNLOAD_ACTION: CatalogModelAction = { kind: 'download', label: 'Download', variant: 'filled' };
-const CANCEL_ACTION: CatalogModelAction = { kind: 'cancel', label: 'Cancel', variant: 'progress' };
+// Reads as the state it is in rather than the press it takes; the "×" the
+// progress button draws is what says the press cancels (Figma 531:1355).
+const CANCEL_ACTION: CatalogModelAction = {
+  kind: 'cancel',
+  label: 'Downloading...',
+  variant: 'progress'
+};
 const RETRY_ACTION: CatalogModelAction = { kind: 'download', label: 'Retry', variant: 'filled' };
 const RETRY_START_ACTION: CatalogModelAction = { kind: 'deploy', label: 'Retry start', variant: 'filled' };
 

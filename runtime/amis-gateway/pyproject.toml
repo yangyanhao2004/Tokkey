@@ -35,7 +35,7 @@ amis-gateway = "amis_gateway.main:main"
 
 [tool.uv.sources]
 # Build the runtime from the reviewed fork commit instead of a moving branch.
-litellm = { git = "https://github.com/cPilot-GUI/litellm.git", rev = "7cf5de494a4e5a0a1b7336067fbb8b6561ff87f0" }
+litellm = { git = "https://github.com/cPilot-GUI/litellm.git", rev = "068feace935218ce6a038dedb11ef195061224d8" }
 
 [dependency-groups]
 dev = [
