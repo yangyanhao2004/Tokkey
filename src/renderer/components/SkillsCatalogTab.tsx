@@ -14,6 +14,7 @@ import { useSkillUpload } from '../hooks/useSkillUpload';
 import { CatalogGrid, CatalogMessage, CatalogTabLayout } from './CatalogTabLayout';
 import { ManageSkillDialog } from './ManageSkillDialog';
 import { PushButton } from './PushButton';
+import { SkillDetailsDialog } from './SkillDetailsDialog';
 import { SkillUploadConflictDialog } from './SkillUploadConflictDialog';
 
 export interface SkillsCatalogTabProps {
@@ -34,6 +35,7 @@ export interface SkillsCatalogTabProps {
 export function SkillsCatalogTab({ onDiscover }: SkillsCatalogTabProps) {
   const [query, setQuery] = useState('');
   const [managedSkillId, setManagedSkillId] = useState<string | null>(null);
+  const [detailedSkillId, setDetailedSkillId] = useState<string | null>(null);
   const { skills, isLoading, error, applyAgentSelection, uninstall, applyScan } = useInstalledSkills();
   const upload = useSkillUpload({ onCatalogScanned: applyScan });
 
@@ -42,6 +44,8 @@ export function SkillsCatalogTab({ onDiscover }: SkillsCatalogTabProps) {
   const entries = selectCatalogEntries(skillEntries, query);
   // Held by id rather than by object so the dialog follows the rescanned card.
   const managedSkill = skills?.find((skill) => skill.id === managedSkillId) ?? null;
+  // Details follow the same rescan and disappear if the skill is removed elsewhere.
+  const detailedSkill = skills?.find((skill) => skill.id === detailedSkillId) ?? null;
 
   return (
     <>
@@ -81,8 +85,21 @@ export function SkillsCatalogTab({ onDiscover }: SkillsCatalogTabProps) {
           </CatalogMessage>
         )}
 
-        <CatalogGrid entries={entries} onAction={setManagedSkillId} />
+        <CatalogGrid
+          entries={entries}
+          onAction={setManagedSkillId}
+          onSelect={setDetailedSkillId}
+        />
       </CatalogTabLayout>
+
+      {detailedSkill && (
+        <SkillDetailsDialog
+          key={detailedSkill.id}
+          name={detailedSkill.name}
+          request={{ kind: 'installed', skillId: detailedSkill.id }}
+          onClose={() => setDetailedSkillId(null)}
+        />
+      )}
 
       {managedSkill && (
         <ManageSkillDialog

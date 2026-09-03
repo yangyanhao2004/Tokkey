@@ -86,6 +86,8 @@ export interface CatalogCardProps {
   actionLabel?: string;
   /** Omitted for entries with nothing to act on yet, which disables the button. */
   onAction?: () => void;
+  /** Opens read-only details when the card surface is selected. */
+  onSelect?: () => void;
 }
 
 /**
@@ -93,13 +95,29 @@ export interface CatalogCardProps {
  * The card is at least as tall as the design's fixed 148px but grows rather
  * than clipping, since a longer description would otherwise spill out.
  */
-export function CatalogCard({ entry, actionLabel = MANAGE_LABEL, onAction }: CatalogCardProps) {
+export function CatalogCard({
+  entry,
+  actionLabel = MANAGE_LABEL,
+  onAction,
+  onSelect
+}: CatalogCardProps) {
   return (
     <article
-      className="flex min-h-[148px] flex-col justify-between gap-4 rounded-[12px] border border-vibrant-tertiary p-4"
+      className="relative flex min-h-[148px] flex-col justify-between gap-4 rounded-[12px] border border-vibrant-tertiary p-4"
       data-testid={`catalog-entry-${entry.id}`}
     >
-      <div className="flex w-full flex-col gap-1.5">
+      {onSelect && (
+        <button
+          type="button"
+          className="absolute inset-0 rounded-[12px] hover:bg-black/[0.025] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary"
+          aria-label={`View ${entry.name} skill details`}
+          onClick={onSelect}
+          data-testid={`catalog-details-${entry.id}`}
+        />
+      )}
+
+      {/* Content ignores the overlay button, while the explicit card action remains interactive. */}
+      <div className={`relative z-10 flex w-full flex-col gap-1.5 ${onSelect ? 'pointer-events-none' : ''}`}>
         <div className="flex w-full items-start justify-between gap-2">
           <h3 className="min-w-0 truncate text-[12px] leading-[14px] font-bold text-text-primary">
             {entry.name}
@@ -120,7 +138,7 @@ export function CatalogCard({ entry, actionLabel = MANAGE_LABEL, onAction }: Cat
         )}
       </div>
 
-      <div className="flex w-full flex-col gap-2">
+      <div className={`relative z-10 flex w-full flex-col gap-2 ${onSelect ? 'pointer-events-none' : ''}`}>
         <span className="text-[8px] leading-[10px] font-bold uppercase text-label-section">
           {WORKS_WITH_LABEL}
         </span>
@@ -128,20 +146,26 @@ export function CatalogCard({ entry, actionLabel = MANAGE_LABEL, onAction }: Cat
         <div className="flex w-full items-center justify-between gap-2">
           {/* Wider than Figma's 4px: the check badge overhangs its own chip,
               so a tighter gap would sit it on top of the next one. */}
-          <div className="flex items-center gap-2">
+          <div
+            className={onSelect ? 'pointer-events-auto flex items-center gap-2' : 'flex items-center gap-2'}
+            // Keep chip tooltips available while treating their row as part of the card surface.
+            onClick={onSelect}
+          >
             {entry.compatibility.map((chip) => (
               <CompatibilityChipMark key={chip.agentId} chip={chip} />
             ))}
           </div>
 
-          <PushButton
-            variant="plain-dark"
-            onClick={onAction}
-            disabled={onAction === undefined}
-            testId={`catalog-action-${entry.id}`}
-          >
-            {entry.actionLabel ?? actionLabel}
-          </PushButton>
+          <span className="pointer-events-auto">
+            <PushButton
+              variant="plain-dark"
+              onClick={onAction}
+              disabled={onAction === undefined}
+              testId={`catalog-action-${entry.id}`}
+            >
+              {entry.actionLabel ?? actionLabel}
+            </PushButton>
+          </span>
         </div>
       </div>
     </article>

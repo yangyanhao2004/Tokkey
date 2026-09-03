@@ -40,10 +40,12 @@ export interface CatalogGridProps {
   actionLabel?: string;
   /** Omitted by tabs whose entries have nothing to act on yet. */
   onAction?: (entryId: string) => void;
+  /** Omitted for catalogs whose cards do not expose a detail document. */
+  onSelect?: (entryId: string) => void;
 }
 
 /** The two-column grid of whatever the open tab holds. */
-export function CatalogGrid({ entries, actionLabel, onAction }: CatalogGridProps) {
+export function CatalogGrid({ entries, actionLabel, onAction, onSelect }: CatalogGridProps) {
   return (
     <div className="grid w-full grid-cols-2 gap-3">
       {entries.map((entry) => (
@@ -52,6 +54,7 @@ export function CatalogGrid({ entries, actionLabel, onAction }: CatalogGridProps
           entry={entry}
           actionLabel={actionLabel}
           onAction={onAction ? () => onAction(entry.id) : undefined}
+          onSelect={onSelect ? () => onSelect(entry.id) : undefined}
         />
       ))}
     </div>

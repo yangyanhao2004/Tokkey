@@ -21,6 +21,7 @@ export { default as CachedSourceCatalog, LocalCachedSourceCatalog } from './Cach
 export { default as CachedInstalledSkillMatcher, LocalSkillDuplicateDetector } from './CachedInstalledSkillMatcher';
 export { default as SkillFolderSelector, ElectronDirectoryChooser } from './SkillFolderSelector';
 export { default as SkillUploadService } from './SkillUploadService';
+export { default as SkillDetailsReader } from './SkillDetailsReader';
 export { default as DiscoverSkillsService } from './DiscoverSkillsService';
 export type {
   DiscoveredSkill,

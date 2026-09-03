@@ -209,6 +209,7 @@ export interface TokkeyApi {
   getSkillAgentSelection(skillId: string): Promise<SkillAgentSelection>;
   applySkillAgentSelection(skillId: string, selectedAgents: SkillAgent[]): Promise<InstalledSkill[]>;
   uninstallSkill(skillId: string): Promise<InstalledSkill[]>;
+  getSkillDetails(request: SkillDetailsRequest): Promise<SkillDetails>;
   uploadSkillFolder(): Promise<SkillUploadResult>;
   resolveSkillUploadConflict(
     pendingUploadId: string,
@@ -599,6 +600,14 @@ export interface LocalModelCatalogScan {
 /** Filesystem roots whose contents are visible to the supported agents. */
 export type SkillRoot = 'amis' | 'claudeCode' | 'codex' | 'agents';
 
+/** User-facing owner names shared by skill cards and detail source rows. */
+export const SKILL_ROOT_DISPLAY_NAMES: Readonly<Record<SkillRoot, string>> = {
+  amis: 'Tokkey',
+  claudeCode: 'Claude Code',
+  codex: 'Codex',
+  agents: 'Agents'
+};
+
 /** Agents that can load a skill from one of the supported roots. */
 export type SkillAgent = 'claudeCode' | 'codex';
 
@@ -641,6 +650,24 @@ export interface InstalledSkill {
   sourcePath: string;
   hasNameCollision: boolean;
   agentBadges: SkillAgentBadge[];
+}
+
+/** A catalog-owned identifier for the SKILL.md the renderer wants to inspect. */
+export type SkillDetailsRequest =
+  | { kind: 'installed'; skillId: string }
+  | { kind: 'repository'; source: string; relativePath: string };
+
+/** One place the displayed skill is available from. */
+export interface SkillDetailsLocation {
+  label: string;
+  path: string;
+}
+
+/** Renderer-safe SKILL.md content and its catalog-verified filesystem origins. */
+export interface SkillDetails {
+  name: string;
+  content: string;
+  locations: SkillDetailsLocation[];
 }
 
 /** A normalized GitHub source displayed by the repository browser. */

@@ -9,6 +9,7 @@
  * deliberately absent — Tokkey only manages Codex and Claude Code.
  */
 
+import { SKILL_ROOT_DISPLAY_NAMES } from '../../shared/types';
 import type {
   AgentInstallation,
   CodingAgent,
@@ -20,7 +21,6 @@ import type {
   McpConnectionType,
   SkillAgent,
   SkillAgentBadge,
-  SkillRoot,
   SkillUploadConflictChoice,
   SkillUploadResult
 } from '../../shared/types';
@@ -29,10 +29,9 @@ import type {
 export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
 
 export const PAGE_TITLE = 'Agent Hub';
-export const PAGE_SUBTITLE =
-  'Install the coding agents you use while Tokkey keeps local and cloud models available in the background.';
+export const PAGE_SUBTITLE = 'See whether Codex and Claude Code are installed on this Mac.';
 
-/** Every coding agent the hub can install. */
+/** Every coding agent the hub can detect. */
 export type AgentId = 'codex' | 'claude-code';
 
 export interface HubAgent {
@@ -86,16 +85,29 @@ export function readAgentAvailability(
   ) as Record<AgentId, boolean>;
 }
 
-/** Whether one agent is known to be installed; unknown counts as not installed. */
-export function isAgentInstalled(availability: AgentAvailability, agentId: AgentId): boolean {
-  return availability?.[agentId] === true;
+/** The read-only state shown by an agent card while detection settles. */
+export type AgentStatus = 'checking' | 'installed' | 'notInstalled';
+
+const AGENT_STATUS_LABELS: Readonly<Record<AgentStatus, string>> = {
+  checking: 'Checking…',
+  installed: 'Installed',
+  notInstalled: 'Not installed'
+};
+
+/** Resolves detection without implying that Tokkey can change the installation. */
+export function resolveAgentStatus(
+  availability: AgentAvailability,
+  agentId: AgentId
+): AgentStatus {
+  if (!availability) {
+    return 'checking';
+  }
+  return availability[agentId] ? 'installed' : 'notInstalled';
 }
 
-export function describeAgentAction(availability: AgentAvailability, agentId: AgentId): string {
-  if (!availability) {
-    return 'Checking…';
-  }
-  return availability[agentId] ? 'Uninstall' : 'Install';
+/** Human-readable status for the agent card's non-interactive badge. */
+export function describeAgentStatus(status: AgentStatus): string {
+  return AGENT_STATUS_LABELS[status];
 }
 
 /**
@@ -183,13 +195,6 @@ export interface CatalogEntry {
  * The Amis root is Tokkey's own store, so it reads as the app rather than as a
  * directory nobody outside the code recognizes.
  */
-const SKILL_ROOT_LABELS: Readonly<Record<SkillRoot, string>> = {
-  amis: 'Tokkey',
-  claudeCode: 'Claude Code',
-  codex: 'Codex',
-  agents: 'Agents'
-};
-
 /** Stands in for a skill whose SKILL.md carries no description. */
 export const MISSING_SUMMARY_TEXT = 'No description in this skill’s SKILL.md.';
 
@@ -226,7 +231,7 @@ export function toSkillCatalogEntries(skills: readonly InstalledSkill[]): readon
   return skills.map((skill) => ({
     id: skill.id,
     name: skill.name,
-    source: SKILL_ROOT_LABELS[skill.primaryInstallation.root],
+    source: SKILL_ROOT_DISPLAY_NAMES[skill.primaryInstallation.root],
     description: skill.summary ?? MISSING_SUMMARY_TEXT,
     compatibility: toCompatibilityChips(skill.agentBadges)
   }));
@@ -309,6 +314,10 @@ export function selectCatalogEntries(
  * does not manage it, so the dialog lists `HUB_AGENTS` like the rest of the page.
  */
 export const MANAGE_SKILL_DIALOG_EYEBROW = 'MANAGE SKILL';
+export const SKILL_DETAILS_DIALOG_EYEBROW = 'Skill INFO';
+export const SKILL_DETAILS_LOADING_TEXT = 'Reading SKILL.md…';
+export const SKILL_DETAILS_EMPTY_TEXT = 'This SKILL.md has no content.';
+export const CLOSE_LABEL = 'Close';
 export const MANAGE_MCP_DIALOG_EYEBROW = 'MANAGE MCP';
 export const MANAGE_DIALOG_ENABLE_HEADING = 'Enable for';
 export const MANAGE_DIALOG_ENABLE_HINT = 'Choose one or more agents. You can change this later.';
@@ -343,6 +352,11 @@ export function describeSelectedAgentCount(count: number): string {
 /** Reports why a save or uninstall left the filesystem untouched. */
 export function describeManageFailure(error: string): string {
   return `That did not work: ${error}`;
+}
+
+/** Reports a read failure inside the detail dialog without hiding what failed. */
+export function describeSkillDetailsFailure(error: string): string {
+  return `Could not read SKILL.md: ${error}`;
 }
 
 export const SECTION_HEADING = 'Skills & MCPs';

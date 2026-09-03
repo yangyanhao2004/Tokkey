@@ -9,6 +9,7 @@ import { DiscoverRepositories } from '../dist/main/mcpnskills/DiscoverRepositori
 import { GitHubRepositoryCoordinate } from '../dist/main/mcpnskills/GitHubRepositoryCoordinate.js';
 import { RepositoryCloneCache } from '../dist/main/mcpnskills/RepositoryCloneCache.js';
 import { SkillInstaller } from '../dist/main/mcpnskills/SkillInstaller.js';
+import { SkillDetailsReader } from '../dist/main/mcpnskills/SkillDetailsReader.js';
 import { RepositorySkillScanner } from '../dist/main/mcpnskills/RepositorySkillScanner.js';
 import {
   LocalSkillCatalogScanner,
@@ -94,6 +95,94 @@ test('parses skill frontmatter scalars and multiline descriptions', () => {
     skillName: null,
     skillDescription: null
   });
+});
+
+test('reads installed and cached SKILL.md bodies with catalog-owned locations', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    const manifest = '---\nname: inspectable\ndescription: Read me\n---\n# Instructions\n\nUse the tool safely.\n';
+    workspace.write('.agents/skills/inspectable/SKILL.md', manifest);
+    workspace.write('cache/owner/repository/skills/inspectable/SKILL.md', manifest);
+    const [installedSkill] = await new LocalSkillCatalogScanner({
+      homeDirectory: workspace.root
+    }).scanInstalledSkills();
+    const reader = new SkillDetailsReader();
+
+    const installedDetails = await reader.readInstalledSkill(installedSkill);
+    assert.equal(installedDetails.content, '# Instructions\n\nUse the tool safely.');
+    assert.deepEqual(installedDetails.locations, [{
+      label: 'Agents',
+      path: workspace.resolve('.agents/skills/inspectable')
+    }]);
+
+    // Cached cards carry their repository identity rather than an agent root.
+    const cachedDetails = await reader.readRepositorySkill({
+      id: 'owner/repository:skills/inspectable',
+      name: 'inspectable',
+      summary: 'Read me',
+      description: 'Read me',
+      source: 'owner/repository',
+      relativePath: 'skills/inspectable',
+      absolutePath: workspace.resolve('cache/owner/repository/skills/inspectable'),
+      isInstalled: false,
+      installedSkillId: null,
+      agentBadges: []
+    });
+    assert.equal(cachedDetails.content, installedDetails.content);
+    assert.equal(cachedDetails.locations[0].label, 'owner/repository');
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test('reads an installed manifest link whose target belongs to the same installed catalog', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    const sharedManifestPath = workspace.write(
+      '.claude/skills/shared/SKILL.md',
+      '---\nname: shared\ndescription: Shared source\n---\n# Shared instructions\n'
+    );
+    const commandPath = workspace.directory('.amis/skills/shared-command');
+    symlinkSync(sharedManifestPath, path.join(commandPath, 'SKILL.md'));
+    const installedCatalog = await new LocalSkillCatalogScanner({
+      homeDirectory: workspace.root
+    }).scanInstalledSkills();
+    const command = installedCatalog.find((skill) => skill.name === 'shared-command');
+    assert.ok(command);
+
+    const details = await new SkillDetailsReader().readInstalledSkill(command, installedCatalog);
+    assert.equal(details.content, '# Shared instructions');
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test('rejects a SKILL.md link whose target is outside every catalog skill', async () => {
+  const workspace = new TestWorkspace();
+  try {
+    const skillPath = workspace.directory('cache/owner/repository/skills/linked');
+    const externalManifestPath = workspace.write('private/SKILL.md', 'private content');
+    symlinkSync(externalManifestPath, path.join(skillPath, 'SKILL.md'));
+    const reader = new SkillDetailsReader();
+
+    await assert.rejects(
+      () => reader.readRepositorySkill({
+        id: 'owner/repository:skills/linked',
+        name: 'linked',
+        summary: null,
+        description: null,
+        source: 'owner/repository',
+        relativePath: 'skills/linked',
+        absolutePath: skillPath,
+        isInstalled: false,
+        installedSkillId: null,
+        agentBadges: []
+      }),
+      /escapes the cataloged skill directories/
+    );
+  } finally {
+    workspace.cleanup();
+  }
 });
 
 test('rejects filesystem traversal and preserves Codex path preference', () => {

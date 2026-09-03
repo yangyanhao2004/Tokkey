@@ -186,3 +186,129 @@ body {
 body:has(.app-theme-chat) {
   background-color: var(--color-chat-frame-border);
 }
+
+/* SKILL.md keeps the dialog's compact Figma typography while restoring the
+   document structure removed by Tailwind's browser reset. */
+.skill-markdown > :first-child {
+  margin-top: 0;
+}
+
+.skill-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.skill-markdown h1,
+.skill-markdown h2,
+.skill-markdown h3,
+.skill-markdown h4,
+.skill-markdown h5,
+.skill-markdown h6 {
+  margin: 16px 0 8px;
+  line-height: 18px;
+  font-weight: 700;
+}
+
+.skill-markdown h1 {
+  font-size: 16px;
+}
+
+.skill-markdown h2 {
+  font-size: 14px;
+}
+
+.skill-markdown h3,
+.skill-markdown h4,
+.skill-markdown h5,
+.skill-markdown h6 {
+  font-size: 12px;
+}
+
+.skill-markdown p,
+.skill-markdown ul,
+.skill-markdown ol,
+.skill-markdown blockquote,
+.skill-markdown pre,
+.skill-markdown table,
+.skill-markdown hr {
+  margin: 0 0 12px;
+}
+
+.skill-markdown ul,
+.skill-markdown ol {
+  padding-left: 20px;
+}
+
+.skill-markdown ul {
+  list-style: disc;
+}
+
+.skill-markdown ol {
+  list-style: decimal;
+}
+
+.skill-markdown li + li {
+  margin-top: 4px;
+}
+
+.skill-markdown blockquote {
+  border-left: 2px solid var(--color-dialog-divider);
+  padding-left: 12px;
+  color: var(--color-text-secondary);
+}
+
+.skill-markdown code {
+  border-radius: 4px;
+  background-color: var(--color-fill-tile);
+  padding: 1px 4px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
+.skill-markdown pre {
+  overflow-x: auto;
+  border-radius: 6px;
+  background-color: var(--color-field-bg);
+  padding: 12px;
+  white-space: pre;
+}
+
+.skill-markdown pre code {
+  border-radius: 0;
+  background-color: transparent;
+  padding: 0;
+}
+
+.skill-markdown a {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+.skill-markdown table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.skill-markdown th,
+.skill-markdown td {
+  border: 1px solid var(--color-dialog-divider);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.skill-markdown th {
+  font-weight: 700;
+}
+
+.skill-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--color-dialog-divider);
+}
+
+.skill-markdown input[type="checkbox"] {
+  margin-right: 6px;
+  pointer-events: none;
+}

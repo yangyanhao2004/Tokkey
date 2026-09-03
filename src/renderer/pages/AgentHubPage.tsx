@@ -6,9 +6,10 @@ import {
   PAGE_TITLE,
   SECTION_HEADING,
   TAB_GROUP_LABEL,
-  describeAgentAction,
-  isAgentInstalled,
+  describeAgentStatus,
+  resolveAgentStatus,
   type CatalogTab,
+  type AgentStatus,
   type HubAgent
 } from './agentHubContent';
 import {
@@ -19,19 +20,25 @@ import { AgentMarkTile } from '../components/AgentMark';
 import { McpCatalogTab } from '../components/McpCatalogTab';
 import { useNavigation } from '../components/NavigationProvider';
 import { PageShell } from '../components/PageShell';
-import { PushButton } from '../components/PushButton';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { SkillsCatalogTab } from '../components/SkillsCatalogTab';
 import { TitleBlock } from '../components/TitleBlock';
+
+/** Read-only detection tones; installed matches Figma Push Button 531:2433. */
+const AGENT_STATUS_CLASSES: Readonly<Record<AgentStatus, string>> = {
+  checking: 'rounded-[6px] bg-fill-tile text-text-secondary',
+  installed: 'rounded-[6px] text-label-tertiary',
+  notInstalled: 'rounded-[6px] bg-status-idle-bg text-status-idle-text'
+};
 
 interface AgentCardProps {
   agent: HubAgent;
 }
 
-/** One installable coding agent: its glyph, name, vendor, and single action. */
+/** One detected coding agent: its glyph, identity, and read-only availability. */
 function AgentCard({ agent }: AgentCardProps) {
   const availability = useAgentAvailability();
-  const isInstalled = isAgentInstalled(availability, agent.id);
+  const status = resolveAgentStatus(availability, agent.id);
 
   return (
     <article
@@ -44,20 +51,20 @@ function AgentCard({ agent }: AgentCardProps) {
       </div>
 
       <div className="flex w-full items-center justify-end">
-        <PushButton
-          variant={isInstalled ? 'plain' : 'filled'}
-          // Nothing to offer until detection says which action this even is.
-          disabled={availability === null}
-          testId={`agent-action-${agent.id}`}
+        <span
+          className={`flex h-[24px] shrink-0 items-center overflow-hidden px-2 text-[10px] leading-[16px] font-medium ${AGENT_STATUS_CLASSES[status]}`}
+          role="status"
+          aria-live="polite"
+          data-testid={`agent-status-${agent.id}`}
         >
-          {describeAgentAction(availability, agent.id)}
-        </PushButton>
+          {describeAgentStatus(status)}
+        </span>
       </div>
     </article>
   );
 }
 
-/** The agents the hub manages, side by side across the top of the page. */
+/** The agents the hub detects, side by side across the top of the page. */
 function AgentRow() {
   return (
     <section className="flex w-full shrink-0 items-start gap-2" data-testid="agent-row">

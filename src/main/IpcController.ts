@@ -4,6 +4,7 @@ import type {
   AppInfo,
   ApplyMcpConfigurationRequest,
   CachedRepository,
+  CachedRepositorySkill,
   CloudModelCard,
   CloudModelConnection,
   HostSnapshot,
@@ -26,6 +27,8 @@ import type {
   RouterRuntimeState,
   SkillAgent,
   SkillAgentSelection,
+  SkillDetails,
+  SkillDetailsRequest,
   SkillInstallResult,
   SkillUploadConflictChoice,
   SkillUploadResult
@@ -41,6 +44,7 @@ import RepositoryCloneCache from './mcpnskills/RepositoryCloneCache';
 import RepositorySkillScanner from './mcpnskills/RepositorySkillScanner';
 import SkillFolderImporter from './mcpnskills/SkillFolderImporter';
 import SkillInstaller from './mcpnskills/SkillInstaller';
+import SkillDetailsReader from './mcpnskills/SkillDetailsReader';
 import SkillUploadService from './mcpnskills/SkillUploadService';
 import DiscoverSkillsService from './mcpnskills/DiscoverSkillsService';
 import LocalMcpCatalogScanner, { MCP_AGENT_ORDER } from './mcp/McpCatalogScanner';
@@ -73,6 +77,7 @@ export interface IpcControllerOptions {
   accountService?: AccountService;
   skillCatalogScanner?: LocalSkillCatalogScanner;
   skillDeployer?: SkillDeployer;
+  skillDetailsReader?: SkillDetailsReader;
   discoverRepositories?: DiscoverRepositories;
   discoverSkills?: DiscoverSkillsService;
   skillUploadService?: SkillUploadService;
@@ -111,6 +116,7 @@ export default class IpcController {
   private readonly handlers: Record<string, IpcHandler>;
   private readonly skillCatalogScanner: LocalSkillCatalogScanner;
   private readonly skillDeployer: SkillDeployer;
+  private readonly skillDetailsReader: SkillDetailsReader;
   private readonly discoverRepositories: DiscoverRepositories;
   private readonly discoverSkills: DiscoverSkillsService;
   private readonly skillUploadService: SkillUploadService;
@@ -141,6 +147,7 @@ export default class IpcController {
       options.skillDeployer ?? new SkillDeployer({ scanner: skillCatalogScanner });
     this.skillCatalogScanner = skillCatalogScanner;
     this.skillDeployer = skillDeployer;
+    this.skillDetailsReader = options.skillDetailsReader ?? new SkillDetailsReader();
     this.discoverRepositories = options.discoverRepositories ?? this.createDiscoverRepositories();
     this.discoverSkills = options.discoverSkills ?? new DiscoverSkillsService({
       installedCatalog: skillCatalogScanner,
@@ -206,6 +213,8 @@ export default class IpcController {
           this.requireSkillAgents(selectedAgents)
         ),
       'skills:uninstall': (skillId: unknown) => this.uninstallSkill(this.requireSkillId(skillId)),
+      'skills:get-details': (request: unknown) =>
+        this.getSkillDetails(this.requireSkillDetailsRequest(request)),
       'skills:upload-folder': () => this.uploadSkillFolder(),
       'skills:resolve-upload-conflict': (pendingUploadId: unknown, choice: unknown) =>
         this.resolveSkillUploadConflict(
@@ -631,6 +640,18 @@ export default class IpcController {
     return this.skillDeployer.uninstallSkill(skill);
   }
 
+  /** Resolves a catalog identifier before allowing the document reader near disk. */
+  async getSkillDetails(request: SkillDetailsRequest): Promise<SkillDetails> {
+    if (request.kind === 'installed') {
+      const installedCatalog = await this.getInstalledSkills();
+      const skill = this.findSkillInCatalog(installedCatalog, request.skillId);
+      return this.skillDetailsReader.readInstalledSkill(skill, installedCatalog);
+    }
+
+    const skill = await this.findRepositorySkill(request.source, request.relativePath);
+    return this.skillDetailsReader.readRepositorySkill(skill);
+  }
+
   /** Lists repository cards from the local cache without running Git. */
   listCachedRepositories(): Promise<CachedRepository[]> {
     return this.discoverRepositories.listCached();
@@ -695,9 +716,29 @@ export default class IpcController {
   }
 
   private async findSkill(skillId: string): Promise<InstalledSkill> {
-    const skill = (await this.getInstalledSkills()).find((candidate) => candidate.id === skillId);
+    return this.findSkillInCatalog(await this.getInstalledSkills(), skillId);
+  }
+
+  /** Finds one skill without forcing callers that already scanned to scan again. */
+  private findSkillInCatalog(skills: readonly InstalledSkill[], skillId: string): InstalledSkill {
+    const skill = skills.find((candidate) => candidate.id === skillId);
     if (!skill) {
       throw new Error(`Skill not found: ${skillId}`);
+    }
+    return skill;
+  }
+
+  /** Finds one cached card by the stable source and relative path sent to the grid. */
+  private async findRepositorySkill(
+    source: string,
+    relativePath: string
+  ): Promise<CachedRepositorySkill> {
+    const repositories = await this.listCachedRepositories();
+    const skill = repositories
+      .find((repository) => repository.coordinate.source === source)
+      ?.skills.find((candidate) => candidate.relativePath === relativePath);
+    if (!skill) {
+      throw new Error(`Repository skill not found: ${source}/${relativePath}`);
     }
     return skill;
   }
@@ -707,6 +748,28 @@ export default class IpcController {
       throw new TypeError('Skill ID must be a non-empty string');
     }
     return value;
+  }
+
+  /** Accepts catalog identifiers only; renderer-provided filesystem paths are never valid. */
+  private requireSkillDetailsRequest(value: unknown): SkillDetailsRequest {
+    if (!value || typeof value !== 'object') {
+      throw new TypeError('Skill details request must be an object');
+    }
+    const request = value as Record<string, unknown>;
+    if (request.kind === 'installed') {
+      return {
+        kind: 'installed',
+        skillId: this.requireSkillId(request.skillId)
+      };
+    }
+    if (request.kind === 'repository') {
+      return {
+        kind: 'repository',
+        source: this.requireString(request.source, 'Repository source'),
+        relativePath: this.requireString(request.relativePath, 'Repository skill path')
+      };
+    }
+    throw new TypeError(`Unsupported skill details request: ${String(request.kind)}`);
   }
 
   /** `reportConflict` is the flow's own opening move, never a user's answer. */

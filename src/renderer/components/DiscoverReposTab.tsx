@@ -21,6 +21,7 @@ import { CatalogGrid, CatalogMessage } from './CatalogTabLayout';
 import { DiscoverTabLayout } from './DiscoverTabLayout';
 import { ManageSkillDialog } from './ManageSkillDialog';
 import { PushButton } from './PushButton';
+import { SkillDetailsDialog } from './SkillDetailsDialog';
 
 export interface DiscoverReposTabProps {
   onTabChange: (tab: DiscoverTab) => void;
@@ -45,6 +46,7 @@ export interface DiscoverReposTabProps {
 export function DiscoverReposTab({ onTabChange }: DiscoverReposTabProps) {
   const [query, setQuery] = useState('');
   const [managedSkillId, setManagedSkillId] = useState<string | null>(null);
+  const [detailedSkillId, setDetailedSkillId] = useState<string | null>(null);
   const [isAddingRepository, setIsAddingRepository] = useState(false);
   const [notice, setNotice] = useState<CatalogNotice | null>(null);
   const { repositories, isLoading, error, installSkill, addRepository } = useCachedRepositories();
@@ -58,6 +60,8 @@ export function DiscoverReposTab({ onTabChange }: DiscoverReposTabProps) {
   const entries = selectCatalogEntries(skillEntries, query);
   // Held by id rather than by object so the dialog follows the rescanned card.
   const managedSkill = skills.find((skill) => skill.id === managedSkillId) ?? null;
+  // The cached record provides the catalog identifiers used by the safe reader.
+  const detailedSkill = skills.find((skill) => skill.id === detailedSkillId) ?? null;
 
   /**
    * Installs the managed card, then reports what the main process did. Only a
@@ -142,8 +146,25 @@ export function DiscoverReposTab({ onTabChange }: DiscoverReposTabProps) {
           </CatalogMessage>
         )}
 
-        <CatalogGrid entries={entries} onAction={setManagedSkillId} />
+        <CatalogGrid
+          entries={entries}
+          onAction={setManagedSkillId}
+          onSelect={setDetailedSkillId}
+        />
       </DiscoverTabLayout>
+
+      {detailedSkill && (
+        <SkillDetailsDialog
+          key={detailedSkill.id}
+          name={detailedSkill.name}
+          request={{
+            kind: 'repository',
+            source: detailedSkill.source,
+            relativePath: detailedSkill.relativePath
+          }}
+          onClose={() => setDetailedSkillId(null)}
+        />
+      )}
 
       {isAddingRepository && (
         <AddRepositoryDialog

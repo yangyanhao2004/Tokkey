@@ -15,6 +15,8 @@ interface PushButtonProps {
   /** Dims the button while its action is still running. */
   disabled?: boolean;
   testId?: string;
+  /** Moves keyboard focus to the primary dialog exit when it opens. */
+  autoFocus?: boolean;
 }
 
 const VARIANT_CLASSES = {
@@ -33,13 +35,15 @@ export function PushButton({
   variant = 'filled',
   onClick,
   disabled = false,
-  testId
+  testId,
+  autoFocus = false
 }: PushButtonProps) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      autoFocus={autoFocus}
       className={`flex h-[24px] shrink-0 items-center justify-center rounded-[6px] px-2 text-[10px] leading-[16px] font-medium focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-text-primary disabled:opacity-40 ${VARIANT_CLASSES[variant]}`}
       data-testid={testId}
     >
