@@ -1,12 +1,12 @@
-../../../bin/lite,sha256=XngkFavkIwZaiAVGVsOtBs8JKumGCut18LQjauxuwwI,365
-../../../bin/litellm,sha256=61CHpKrSumiz30tmOSNWA5mm6-Ays-eKK1VUqpRZRh4,362
-../../../bin/litellm-proxy,sha256=XngkFavkIwZaiAVGVsOtBs8JKumGCut18LQjauxuwwI,365
+../../../bin/lite,sha256=X9hPZpjIdAQw4VLK0ffR6s_zURK6gEJsnWKh_8booqA,366
+../../../bin/litellm,sha256=diIDX5lpPDYGIztC5P1fiANLQ8NXCJsfUxsHicStCrk,363
+../../../bin/litellm-proxy,sha256=X9hPZpjIdAQw4VLK0ffR6s_zURK6gEJsnWKh_8booqA,366
 litellm-1.92.0+amis.2.dist-info/INSTALLER,sha256=5hhM4Q4mYTT9z6QB6PGpUAW81PGNFrYrdXMj4oM_6ak,2
 litellm-1.92.0+amis.2.dist-info/METADATA,sha256=ztGMHqct8o7IkAnfj6CFVJ2yCSRCKIaDD_uTMlA8PDo,41010
 litellm-1.92.0+amis.2.dist-info/RECORD,,
 litellm-1.92.0+amis.2.dist-info/REQUESTED,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0
 litellm-1.92.0+amis.2.dist-info/WHEEL,sha256=qPmdr8fB5VyzHuEe_BZYkwViBC6_YLDjr40IyuSix7k,104
-litellm-1.92.0+amis.2.dist-info/direct_url.json,sha256=IpZ_KvfwcPa7eZqt6s0BprC4iRWIajGQYtrncJSiHks,195
+litellm-1.92.0+amis.2.dist-info/direct_url.json,sha256=qJsDTd4lL4P1p0DEsrsKlJwk5sHKj0WJBZ9J7gJM_xM,195
 litellm-1.92.0+amis.2.dist-info/entry_points.txt,sha256=YwolSk4jzNm3wgG3q6j50wgYNAvJhGnK0-cTrqTP6ko,122
 litellm-1.92.0+amis.2.dist-info/licenses/LICENSE,sha256=sXDWv46INd01fgEWgdsCj01R4vsOqJIFj1bgH7ObgnM,1419
 litellm-1.92.0+amis.2.dist-info/uv_build.json,sha256=RBNvo1WzZ4oRRq0W9-hknpT7T8If536DEMBg9hyq_4o,2
@@ -98,7 +98,7 @@ litellm/compression/retrieval_tool.py,sha256=6yNUXckRuJbwD8LNpIjTip6sh0HjA3hISEv
 litellm/compression/scoring/__init__.py,sha256=zHp-49gHLAQUFTrCKvLEcfxD_phChDPr9GqxMyLiuBA,210
 litellm/compression/scoring/bm25.py,sha256=d89UKHbO_Vgszp15-lJU3-GiZxyQiS0NV0P0jNuD8dk,3641
 litellm/compression/scoring/embedding_scorer.py,sha256=UeYEpIBLKyMEOyqrSLGl4AzbGsfGjBVGJMiD5EIFMII,2976
-litellm/constants.py,sha256=ZNmtlJLOV_kCWKe80UgMDjzx_exj74gL6hbLAcT6p8U,70550
+litellm/constants.py,sha256=O8-NKBx9IvVIiJZF_kEAuSfepAX2WVOLZPCOlPj-9lQ,70871
 litellm/containers/README.md,sha256=jFpkeToCqI77XaU1kMo1843Rbbjq93W4FMczZlhCa5o,7040
 litellm/containers/__init__.py,sha256=s5CbP9YhycA-Wj7-CcDs9xYyE0YEvhOr_GTm_-94fto,1165
 litellm/containers/endpoint_factory.py,sha256=U0tfkjzQbuN0xIE6SXpCWa-vNfemA6F39Mqa20_MFZQ,9151

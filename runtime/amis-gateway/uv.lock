@@ -87,7 +87,7 @@ requires-dist = [
     { name = "backoff", specifier = ">=2.2.1,<3" },
     { name = "fastapi", specifier = ">=0.139,<1" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28.1,<1" },
-    { name = "litellm", git = "https://github.com/cPilot-GUI/litellm.git?rev=7cf5de494a4e5a0a1b7336067fbb8b6561ff87f0" },
+    { name = "litellm", git = "https://github.com/cPilot-GUI/litellm.git?rev=068feace935218ce6a038dedb11ef195061224d8" },
     { name = "orjson", specifier = ">=3.11.6,<4" },
     { name = "pyyaml", specifier = ">=6.0,<7" },
     { name = "starlette", specifier = ">=1.0.1,<2" },
@@ -484,7 +484,7 @@ wheels = [
 [[package]]
 name = "litellm"
 version = "1.92.0+amis.2"
-source = { git = "https://github.com/cPilot-GUI/litellm.git?rev=7cf5de494a4e5a0a1b7336067fbb8b6561ff87f0#7cf5de494a4e5a0a1b7336067fbb8b6561ff87f0" }
+source = { git = "https://github.com/cPilot-GUI/litellm.git?rev=068feace935218ce6a038dedb11ef195061224d8#068feace935218ce6a038dedb11ef195061224d8" }
 dependencies = [
     { name = "aiohttp" },
     { name = "click" },
