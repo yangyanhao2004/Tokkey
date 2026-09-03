@@ -12,10 +12,22 @@ const INITIAL_RUNTIME_STATE: LocalModelRuntimeState = {
   device: null
 };
 
+/**
+ * A start or remove that failed, kept beside the model it was asked of rather
+ * than folded into the list-wide error: the page reports it under that one row,
+ * where the button that caused it is.
+ */
+export interface ModelActionError {
+  readonly modelId: string;
+  readonly message: string;
+}
+
 export interface InstalledModels {
   models: InstalledLocalModel[] | null;
   isLoading: boolean;
   error: string | null;
+  /** The last failed per-model action, or `null` once one succeeds. */
+  actionError: ModelActionError | null;
   busyModelId: string | null;
   runtime: LocalModelRuntimeState;
   /** The model currently loaded in the shared local inference runtime. */
@@ -29,6 +41,7 @@ export interface InstalledModels {
 export function useInstalledModels(): InstalledModels {
   const [models, setModels] = useState<InstalledLocalModel[] | null>(null);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<ModelActionError | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
   const [runtime, setRuntime] = useState<LocalModelRuntimeState>(INITIAL_RUNTIME_STATE);
@@ -80,6 +93,9 @@ export function useInstalledModels(): InstalledModels {
   const run = useCallback(
     async (call: () => Promise<unknown>, modelId: string | null = null) => {
       setBusyModelId(modelId);
+      // A fresh attempt drops whatever the last one left behind, so a retry
+      // never reads as still failing.
+      setActionError(null);
       try {
         await call();
         const next = await loadSnapshot();
@@ -89,7 +105,11 @@ export function useInstalledModels(): InstalledModels {
         setScanError(null);
       } catch (cause) {
         if (!isMountedRef.current) return;
-        setScanError(cause instanceof Error ? cause.message : String(cause));
+        const message = cause instanceof Error ? cause.message : String(cause);
+        // Something asked of one model is reported under it; only a failure with
+        // no model behind it belongs to the list as a whole.
+        if (modelId === null) setScanError(message);
+        else setActionError({ modelId, message });
       } finally {
         if (isMountedRef.current) {
           setIsLoading(false);
@@ -124,6 +144,7 @@ export function useInstalledModels(): InstalledModels {
     models,
     isLoading,
     error: scanError ?? runtime.error,
+    actionError,
     busyModelId,
     runtime,
     runningModelId,

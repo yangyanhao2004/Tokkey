@@ -109,7 +109,6 @@ export function describeEmptyCatalog(isLoading: boolean, query: string): string 
 
 const DOWNLOAD_ACTION: CatalogModelAction = { kind: 'download', label: 'Download', variant: 'filled' };
 const CANCEL_ACTION: CatalogModelAction = { kind: 'cancel', label: 'Cancel', variant: 'progress' };
-const START_ACTION: CatalogModelAction = { kind: 'deploy', label: 'Start', variant: 'filled' };
 const RETRY_ACTION: CatalogModelAction = { kind: 'download', label: 'Retry', variant: 'filled' };
 const RETRY_START_ACTION: CatalogModelAction = { kind: 'deploy', label: 'Retry start', variant: 'filled' };
 
@@ -126,7 +125,7 @@ const LIFECYCLE_ACTIONS: Record<LocalModelLifecycle, CatalogModelAction | null> 
   downloadable: DOWNLOAD_ACTION,
   pendingArtifact: null,
   downloading: CANCEL_ACTION,
-  downloaded: START_ACTION,
+  downloaded: null,
   downloadFailed: RETRY_ACTION,
   deployPreparing: null,
   deployed: null,
@@ -141,8 +140,12 @@ const LIFECYCLE_STATUS: Partial<Record<LocalModelLifecycle, string>> = {
   deployed: 'Running'
 };
 
-/** Status half of the meta line. A reported error always wins over the state. */
-function describeLifecycle(model: LocalModelRow): string {
+/**
+ * Status half of the meta line. A reported error always wins over the state.
+ * Shared with the Tokkey page's recommended badge so one download reads the same
+ * wherever it is watched from.
+ */
+export function describeModelLifecycle(model: LocalModelRow): string {
   switch (model.lifecycle) {
     case 'downloading':
       return model.progress === null
@@ -184,7 +187,7 @@ export function describeCatalogModel(model: LocalModelRow): CatalogModel {
   const detail = [
     model.sizeBytes === null ? '' : formatFileSize(model.sizeBytes),
     model.provider,
-    describeLifecycle(model)
+    describeModelLifecycle(model)
   ]
     .filter((part) => part.length > 0)
     .join(' · ');

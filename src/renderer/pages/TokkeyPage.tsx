@@ -1,13 +1,22 @@
+import { useEffect } from 'react';
 import {
   ICON_BASE_PATH,
   INSTALLED_EMPTY_MESSAGE,
   INSTALLED_LOADING_MESSAGE,
   LOCAL_MODELS_FOOTNOTE,
+  RECOMMENDED_LOCAL_MODEL,
   describeInstalledModel,
+  describeRecommendedButtons,
+  describeRecommendedNote,
+  findModelActionError,
+  findRecommendedInstall,
   formatModelCount,
-  type InstalledModel
+  type InstalledModel,
+  type RecommendedModelButton
 } from './tokkeyContent';
 import { useInstalledModels } from '../hooks/useInstalledModels';
+import { useRecommendedModel } from '../hooks/useRecommendedModel';
+import { DownloadProgressButton } from '../components/DownloadProgressButton';
 import { IconTile } from '../components/IconTile';
 import { useNavigation } from '../components/NavigationProvider';
 import { PageShell } from '../components/PageShell';
@@ -60,6 +69,134 @@ function DeviceCard({ runtime }: DeviceCardProps) {
   );
 }
 
+interface RecommendedModelCardProps {
+  installed: InstalledModels;
+}
+
+/**
+ * The recommended model, offered above the installed list (Figma 531:613).
+ *
+ * It carries the same lifecycle the rows below do, and through the same paths:
+ * downloading is the catalog's business, while starting and removing act on the
+ * copy on disk and so go through the installed list, by the id that list knows
+ * the model under. The two are kept in step in both directions — this card asks
+ * the list to reload after every download it takes on, and re-scans whenever the
+ * list reports this model installed, removed, or running.
+ */
+function RecommendedModelCard({ installed }: RecommendedModelCardProps) {
+  const recommended = useRecommendedModel(installed.refresh);
+  const install = findRecommendedInstall(installed.models, recommended.row);
+  const isRunning = install !== null && installed.runningModelId === install.id;
+
+  // Only the two facts the list holds that this card's own scan cannot see, so
+  // an action taken on the same model below reaches the badge without the two
+  // refreshing each other in a loop.
+  const installId = install?.id ?? null;
+
+  // Start and remove run through the installed list, so a failure of either
+  // comes back from there — under the id that list knows this model under.
+  const note = describeRecommendedNote(
+    recommended.row,
+    recommended.error,
+    findModelActionError(installed.actionError, installId)
+  );
+  const { refresh } = recommended;
+
+  useEffect(refresh, [installId, isRunning, refresh]);
+
+  const isBusy = recommended.isBusy || (installId !== null && installed.busyModelId === installId);
+
+  // Downloads are the catalog's; anything acting on the bytes already on disk
+  // belongs to the installed list, which owns their id.
+  const press = (button: RecommendedModelButton) => {
+    if (button.kind === 'start' && install) return installed.start(install.id);
+    if (button.kind === 'remove' && install) return installed.remove(install.id);
+    if (button.kind === 'download' || button.kind === 'cancel') {
+      recommended.runAction(button.kind);
+    }
+  };
+
+  const renderButton = (button: RecommendedModelButton) => {
+    const isDisabled = button.disabled || isBusy;
+    const testId = `recommended-model-${button.kind}`;
+
+    if (button.variant === 'progress') {
+      return (
+        <DownloadProgressButton
+          key={button.kind}
+          progress={recommended.row?.progress ?? null}
+          onClick={() => press(button)}
+          disabled={isDisabled}
+          testId={testId}
+        >
+          {button.label}
+        </DownloadProgressButton>
+      );
+    }
+
+    return (
+      <PushButton
+        key={button.kind}
+        variant={button.variant}
+        onClick={() => press(button)}
+        disabled={isDisabled}
+        testId={testId}
+      >
+        {button.label}
+      </PushButton>
+    );
+  };
+
+  return (
+    <section
+      className="flex w-full shrink-0 items-center justify-between overflow-hidden rounded-[12px] border border-surface-card-border bg-surface-card p-4"
+      data-testid="recommended-model-card"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="relative flex size-8 shrink-0 items-center justify-center rounded-[8.421px] bg-fill-tile">
+          <span className="text-[12px] leading-[14px] font-bold text-text-primary">
+            {RECOMMENDED_LOCAL_MODEL.initials}
+          </span>
+          {/* Sits proud of the tile's bottom-right corner, as in the design. */}
+          <img
+            className="absolute top-[19px] left-[20px] block size-[11px] max-w-none"
+            src={`${ICON_BASE_PATH}/main-badge-recommended.svg`}
+            alt=""
+          />
+        </span>
+
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className="text-[10px] leading-[12px] font-bold tracking-[0.0548px] text-label-eyebrow">
+            {RECOMMENDED_LOCAL_MODEL.eyebrow}
+          </span>
+          {/* The catalog's own name once it is known, so a rename reaches here. */}
+          <span className="truncate text-[12px] leading-[14px] font-bold text-text-primary">
+            {recommended.row?.name ?? RECOMMENDED_LOCAL_MODEL.name}
+          </span>
+          {note && (
+            <span
+              // A failure is worth its full width; the progress line, which the
+              // buttons repeat anyway, still gives way to them.
+              className={`text-[10px] leading-[12px] ${
+                note.tone === 'error'
+                  ? 'break-words text-status-error-text'
+                  : 'truncate text-text-secondary'
+              }`}
+              data-testid="recommended-model-note"
+            >
+              {note.text}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 items-center justify-end gap-2">
+        {describeRecommendedButtons({ install, isRunning, row: recommended.row }).map(renderButton)}
+      </div>
+    </section>
+  );
+}
+
 interface ModelRowProps {
   model: InstalledModel;
   installed: InstalledModels;
@@ -71,33 +208,47 @@ interface ModelRowProps {
 function ModelRow({ model, installed, onStart, onRemove }: ModelRowProps) {
   const isBusy = installed.busyModelId === model.id;
   const isRunning = installed.runningModelId === model.id;
+  const actionError = findModelActionError(installed.actionError, model.id);
+
   return (
     <div
-      className="flex w-full items-center justify-between border-t border-separator p-4"
+      className="flex w-full flex-col border-t border-separator p-4"
       data-testid={`model-row-${model.id}`}
     >
-      <div className="flex min-w-0 items-center gap-2">
-        <IconTile src={`${ICON_BASE_PATH}/main-model-cube.svg`} />
-        <TitleBlock title={model.name} subtitle={model.detail} />
+      <div className="flex w-full items-center justify-between">
+        <div className="flex min-w-0 items-center gap-2">
+          <IconTile src={`${ICON_BASE_PATH}/main-model-cube.svg`} />
+          <TitleBlock title={model.name} subtitle={model.detail} />
+        </div>
+
+        <div className="flex shrink-0 items-center justify-end gap-2">
+          <PushButton
+            onClick={() => onStart(model.id)}
+            disabled={isBusy || isRunning}
+            testId={`model-start-${model.id}`}
+          >
+            {isRunning ? 'Running' : 'Start'}
+          </PushButton>
+          <PushButton
+            variant="plain"
+            onClick={() => onRemove(model.id)}
+            disabled={isBusy}
+            testId={`model-remove-${model.id}`}
+          >
+            Remove
+          </PushButton>
+        </div>
       </div>
 
-      <div className="flex shrink-0 items-center justify-end gap-2">
-        <PushButton
-          onClick={() => onStart(model.id)}
-          disabled={isBusy || isRunning}
-          testId={`model-start-${model.id}`}
+      {/* Under the whole row rather than the title, since it answers a button. */}
+      {actionError && (
+        <p
+          className="mt-2 w-full break-words text-[10px] leading-[12px] text-status-error-text"
+          data-testid={`model-error-${model.id}`}
         >
-          {isRunning ? 'Running' : 'Start'}
-        </PushButton>
-        <PushButton
-          variant="plain"
-          onClick={() => onRemove(model.id)}
-          disabled={isBusy}
-          testId={`model-remove-${model.id}`}
-        >
-          Remove
-        </PushButton>
-      </div>
+          {actionError}
+        </p>
+      )}
     </div>
   );
 }
@@ -199,6 +350,7 @@ export function TokkeyPage() {
   return (
     <PageShell title="Tokkey" subtitle="Connect Tokii and manage your local models." testId="tokkey">
       <DeviceCard runtime={installed.runtime} />
+      <RecommendedModelCard installed={installed} />
       <LocalModelsCard installed={installed} onAddModel={() => navigate('add-model')} />
     </PageShell>
   );
