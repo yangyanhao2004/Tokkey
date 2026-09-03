@@ -14,7 +14,7 @@ export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
 
 export const ROUTER_TOGGLE_TITLE = 'Router';
 export const ROUTER_TOGGLE_DESCRIPTION =
-  'Automatically send simple tasks to your Tokii and complex tasks to the selected cloud model.';
+  'Automatically send simple tasks to your Tokkey and complex tasks to the selected cloud model.';
 
 /** Said in front of whatever reason the main process gave for a failed start. */
 export const ROUTER_START_FAILED_PREFIX = 'Could not start Router: ';
@@ -69,7 +69,7 @@ export const CLOUD_MODEL_SUMMARY: ModelSummary = {
 
 /** Stands in for the local summary while no local model is running. */
 export const NO_LOCAL_MODEL_NAME = 'No local model running';
-export const NO_LOCAL_MODEL_DETAIL = 'Start a local model from Tokii to use it here.';
+export const NO_LOCAL_MODEL_DETAIL = 'Start a local model from Tokkey to use it here.';
 
 /** A model listed in the "Cloud Models" grid. */
 export interface CloudModel {

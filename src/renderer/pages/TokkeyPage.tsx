@@ -33,11 +33,11 @@ function DeviceCard({ runtime }: DeviceCardProps) {
   const suffix = runtime.device?.serialNumber?.slice(-4).toUpperCase();
   const isConnected = runtime.device !== null;
   const name = isConnected
-    ? `Tokii${suffix ? ` ${suffix}` : ''} is connected`
-    : 'No Tokii connected';
+    ? `Tokkey${suffix ? ` ${suffix}` : ''} is connected`
+    : 'No Tokkey connected';
   const detail = isConnected
     ? 'Connected via USB-C · local runtime available to supported clients'
-    : 'Connect Tokii via USB-C to start a local model';
+    : 'Connect Tokkey via USB-C to start a local model';
 
   return (
     <section
@@ -348,7 +348,7 @@ export function TokkeyPage() {
   const installed = useInstalledModels();
 
   return (
-    <PageShell title="Tokkey" subtitle="Connect Tokii and manage your local models." testId="tokkey">
+    <PageShell title="Tokkey" subtitle="Connect Tokkey and manage your local models." testId="tokkey">
       <DeviceCard runtime={installed.runtime} />
       <RecommendedModelCard installed={installed} />
       <LocalModelsCard installed={installed} onAddModel={() => navigate('add-model')} />

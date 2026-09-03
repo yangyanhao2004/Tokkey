@@ -305,7 +305,7 @@ export function RouterPage() {
   return (
     <PageShell
       title="Router"
-      subtitle="Simple tasks run on your Tokii. Hard ones go to a cloud model."
+      subtitle="Simple tasks run on your Tokkey. Hard ones go to a cloud model."
       testId="router"
     >
       <RouterToggleCard
