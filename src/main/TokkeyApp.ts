@@ -44,6 +44,8 @@ export class TokkeyApp {
   private readonly evidenceMode: boolean;
   private readonly evidenceCapture: RendererEvidenceCapture | null;
   private mainWindow: BrowserWindow | null;
+  /** True once the borrowed config files have been handed back this session. */
+  private configsReleased = false;
 
   /**
    * @param options initial window dimensions
@@ -134,6 +136,50 @@ export class TokkeyApp {
     app.on('activate', () => this.onActivate());
     app.on('window-all-closed', () => this.onWindowAllClosed());
     app.on('will-quit', () => this.onWillQuit());
+    this.bindCrashHandler();
+  }
+
+  /**
+   * Hands the borrowed config files back when the main process throws its way
+   * out, which is the one exit `will-quit` does not cover.
+   *
+   * There is deliberately no signal handler beside it. `process.on('SIGINT')`
+   * and its siblings never fire in an Electron main process: Chromium installs
+   * its own POSIX handlers before libuv can watch for anything, and turns a
+   * signal into an ordinary `before-quit`/`will-quit` shutdown instead. So a
+   * signal already reaches `onWillQuit` — as long as only one arrives. A second
+   * one during that shutdown kills the process outright, which is what
+   * `scripts/electron-dev.js` exists to prevent, and why it does that out in the
+   * launcher rather than with a handler here that would never run.
+   *
+   * None of this makes the restore something to rely on. `SIGKILL`, a native
+   * crash and a power cut stay unobservable by construction, which is why
+   * `BackedUpConfigFile` recovers an interrupted session on the next launch.
+   */
+  private bindCrashHandler(): void {
+    process.on('uncaughtException', (error: unknown) => {
+      console.error('[Tokkey] Uncaught exception in the main process:', error);
+      this.releaseBorrowedConfigs();
+      // `app.exit` rather than `app.quit`: the process is in an unknown state,
+      // and a graceful quit could stall on the very thing that just threw.
+      app.exit(1);
+    });
+  }
+
+  /**
+   * Returns Codex's and Claude's own configuration to them, once per session.
+   *
+   * Guarded because more than one exit can reach it — `will-quit` on the way
+   * out, or the crash handler before it — and because the second call would
+   * find the file already restored and no takeover in force.
+   */
+  private releaseBorrowedConfigs(): void {
+    if (this.configsReleased) {
+      return;
+    }
+    this.configsReleased = true;
+    this.codexGatewayIntegration.deactivate();
+    this.claudeGatewayIntegration.deactivate();
   }
 
   /** Creates the first window once Electron has finished initialising. */
@@ -147,6 +193,9 @@ export class TokkeyApp {
       // every reader downstream — the upstream endpoint resolver above all —
       // must see the user's instead.
       this.codexGatewayIntegration.recoverInterruptedSession();
+      // Kept while the Claude takeover is disabled: an earlier run may still
+      // have left Tokkey's settings in ~/.claude/settings.json, and this is what
+      // hands the user's own file back.
       this.claudeGatewayIntegration.recoverInterruptedSession();
       this.startGateway();
     }
@@ -161,10 +210,12 @@ export class TokkeyApp {
    * remove stops answering the moment the gateway below it goes down.
    */
   onWillQuit(): void {
+    // First, and before anything that could throw: this is the only irreversible
+    // half of the shutdown, and the user's own files stay borrowed if a failure
+    // above it skips the call.
+    this.releaseBorrowedConfigs();
     this.ipcController.cancelAccountSignIn();
     this.tokenHubRuntime.shutdownNow();
-    this.codexGatewayIntegration.deactivate();
-    this.claudeGatewayIntegration.deactivate();
     // The router goes down before the gateway it forwards to, so it never spends
     // its last moments proxying to an address that has already stopped answering.
     this.routerProcessManager.stop('application quit');
@@ -206,15 +257,19 @@ export class TokkeyApp {
         if (claude.length > 0) {
           console.info(`[AmisGateway] Registered ${claude.length} Claude model route(s).`);
         }
-        // Last, and only now: both CLIs are configured from the routes that
-        // exist, and taking over config.toml any earlier would hide the user's
-        // own upstream from the registrar that just read it. Claude's settings
-        // are taken over in the same breath — its routes are in by this point,
-        // and the base URL it gets carries the port this launch actually bound.
+        // Last, and only now: the CLI is configured from the routes that exist,
+        // and taking over config.toml any earlier would hide the user's own
+        // upstream from the registrar that just read it.
+        //
+        // TEMPORARILY DISABLED: the Claude takeover of ~/.claude/settings.json
+        // is switched off, so Claude Code keeps whatever the user configured.
+        // Nothing else needs changing — with no takeover in force, deactivate()
+        // and syncSettings() are both no-ops.
         return Promise.all([
           this.codexGatewayIntegration.activate(),
           this.claudeGatewayIntegration.activate()
         ]);
+        // return this.codexGatewayIntegration.activate();
       })
       .catch((error: unknown) => {
         console.error('[AmisGateway] Gateway start or model restore failed:', error);

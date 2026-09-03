@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import { AgentDetector } from '../dist/main/agents/AgentDetector.js';
+import { DesktopAppDetector } from '../dist/main/agents/DesktopAppDetector.js';
 import { AgentManager } from '../dist/main/agents/AgentManager.js';
 import { InstalledAgentGate } from '../dist/main/agents/InstalledAgentGate.js';
 import { StreamingShellRunner } from '../dist/main/agents/StreamingShellRunner.js';
@@ -11,6 +15,17 @@ import { StreamingShellRunner } from '../dist/main/agents/StreamingShellRunner.j
 class TestShellResult {
   static create(exitCode, output, diagnosticTail = output) {
     return { exitCode, timedOut: false, output, diagnosticTail };
+  }
+}
+
+/** Desktop-app lookup double, so detection never depends on the test machine. */
+class TestDesktopApps {
+  static none() {
+    return { locate: () => null };
+  }
+
+  static only(agent, bundlePath) {
+    return { locate: (candidate) => (candidate === agent ? bundlePath : null) };
   }
 }
 
@@ -24,10 +39,10 @@ test('detector runs which, caches results, and re-probes after invalidation', as
         : TestShellResult.create(1, [], ['which: claude: command not found']);
     }
   };
-  const detector = new AgentDetector(runner);
+  const detector = new AgentDetector({ shellRunner: runner, desktopApps: TestDesktopApps.none() });
 
   assert.deepEqual(await detector.detect('codex'), {
-    agent: 'codex', installed: true, executablePath: '/custom/bin/codex', error: null
+    agent: 'codex', installed: true, executablePath: '/custom/bin/codex', desktopAppPath: null, error: null
   });
   await detector.detect('codex');
   await detector.detect('claude');
@@ -82,8 +97,12 @@ test('streaming runner invokes a login shell and forwards complete lines', async
 
 test('manager publishes detected state and reports availability only when it flips', async () => {
   const detections = {
-    codex: { agent: 'codex', installed: false, executablePath: null, error: 'codex is not installed.' },
-    claude: { agent: 'claude', installed: true, executablePath: '/usr/local/bin/claude', error: null }
+    codex: {
+      agent: 'codex', installed: false, executablePath: null, desktopAppPath: null, error: 'codex is not installed.'
+    },
+    claude: {
+      agent: 'claude', installed: true, executablePath: '/usr/local/bin/claude', desktopAppPath: null, error: null
+    }
   };
   const invalidated = [];
   const detector = {
@@ -118,7 +137,7 @@ test('concurrent detections of one agent share a single probe', async () => {
       return TestShellResult.create(0, ['/usr/local/bin/codex']);
     }
   };
-  const detector = new AgentDetector(runner);
+  const detector = new AgentDetector({ shellRunner: runner, desktopApps: TestDesktopApps.none() });
 
   const [first, second] = await Promise.all([detector.detect('codex'), detector.detect('codex')]);
   assert.equal(probeCount, 1);
@@ -130,13 +149,14 @@ test('concurrent detections of one agent share a single probe', async () => {
   assert.equal(probeCount, 2);
 });
 
-test('the gate reports only the catalog agents whose CLI is on PATH', async () => {
+test('the gate reports only the agents that are installed', async () => {
   const manager = new AgentManager({
     detector: {
       detect: async (agent) => ({
         agent,
         installed: agent === 'claude',
         executablePath: agent === 'claude' ? '/usr/local/bin/claude' : null,
+        desktopAppPath: null,
         error: agent === 'claude' ? null : 'codex is not installed.'
       }),
       invalidate: () => {}
@@ -144,4 +164,54 @@ test('the gate reports only the catalog agents whose CLI is on PATH', async () =
   });
 
   assert.deepEqual(await new InstalledAgentGate({ agentManager: manager }).installedAgents(), ['claudeCode']);
+});
+
+test('an agent with no CLI still counts as installed when its desktop app is there', async () => {
+  const runner = { run: async () => TestShellResult.create(1, [], ['which: claude: command not found']) };
+  const detector = new AgentDetector({
+    shellRunner: runner,
+    desktopApps: TestDesktopApps.only('claude', '/Applications/Claude.app')
+  });
+
+  assert.deepEqual(await detector.detect('claude'), {
+    agent: 'claude',
+    installed: true,
+    executablePath: null,
+    desktopAppPath: '/Applications/Claude.app',
+    error: null
+  });
+  const codex = await detector.detect('codex');
+  assert.equal(codex.installed, false);
+  assert.equal(codex.desktopAppPath, null);
+});
+
+test('desktop app lookup accepts a matching bundle id and rejects a foreign one', () => {
+  const appsDirectory = mkdtempSync(path.join(tmpdir(), 'tokkey-apps-'));
+  const writeApp = (bundleName, bundleIdentifier) => {
+    const contentsDirectory = path.join(appsDirectory, bundleName, 'Contents');
+    mkdirSync(contentsDirectory, { recursive: true });
+    writeFileSync(
+      path.join(contentsDirectory, 'Info.plist'),
+      `<plist><dict><key>CFBundleIdentifier</key><string>${bundleIdentifier}</string></dict></plist>`
+    );
+  };
+  writeApp('Claude.app', 'com.anthropic.claudefordesktop');
+  // The plain ChatGPT app is not Codex, so its bundle must not count as one.
+  writeApp('ChatGPT.app', 'com.openai.chat');
+  const detector = new DesktopAppDetector({ searchDirectories: [appsDirectory] });
+
+  assert.equal(detector.locate('claude'), path.join(appsDirectory, 'Claude.app'));
+  assert.equal(detector.locate('codex'), null);
+
+  writeApp('Codex.app', 'com.openai.codex');
+  assert.equal(detector.locate('codex'), path.join(appsDirectory, 'Codex.app'));
+
+  rmSync(appsDirectory, { recursive: true, force: true });
+});
+
+test('desktop app lookup finds nothing off macOS, where there are no bundles', () => {
+  const detector = new DesktopAppDetector({ platform: 'win32', homeDirectory: '/home/user' });
+
+  assert.equal(detector.locate('claude'), null);
+  assert.equal(detector.locate('codex'), null);
 });

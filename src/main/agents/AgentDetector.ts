@@ -1,14 +1,28 @@
 import type { AgentDetection, ShellAgent, ShellRunResult, ShellRunner } from './AgentTypes';
+import DesktopAppDetector from './DesktopAppDetector';
 import StreamingShellRunner from './StreamingShellRunner';
+
+/** Only the lookup AgentDetector needs, so tests can stand in a plain object. */
+export interface DesktopAppLocating {
+  locate(agent: ShellAgent): string | null;
+}
 
 export interface AgentDetectorOptions {
   shellRunner?: ShellRunner;
   timeoutMs?: number;
+  desktopApps?: DesktopAppLocating;
 }
 
-/** Finds Codex and Claude executables on PATH through the shared shell boundary. */
+/**
+ * Finds Codex and Claude on this machine, by CLI or by desktop app.
+ *
+ * An agent counts as installed when either surface is present: the CLI on PATH
+ * or the desktop app bundle. Users commonly have only one of the two, and both
+ * are equally usable, so requiring the CLI would grey out agents that are there.
+ */
 export class AgentDetector {
   private readonly shellRunner: ShellRunner;
+  private readonly desktopApps: DesktopAppLocating;
   private readonly timeoutMs: number;
   private readonly cache = new Map<ShellAgent, AgentDetection>();
   /** Probes still running, so concurrent callers share one login shell each. */
@@ -19,15 +33,17 @@ export class AgentDetector {
   constructor(shellRunnerOrOptions: ShellRunner | AgentDetectorOptions = {}, timeoutMs = 8000) {
     if ('run' in shellRunnerOrOptions) {
       this.shellRunner = shellRunnerOrOptions;
+      this.desktopApps = new DesktopAppDetector();
       this.timeoutMs = timeoutMs;
       return;
     }
     this.shellRunner = shellRunnerOrOptions.shellRunner ?? new StreamingShellRunner();
+    this.desktopApps = shellRunnerOrOptions.desktopApps ?? new DesktopAppDetector();
     this.timeoutMs = shellRunnerOrOptions.timeoutMs ?? timeoutMs;
   }
 
   /**
-   * Detects one agent, caching the live PATH result until invalidated.
+   * Detects one agent, caching the live result until invalidated.
    *
    * Callers that arrive while a probe is still running join it rather than
    * spawning a second login shell: the catalog scanners and the Agent Hub both
@@ -47,13 +63,13 @@ export class AgentDetector {
     return { codex, claude };
   }
 
-  /** Clears one cached result or all of them so the next detect re-probes PATH. */
+  /** Clears one cached result or all of them so the next detect re-probes. */
   invalidate(agent?: ShellAgent): void {
     if (agent) this.cache.delete(agent);
     else this.cache.clear();
   }
 
-  /** Runs one PATH probe and registers it for the callers that join it. */
+  /** Runs one probe and registers it for the callers that join it. */
   private startProbe(agent: ShellAgent): Promise<AgentDetection> {
     const probe = this.shellRunner
       .run(`which ${agent}`, { shell: '/bin/bash', login: true, timeoutMs: this.timeoutMs })
@@ -68,14 +84,22 @@ export class AgentDetector {
   }
 
   private toDetection(agent: ShellAgent, result: ShellRunResult): AgentDetection {
-    const executablePath = result.output.map((line) => line.trim()).find((line) => line.length > 0) ?? null;
-    const installed = result.exitCode === 0 && !result.timedOut && executablePath !== null;
+    const cliPath = this.toCliPath(result);
+    const desktopAppPath = this.desktopApps.locate(agent);
+    const installed = cliPath !== null || desktopAppPath !== null;
     return {
       agent,
       installed,
-      executablePath: installed ? executablePath : null,
+      executablePath: cliPath,
+      desktopAppPath,
       error: installed ? null : this.failureMessage(agent, result)
     };
+  }
+
+  /** The CLI path `which` printed, or null when the probe found nothing. */
+  private toCliPath(result: ShellRunResult): string | null {
+    if (result.exitCode !== 0 || result.timedOut) return null;
+    return result.output.map((line) => line.trim()).find((line) => line.length > 0) ?? null;
   }
 
   private failureMessage(agent: ShellAgent, result: ShellRunResult): string {

@@ -18,7 +18,7 @@ const CATALOG_AGENT_CLIS: Readonly<Record<CatalogAgent, ShellAgent>> = {
  * Which agent-owned locations are worth reading on this machine.
  *
  * The scanners take this rather than a boolean per call so the whole main
- * process answers "is Codex here" one way. Uninstalling a CLI does not remove
+ * process answers "is Codex here" one way. Uninstalling an agent does not remove
  * its home directory, so without this a departed agent keeps contributing
  * cards from `~/.codex` long after nothing can load them.
  */
@@ -30,7 +30,7 @@ export interface InstalledAgentGateOptions {
   agentManager?: AgentManager;
 }
 
-/** Reads the shared detection cache and reports the agents actually on PATH. */
+/** Reads the shared detection cache and reports the agents actually present. */
 export class InstalledAgentGate implements InstalledAgentGating {
   private readonly agentManager: AgentManager;
 
@@ -39,7 +39,7 @@ export class InstalledAgentGate implements InstalledAgentGating {
   }
 
   /**
-   * The catalog agents whose CLI is on PATH right now.
+   * The catalog agents installed right now, by CLI or by desktop app.
    *
    * The refresh is cheap after the first call — the detector caches until the
    * Agent Hub invalidates it — so every scan gets the same answer the page

@@ -346,11 +346,12 @@ export default class IpcController {
   }
 
   /**
-   * Whether each supported coding agent is on PATH right now.
+   * Whether each supported coding agent is on this machine right now, counting
+   * both its CLI on PATH and its desktop app.
    *
    * The cached detection is dropped first: an agent can be installed or removed
-   * from a terminal while the app is open, and the Agent Hub greys out whatever
-   * is missing, so a stale "installed" would be worse than the extra probe.
+   * while the app is open, and the Agent Hub greys out whatever is missing, so
+   * a stale "installed" would be worse than the extra probe.
    */
   async detectAgents(): Promise<AgentInstallation[]> {
     this.agentManager.invalidate();
@@ -366,6 +367,7 @@ export default class IpcController {
       agent: state.agent,
       installed: state.state === 'installed',
       executablePath: state.executablePath,
+      desktopAppPath: state.desktopAppPath,
       error: state.error
     };
   }

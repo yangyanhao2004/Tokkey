@@ -29,7 +29,10 @@ export interface ShellRunner {
 export interface AgentDetection {
   agent: ShellAgent;
   installed: boolean;
+  /** The CLI on PATH, null when only the desktop app is installed. */
   executablePath: string | null;
+  /** The desktop app bundle, null when only the CLI is installed. */
+  desktopAppPath: string | null;
   error: string | null;
 }
 
@@ -42,6 +45,7 @@ export interface AgentState {
   state: AgentLifecycleState;
   supported: boolean;
   executablePath: string | null;
+  desktopAppPath: string | null;
   error: string | null;
 }
 

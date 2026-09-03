@@ -79,6 +79,7 @@ export class AgentManager {
       ...current,
       state: detection.installed ? 'installed' : 'notInstalled',
       executablePath: detection.executablePath,
+      desktopAppPath: detection.desktopAppPath,
       error: detection.installed ? null : detection.error
     };
     const availabilityChanged = current.state !== next.state;
@@ -90,7 +91,7 @@ export class AgentManager {
   }
 
   private defaultState(agent: ShellAgent): AgentState {
-    return { agent, state: 'notInstalled', supported: true, executablePath: null, error: null };
+    return { agent, state: 'notInstalled', supported: true, executablePath: null, desktopAppPath: null, error: null };
   }
 
   private assertSupported(agent: ShellAgent): void {

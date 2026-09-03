@@ -128,6 +128,55 @@ test('restores a config the previous run was killed before restoring', () => {
   rmSync(home, { recursive: true, force: true });
 });
 
+test('leaves a config edited after an interrupted session exactly as the user left it', () => {
+  const home = makeHome();
+  const configPath = writeConfig(home, USER_CONFIG);
+  const killed = makeTakeover(home);
+  killed.activate('http://127.0.0.1:4173', null);
+  // The user finds Tokkey's leftover file and edits it, not knowing it is on loan.
+  const userEdit = readFileSync(configPath, 'utf8').replace('model = "gpt-5.5"', 'model = "gpt-5.6-sol"');
+  writeFileSync(configPath, userEdit);
+
+  const recovered = makeTakeover(home).recoverInterruptedSession();
+
+  // Their edit outranks the stale original: nothing is written over it.
+  assert.equal(recovered, false);
+  assert.equal(readFileSync(configPath, 'utf8'), userEdit);
+  // The pre-takeover original is kept aside rather than dropped, and recovery
+  // stops retrying the same decision on every launch.
+  assert.equal(existsSync(killed.backupFilePath), false);
+  assert.equal(readFileSync(`${killed.backupFilePath}.orphaned`, 'utf8'), USER_CONFIG);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('leaves a config edited during the session alone at quit', () => {
+  const home = makeHome();
+  const configPath = writeConfig(home, USER_CONFIG);
+  const takeover = makeTakeover(home);
+  takeover.activate('http://127.0.0.1:4173', null);
+  const userEdit = readFileSync(configPath, 'utf8').replace('model = "gpt-5.5"', 'model = "gpt-5.6-sol"');
+  writeFileSync(configPath, userEdit);
+
+  assert.equal(takeover.restore(), false);
+  assert.equal(readFileSync(configPath, 'utf8'), userEdit);
+  assert.equal(readFileSync(`${takeover.backupFilePath}.orphaned`, 'utf8'), USER_CONFIG);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('a mid-session refresh keeps the file restorable', () => {
+  const home = makeHome();
+  const configPath = writeConfig(home, USER_CONFIG);
+  const takeover = makeTakeover(home);
+  takeover.activate('http://127.0.0.1:4173', null);
+  // A catalog written after activate rewrites the file; the record has to track
+  // it, or the restore below would read the refresh as somebody else's edit.
+  takeover.activate('http://127.0.0.1:4173', '/tmp/amis-catalog.json');
+
+  assert.equal(takeover.restore(), true);
+  assert.equal(readFileSync(configPath, 'utf8'), USER_CONFIG);
+  rmSync(home, { recursive: true, force: true });
+});
+
 test('a second takeover declares the provider table once, not twice', () => {
   const home = makeHome();
   const configPath = writeConfig(home, USER_CONFIG);

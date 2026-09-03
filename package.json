@@ -19,9 +19,9 @@
     "gateway:freeze": "cd runtime/amis-gateway/packaging && uv run --project .. --with pyinstaller --frozen pyinstaller --noconfirm --distpath \"../../../resources/GatewayRuntime/$(node -p 'process.arch')\" --workpath ../build amis-gateway.spec",
     "gateway:freeze:clean": "npm run gateway:freeze -- --clean",
     "kill:app": "pkill -f \"$PWD/node_modules/[e]lectron/dist\" ; true",
-    "start": "npm run gateway:freeze && npm run build && npm run kill:app && electron .",
-    "dev": "npm run gateway:freeze && npm run build && npm run kill:app && electron . --dev",
-    "evidence": "npm run gateway:freeze && npm run build && npm run kill:app && electron . --evidence"
+    "start": "npm run gateway:freeze && npm run build && npm run kill:app && node scripts/electron-dev.js .",
+    "dev": "npm run gateway:freeze && npm run build && npm run kill:app && node scripts/electron-dev.js . --dev",
+    "evidence": "npm run gateway:freeze && npm run build && npm run kill:app && node scripts/electron-dev.js . --evidence"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

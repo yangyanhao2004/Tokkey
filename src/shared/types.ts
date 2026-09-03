@@ -42,11 +42,14 @@ export type AccountOperationResult<T> =
 /** The coding agents Tokkey detects, each named after its executable. */
 export type CodingAgent = 'codex' | 'claude';
 
-/** One agent's presence on this machine, as a PATH lookup found it. */
+/** One agent's presence on this machine: its CLI on PATH, its desktop app, or both. */
 export interface AgentInstallation {
   agent: CodingAgent;
   installed: boolean;
+  /** The CLI on PATH, null when only the desktop app is installed. */
   executablePath: string | null;
+  /** The desktop app bundle, null when only the CLI is installed. */
+  desktopAppPath: string | null;
   /** Why detection found nothing; null whenever the agent is installed. */
   error: string | null;
 }
