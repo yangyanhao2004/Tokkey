@@ -66,7 +66,8 @@ const INDENT_WIDTH = 2;
  *   and the model list. This file is purely Tokkey's and is deleted on restore
  *   rather than reverted, since there is no "original" state to return to.
  *
- * The backup/restore contract mirrors {@link BackedUpConfigFile}: the original
+ * The backup/restore contract mirrors the whole-file loan {@link OwnedConfigFile}
+ * replaced for Codex and Claude Code's own configs: the original
  * `_meta.json` is kept at a stable path outside the configLibrary, and the
  * next launch restores it before anything reads the directory, so a crash
  * cannot leave Tokkey's configuration in place indefinitely.

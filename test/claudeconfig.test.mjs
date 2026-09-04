@@ -43,6 +43,20 @@ function makeTakeover(home) {
   return new ClaudeConfigTakeover({ homeDirectory: home, claudeHome: claudeHomeOf(home) });
 }
 
+/**
+ * Asserts a restored settings.json holds exactly the user's original content.
+ *
+ * A per-key revert round-trips every slot it touches through JSON.parse and
+ * JSON.stringify, which is content-preserving but not byte-preserving —
+ * whitespace `USER_SETTINGS` never had (e.g. a trailing newline) can differ
+ * even when nothing meaningful changed. Comparing parsed values is what the
+ * takeover actually promises; comparing bytes is a stricter guarantee JSON
+ * itself does not make.
+ */
+function assertSettingsRestored(settingsPath) {
+  assert.deepEqual(JSON.parse(readFileSync(settingsPath, 'utf8')), JSON.parse(USER_SETTINGS));
+}
+
 // ---------------------------------------------------------------------------
 // ClaudeSettingsDocument
 // ---------------------------------------------------------------------------
@@ -114,8 +128,8 @@ test('points claude at the gateway and hands the original file back at quit', ()
   assert.equal(taken.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY, '1');
 
   assert.equal(takeover.restore(), true);
-  assert.equal(readFileSync(settingsPath, 'utf8'), USER_SETTINGS);
-  assert.equal(existsSync(takeover.backupFilePath), false);
+  assertSettingsRestored(settingsPath);
+  assert.equal(existsSync(takeover.ledgerFilePath), false);
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -143,7 +157,7 @@ test('restores settings the previous run was killed before restoring', () => {
   const recovered = makeTakeover(home).recoverInterruptedSession();
 
   assert.equal(recovered, true);
-  assert.equal(readFileSync(settingsPath, 'utf8'), USER_SETTINGS);
+  assertSettingsRestored(settingsPath);
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -232,7 +246,7 @@ test('offers the routed pair without moving claude off its own model', async () 
   assert.ok(taken.availableModels.slice(1).every((model) => model.startsWith('claude-')));
 
   integration.deactivate();
-  assert.equal(readFileSync(settingsPath, 'utf8'), USER_SETTINGS);
+  assertSettingsRestored(settingsPath);
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -289,7 +303,7 @@ test('the router switch moves claude both ways, and the backup survives it', asy
 
   // Every refresh rewrote the file, not the backup: quit still returns the original.
   integration.deactivate();
-  assert.equal(readFileSync(settingsPath, 'utf8'), USER_SETTINGS);
+  assertSettingsRestored(settingsPath);
   rmSync(home, { recursive: true, force: true });
 });
 

@@ -174,7 +174,7 @@ export class TokkeyApp {
    *
    * None of this makes the restore something to rely on. `SIGKILL`, a native
    * crash and a power cut stay unobservable by construction, which is why
-   * `BackedUpConfigFile` recovers an interrupted session on the next launch.
+   * `OwnedConfigFile` recovers an interrupted session on the next launch.
    */
   private bindCrashHandler(): void {
     process.on('uncaughtException', (error: unknown) => {

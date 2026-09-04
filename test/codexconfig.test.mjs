@@ -111,7 +111,7 @@ test('points codex at the gateway and hands the original file back at quit', () 
 
   assert.equal(takeover.restore(), true);
   assert.equal(readFileSync(configPath, 'utf8'), USER_CONFIG);
-  assert.equal(existsSync(takeover.backupFilePath), false);
+  assert.equal(existsSync(takeover.ledgerFilePath), false);
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -130,38 +130,64 @@ test('restores a config the previous run was killed before restoring', () => {
   rmSync(home, { recursive: true, force: true });
 });
 
-test('leaves a config edited after an interrupted session exactly as the user left it', () => {
+test('an unrelated edit made after an interrupted session does not block recovering the rest', () => {
   const home = makeHome();
   const configPath = writeConfig(home, USER_CONFIG);
   const killed = makeTakeover(home);
   killed.activate('http://127.0.0.1:4173', null);
-  // The user finds Tokkey's leftover file and edits it, not knowing it is on loan.
-  const userEdit = readFileSync(configPath, 'utf8').replace('model = "gpt-5.5"', 'model = "gpt-5.6-sol"');
-  writeFileSync(configPath, userEdit);
+  // The user finds Tokkey's leftover file and edits a key Tokkey never touched,
+  // not knowing the file is on loan.
+  writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('model = "gpt-5.5"', 'model = "gpt-5.6-sol"'));
 
   const recovered = makeTakeover(home).recoverInterruptedSession();
 
-  // Their edit outranks the stale original: nothing is written over it.
-  assert.equal(recovered, false);
-  assert.equal(readFileSync(configPath, 'utf8'), userEdit);
-  // The pre-takeover original is kept aside rather than dropped, and recovery
-  // stops retrying the same decision on every launch.
-  assert.equal(existsSync(killed.backupFilePath), false);
-  assert.equal(readFileSync(`${killed.backupFilePath}.orphaned`, 'utf8'), USER_CONFIG);
+  // Tokkey's own keys still go back, since nothing touched those specifically...
+  assert.equal(recovered, true);
+  assert.equal(
+    readFileSync(configPath, 'utf8'),
+    USER_CONFIG.replace('model = "gpt-5.5"', 'model = "gpt-5.6-sol"')
+  );
+  // ...and the ledger is gone, so nothing is left to retry on a later launch.
+  assert.equal(existsSync(killed.ledgerFilePath), false);
   rmSync(home, { recursive: true, force: true });
 });
 
-test('leaves a config edited during the session alone at quit', () => {
+test('leaves a config edited during the session alone at quit, but still restores everything else', () => {
   const home = makeHome();
   const configPath = writeConfig(home, USER_CONFIG);
   const takeover = makeTakeover(home);
   takeover.activate('http://127.0.0.1:4173', null);
-  const userEdit = readFileSync(configPath, 'utf8').replace('model = "gpt-5.5"', 'model = "gpt-5.6-sol"');
-  writeFileSync(configPath, userEdit);
+  writeFileSync(configPath, readFileSync(configPath, 'utf8').replace('model = "gpt-5.5"', 'model = "gpt-5.6-sol"'));
 
-  assert.equal(takeover.restore(), false);
-  assert.equal(readFileSync(configPath, 'utf8'), userEdit);
-  assert.equal(readFileSync(`${takeover.backupFilePath}.orphaned`, 'utf8'), USER_CONFIG);
+  assert.equal(takeover.restore(), true);
+  assert.equal(
+    readFileSync(configPath, 'utf8'),
+    USER_CONFIG.replace('model = "gpt-5.5"', 'model = "gpt-5.6-sol"')
+  );
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('a key Tokkey itself owns is left as the user set it, without blocking every other key', () => {
+  const home = makeHome();
+  const configPath = writeConfig(home, USER_CONFIG);
+  const takeover = makeTakeover(home);
+  takeover.activate('http://127.0.0.1:4173', '/tmp/amis-catalog.json');
+  // The user manually flips the one key Tokkey owns, e.g. testing another
+  // provider by hand while Tokkey is still running.
+  writeFileSync(
+    configPath,
+    readFileSync(configPath, 'utf8').replace('model_provider = "tokkey"', 'model_provider = "manual-test"')
+  );
+
+  assert.equal(takeover.restore(), true);
+
+  const restored = readFileSync(configPath, 'utf8');
+  // Their edit to the key they touched survives...
+  assert.ok(restored.includes('model_provider = "manual-test"'));
+  // ...while every other key Tokkey owns still goes back, since nothing else changed.
+  assert.ok(!restored.includes('[model_providers.tokkey]'));
+  assert.ok(!restored.includes('model_catalog_json'));
+  assert.equal(existsSync(takeover.ledgerFilePath), false);
   rmSync(home, { recursive: true, force: true });
 });
 
