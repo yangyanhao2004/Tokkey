@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import path from 'node:path';
 import type {
   AgentInstallation,
   AppInfo,
@@ -8,12 +9,17 @@ import type {
   CloudModelCard,
   CloudModelConnection,
   HostSnapshot,
+  LocalChatEvent,
   McpConfigurationDraft,
   McpConfigurationPreparation,
   LocalChatRuntimeState,
   LocalChatTurnRequest,
   LocalChatTurnStarted,
   LocalChatWorkspace,
+  PetInteraction,
+  PetSettings,
+  PetSettingsPatch,
+  PetRuntimeState,
   SkillsShCardState,
   SkillsShInstallRequest,
   SkillsShInstallResult,
@@ -66,6 +72,9 @@ import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import HostSnapshotService from './host/HostSnapshotService';
 import RouterProcessManager from './router/RouterProcessManager';
+import { PetSettingsStore, assertPetSettings, type PetSettingsStoring } from './pet/PetSettingsStore';
+import type { PetRuntimeCoordinating } from './pet/PetRuntimeCoordinator';
+import type { PetCompanionSignal } from './pet/PetCompanionStatus';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 import AccountRuntime from './account/AccountRuntime';
 import AccountService from './account/AccountService';
@@ -97,6 +106,10 @@ export interface IpcControllerOptions {
   claudeGatewayIntegration?: ClaudeGatewayIntegration;
   /** Owns the router subprocess the Router page's switch turns on and off. */
   routerProcessManager?: RouterProcessManager;
+  /** Persists Pet settings; injected in tests, user-data-backed in production. */
+  petSettingsStore?: PetSettingsStoring;
+  /** Runs the independent desktop Pet window when settings enable it. */
+  petRuntimeCoordinator?: PetRuntimeCoordinating;
 }
 
 /**
@@ -133,6 +146,11 @@ export default class IpcController {
   private readonly codexGatewayIntegration: CodexGatewayIntegration | null;
   private readonly claudeGatewayIntegration: ClaudeGatewayIntegration | null;
   private readonly routerProcessManager: RouterProcessManager | null;
+  private readonly petSettingsStore: PetSettingsStoring;
+  private readonly petRuntimeCoordinator: PetRuntimeCoordinating | null;
+  private petSettings: PetSettings | null = null;
+  private petSettingsRead: Promise<PetSettings> | null = null;
+  private petSettingsWriteQueue: Promise<void> = Promise.resolve();
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
   constructor(options: IpcControllerOptions = {}) {
@@ -175,10 +193,17 @@ export default class IpcController {
     this.codexGatewayIntegration = options.codexGatewayIntegration ?? null;
     this.claudeGatewayIntegration = options.claudeGatewayIntegration ?? null;
     this.routerProcessManager = options.routerProcessManager ?? null;
+    this.petSettingsStore = options.petSettingsStore ?? new PetSettingsStore(
+      () => path.join(app.getPath('userData'), 'pet-settings.json')
+    );
+    this.petRuntimeCoordinator = options.petRuntimeCoordinator ?? null;
     // The router can also stop on its own — a crash, or a start that timed out —
     // so the switch is driven by these events rather than by the click alone.
     this.routerProcessManager?.subscribe((state) =>
       this.broadcast('router:state-changed', state)
+    );
+    this.petRuntimeCoordinator?.subscribe((state) =>
+      this.broadcast('pet:runtime-state-changed', state)
     );
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
@@ -195,6 +220,11 @@ export default class IpcController {
       'account:cancel-google': () => this.accountService.cancelGoogleSignIn(),
       'account:sign-out': () => this.accountService.signOut(),
       'host:snapshot': () => this.getHostSnapshot(),
+      'pet:get-settings': () => this.getPetSettings(),
+      'pet:update-settings': (patch: unknown) =>
+        this.updatePetSettings(this.requirePetSettingsPatch(patch)),
+      'pet:get-runtime-state': () => this.getPetRuntimeState(),
+      'pet:set-paused': (isPaused: unknown) => this.setPetPaused(this.requireBoolean(isPaused, 'Pet paused state')),
       'agents:detect': () => this.detectAgents(),
       'mcps:list-installed': () => this.scanInstalledMcps(),
       'mcps:apply-configuration': (request: unknown) =>
@@ -304,6 +334,63 @@ export default class IpcController {
     );
   }
 
+  /** Reads the shared Pet settings snapshot, caching it for this app run. */
+  getPetSettings(): Promise<PetSettings> {
+    if (this.petSettings) {
+      return Promise.resolve({ ...this.petSettings });
+    }
+    if (this.petSettingsRead) {
+      return this.petSettingsRead.then((settings) => ({ ...settings }));
+    }
+
+    this.petSettingsRead = this.petSettingsStore.load().then((settings) => {
+      assertPetSettings(settings);
+      this.petSettings = { ...settings };
+      return settings;
+    });
+    return this.petSettingsRead
+      .then((settings) => ({ ...settings }))
+      .finally(() => {
+        this.petSettingsRead = null;
+      });
+  }
+
+  /** Serializes writes so rapid setting changes cannot overwrite one another. */
+  updatePetSettings(patch: PetSettingsPatch): Promise<PetSettings> {
+    const update = this.petSettingsWriteQueue.then(async () => {
+      const current = await this.getPetSettings();
+      const next = { ...current, ...patch };
+      assertPetSettings(next);
+      await this.petSettingsStore.save(next);
+      this.petSettings = { ...next };
+      await this.petRuntimeCoordinator?.applySettings(next);
+      return { ...next };
+    });
+    this.petSettingsWriteQueue = update.then(() => undefined, () => undefined);
+    return update;
+  }
+
+  /** Returns the current Pet window lifecycle snapshot to a renderer. */
+  getPetRuntimeState(): Promise<PetRuntimeState> {
+    return Promise.resolve(
+      this.petRuntimeCoordinator?.getState() ?? {
+        phase: 'hidden',
+        position: null,
+        direction: 'right',
+        size: 72,
+        message: null,
+        error: null,
+        isPaused: false
+      }
+    );
+  }
+
+  /** Pauses or resumes movement without changing the persisted Pet setting. */
+  setPetPaused(isPaused: boolean): Promise<PetRuntimeState> {
+    this.petRuntimeCoordinator?.setPaused(isPaused);
+    return this.getPetRuntimeState();
+  }
+
   /** Connects native Electron downloads after app.whenReady(). */
   attachModelDownloadSession(): void {
     this.localModelManager.attachDownloadSession();
@@ -329,6 +416,13 @@ export default class IpcController {
     ipcMain.handle('chat:cancel-turn', (_event: IpcMainInvokeEvent, turnId: unknown) =>
       this.cancelLocalChatTurn(validateLocalChatTurnId(turnId))
     );
+    ipcMain.on('pet:interaction', (_event, interaction: unknown) => {
+      try {
+        this.petRuntimeCoordinator?.interact(this.requirePetInteraction(interaction));
+      } catch (error) {
+        console.error('[Pet] Rejected interaction:', error);
+      }
+    });
   }
 
   /**
@@ -503,9 +597,15 @@ export default class IpcController {
       modelLabel: runtimeState.model.label,
       contextWindowTokens: runtimeState.contextWindowTokens
     });
+    this.signalPetCompanion({
+      source: 'chat',
+      phase: 'sending',
+      turnId: request.turnId
+    });
     try {
       return this.localChatTurnExecutor.startTurn(request, (streamEvent) => {
         this.chatSessionStore.handleStreamEvent(streamEvent);
+        this.signalPetForChatEvent(streamEvent);
         if (!event.sender.isDestroyed()) {
           event.sender.send('chat:event', streamEvent);
         }
@@ -515,7 +615,39 @@ export default class IpcController {
         request.turnId,
         error instanceof Error ? error.message : 'The local model request failed.'
       );
+      this.signalPetCompanion({
+        source: 'chat',
+        phase: 'error',
+        turnId: request.turnId
+      });
       throw error;
+    }
+  }
+
+  private signalPetForChatEvent(event: LocalChatEvent): void {
+    if (event.type === 'completed' || event.type === 'cancelled' || event.type === 'error') {
+      this.signalPetCompanion({
+        source: 'chat',
+        phase: event.type,
+        turnId: event.turnId
+      });
+      return;
+    }
+    if (event.type === 'watchdogTerminated') {
+      this.signalPetCompanion({
+        source: 'chat',
+        phase: 'error',
+        turnId: event.turnId
+      });
+    }
+  }
+
+  /** Pet feedback is best effort and must never interrupt Chat persistence or delivery. */
+  private signalPetCompanion(signal: PetCompanionSignal): void {
+    try {
+      this.petRuntimeCoordinator?.signalCompanion(signal);
+    } catch (error) {
+      console.error('[Pet] Companion signal failed:', error);
     }
   }
 
@@ -792,6 +924,79 @@ export default class IpcController {
       configurationJson: request.configurationJson,
       selectedAgents: this.requireMcpAgents(request.selectedAgents)
     };
+  }
+
+  /** Accepts only known Pet fields and the finite values used by the UI. */
+  private requirePetSettingsPatch(value: unknown): PetSettingsPatch {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new TypeError('Pet settings patch must be an object.');
+    }
+    const source = value as Record<string, unknown>;
+    const patch: PetSettingsPatch = {};
+    if ('isEnabled' in source) {
+      if (typeof source.isEnabled !== 'boolean') {
+        throw new TypeError('Pet setting isEnabled must be a boolean.');
+      }
+      patch.isEnabled = source.isEnabled;
+    }
+    if ('size' in source) {
+      patch.size = this.requirePetScale(source.size, 'size');
+    }
+    if ('speed' in source) {
+      patch.speed = this.requirePetScale(source.speed, 'speed');
+    }
+    if ('movementRange' in source) {
+      patch.movementRange = this.requirePetScale(source.movementRange, 'movementRange');
+    }
+    if (Object.keys(patch).length === 0) {
+      throw new TypeError('Pet settings patch must contain a supported field.');
+    }
+    return patch;
+  }
+
+  /** Validates pointer intent before it reaches the main-process Pet runtime. */
+  private requirePetInteraction(value: unknown): PetInteraction {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new TypeError('Pet interaction must be an object.');
+    }
+    const interaction = value as Record<string, unknown>;
+    if (
+      interaction.type === 'mouseEnter' ||
+      interaction.type === 'mouseLeave' ||
+      interaction.type === 'contextMenu' ||
+      interaction.type === 'click' ||
+      interaction.type === 'dragEnd'
+    ) {
+      return { type: interaction.type };
+    }
+    if (interaction.type === 'dragStart' || interaction.type === 'dragMove') {
+      if (!interaction.point || typeof interaction.point !== 'object' || Array.isArray(interaction.point)) {
+        throw new TypeError('Pet drag interaction must include a point.');
+      }
+      const point = interaction.point as Record<string, unknown>;
+      if (
+        typeof point.x !== 'number' || !Number.isFinite(point.x) ||
+        typeof point.y !== 'number' || !Number.isFinite(point.y)
+      ) {
+        throw new TypeError('Pet drag point must contain finite coordinates.');
+      }
+      return { type: interaction.type, point: { x: point.x, y: point.y } };
+    }
+    throw new TypeError(`Unsupported Pet interaction: ${String(interaction.type)}.`);
+  }
+
+  private requirePetScale(value: unknown, field: string): PetSettings['size'] {
+    if (value !== 'small' && value !== 'mid' && value !== 'large') {
+      throw new TypeError(`Unsupported Pet ${field}: ${String(value)}.`);
+    }
+    return value;
+  }
+
+  private requireBoolean(value: unknown, field: string): boolean {
+    if (typeof value !== 'boolean') {
+      throw new TypeError(`${field} must be a boolean.`);
+    }
+    return value;
   }
 
   private requireMcpAgents(value: unknown): McpAgent[] {

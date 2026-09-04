@@ -10,10 +10,15 @@ interface SegmentedControlProps<TValue extends string> {
   /** Announced to assistive tech, since the group carries no visible label. */
   label: string;
   testId?: string;
+  disabled?: boolean;
   /** Fixed-width Figma instances can opt out of the default content width. */
   widthClassName?: string;
   /** Some instances use the quieter opaque quinary fill instead of a tile fill. */
   surfaceClassName?: string;
+  /** Optional per-segment layout without changing existing instances. */
+  segmentClassName?: string;
+  selectedClassName?: string;
+  unselectedClassName?: string;
 }
 
 /**
@@ -27,14 +32,18 @@ export function SegmentedControl<TValue extends string>({
   onChange,
   label,
   testId,
+  disabled = false,
   widthClassName = 'w-fit',
-  surfaceClassName = 'bg-fill-tile'
+  surfaceClassName = 'bg-fill-tile',
+  segmentClassName = '',
+  selectedClassName = 'bg-text-primary text-white drop-shadow-[0px_0.831px_1.247px_rgba(0,0,0,0.12)]',
+  unselectedClassName = 'text-text-secondary'
 }: SegmentedControlProps<TValue>) {
   return (
     <div
       // `w-fit` so the track hugs its segments instead of stretching to the
       // width of whatever column it is dropped into.
-      className={`flex h-[24px] shrink-0 items-stretch overflow-hidden rounded-[6px] ${widthClassName} ${surfaceClassName}`}
+      className={`flex h-[24px] shrink-0 items-stretch rounded-[6px] ${widthClassName} ${surfaceClassName}`}
       role="tablist"
       aria-label={label}
       data-testid={testId}
@@ -48,11 +57,10 @@ export function SegmentedControl<TValue extends string>({
             type="button"
             role="tab"
             aria-selected={isSelected}
+            disabled={disabled}
             onClick={() => onChange(option.value)}
-            className={`flex min-w-[43.213px] flex-1 items-center justify-center rounded-[6px] px-3 py-1 text-[10px] leading-[12px] font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary ${
-              isSelected
-                ? 'bg-selected-ink text-white drop-shadow-[0px_0.831px_1.247px_rgba(0,0,0,0.12)]'
-                : 'text-control-neutral'
+            className={`flex min-w-[43.213px] items-center justify-center rounded-[6px] px-3 py-1 text-[10px] leading-[12px] font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary ${segmentClassName} ${
+              isSelected ? selectedClassName : unselectedClassName
             }`}
             data-testid={testId ? `${testId}-${option.value}` : undefined}
           >

@@ -288,6 +288,30 @@ test('manager launches the frozen executable with only the loopback flags', asyn
   manager.stop('test finished');
 });
 
+test('manager publishes gateway lifecycle state to subscribers', async () => {
+  const child = new FakeChildProcess();
+  const manager = new GatewayProcessManager({
+    locator: new GatewayRuntimeLocator({
+      projectRoot: PROJECT_ROOT,
+      environment: {},
+      architecture: 'arm64',
+      isExecutable: () => true
+    }),
+    portResolver: new GatewayPortResolver({ preferredPort: 4000, findListener: () => null }),
+    healthProbe: { isHealthy: async () => true },
+    spawnProcess: () => child,
+    delay: async () => {}
+  });
+  const phases = [];
+  manager.subscribe((state) => phases.push(state.phase));
+
+  await manager.startIfNeeded();
+  manager.stop('test finished');
+
+  assert.deepEqual(phases, ['starting', 'running', 'stopped']);
+  assert.deepEqual(manager.currentState(), { phase: 'stopped', error: null });
+});
+
 test('manager keeps an inherited REQUEST_TIMEOUT so an operator can tune it', async () => {
   const child = new FakeChildProcess();
   let launchOptions = null;

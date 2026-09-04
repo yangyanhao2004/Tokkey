@@ -189,6 +189,65 @@ export interface HostSnapshot {
   gauges: HostResourceGauge[];
 }
 
+/** Persisted settings shared by the Pet page and its future desktop runtime. */
+export interface PetSettings {
+  isEnabled: boolean;
+  size: 'small' | 'mid' | 'large';
+  speed: 'small' | 'mid' | 'large';
+  movementRange: 'small' | 'mid' | 'large';
+}
+
+/** One partial update accepted by the main process for a Pet setting change. */
+export type PetSettingsPatch = Partial<PetSettings>;
+
+/** First-run settings shown while the renderer loads persisted Pet state. */
+export const DEFAULT_PET_SETTINGS: PetSettings = {
+  isEnabled: false,
+  size: 'mid',
+  speed: 'mid',
+  movementRange: 'small'
+};
+
+/** Main-process lifecycle state exposed to the Pet settings page. */
+export type PetRuntimePhase =
+  | 'hidden'
+  | 'idle'
+  | 'walking'
+  | 'hover'
+  | 'paused'
+  | 'working'
+  | 'thinking'
+  | 'celebrating'
+  | 'serviceError'
+  | 'sleeping'
+  | 'clickWave'
+  | 'dragging'
+  | 'returning'
+  | 'easter'
+  | 'openingChat'
+  | 'error';
+
+/** Pointer intents accepted by the main-process Pet runtime. */
+export type PetInteraction =
+  | { type: 'mouseEnter' }
+  | { type: 'mouseLeave' }
+  | { type: 'contextMenu' }
+  | { type: 'click' }
+  | { type: 'dragStart'; point: { x: number; y: number } }
+  | { type: 'dragMove'; point: { x: number; y: number } }
+  | { type: 'dragEnd' };
+
+/** Renderer-safe snapshot of the independent desktop Pet window. */
+export interface PetRuntimeState {
+  phase: PetRuntimePhase;
+  position: { x: number; y: number } | null;
+  direction: 'left' | 'right';
+  size: number;
+  message: string | null;
+  error: string | null;
+  isPaused: boolean;
+}
+
 /** Renderer-facing API exposed by the preload bridge. */
 export interface TokkeyApi {
   getAppInfo(): Promise<AppInfo>;
@@ -199,6 +258,14 @@ export interface TokkeyApi {
   cancelGoogleSignIn(): Promise<void>;
   signOutAccount(): Promise<AccountOperationResult<AccountState>>;
   getHostSnapshot(): Promise<HostSnapshot>;
+  getPetSettings(): Promise<PetSettings>;
+  updatePetSettings(patch: PetSettingsPatch): Promise<PetSettings>;
+  getPetRuntimeState(): Promise<PetRuntimeState>;
+  onPetRuntimeStateChanged(listener: (state: PetRuntimeState) => void): () => void;
+  sendPetInteraction(interaction: PetInteraction): void;
+  setPetPaused(isPaused: boolean): Promise<PetRuntimeState>;
+  onPetOpenChat(listener: () => void): () => void;
+  onPetOpenSettings(listener: () => void): () => void;
   detectAgents(): Promise<AgentInstallation[]>;
   getInstalledMcps(): Promise<McpCatalogScan>;
   scanInstalledMcps(): Promise<McpCatalogScan>;

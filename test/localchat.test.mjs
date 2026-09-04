@@ -863,6 +863,7 @@ test('Chat session store leaves Amis-Wifi history isolated from Tokkey storage',
 
 test('IPC controller keeps persisted turns, SSE events, and runtime selection in lockstep', () => {
   const calls = [];
+  const petSignals = [];
   const workspace = { sessions: [], openSessionIds: [], activeSessionId: 'session-1' };
   const chatSessionStore = {
     loadWorkspace: () => workspace,
@@ -883,9 +884,11 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
     subscribe: () => () => {}
   };
   let startShouldFail = false;
+  let emitChatEvent = null;
   const executor = {
     startTurn: (request, onEvent) => {
       if (startShouldFail) throw new Error('stream startup failed');
+      emitChatEvent = onEvent;
       const streamEvent = { type: 'textDelta', ...CHAT_EVENT_IDENTITY, text: 'Persist me first' };
       onEvent(streamEvent);
       return { turnId: request.turnId };
@@ -896,7 +899,11 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
     chatSessionStore,
     localChatTurnExecutor: executor,
     tokenHubRuntime: runtime,
-    localModelManager: {}
+    localModelManager: {},
+    petRuntimeCoordinator: {
+      subscribe: () => () => {},
+      signalCompanion: (signal) => petSignals.push(signal)
+    }
   });
   const sentEvents = [];
   const sender = {
@@ -925,6 +932,17 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
       streamEvent: { type: 'textDelta', ...CHAT_EVENT_IDENTITY, text: 'Persist me first' }
     }
   ]);
+  assert.deepEqual(petSignals, [{
+    source: 'chat',
+    phase: 'sending',
+    turnId: CHAT_REQUEST.turnId
+  }]);
+  emitChatEvent({ type: 'completed', ...CHAT_EVENT_IDENTITY });
+  assert.deepEqual(petSignals.at(-1), {
+    source: 'chat',
+    phase: 'completed',
+    turnId: CHAT_REQUEST.turnId
+  });
   assert.equal(controller.loadLocalChatWorkspace(), workspace);
   assert.equal(controller.createLocalChatSession().activeSessionId, 'created-session');
   assert.equal(controller.openLocalChatSession('history-session').activeSessionId, 'history-session');
@@ -939,6 +957,11 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
     type: 'start-failed',
     turnId: 'turn-start-failure',
     message: 'stream startup failed'
+  });
+  assert.deepEqual(petSignals.at(-1), {
+    source: 'chat',
+    phase: 'error',
+    turnId: 'turn-start-failure'
   });
 
   const unavailableController = new IpcController({
@@ -959,6 +982,47 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
 
   controller.cancelLocalChatTurn(CHAT_REQUEST.turnId);
   assert.deepEqual(calls.at(-1), { type: 'cancel', turnId: CHAT_REQUEST.turnId });
+});
+
+test('a failed Pet observer cannot interrupt an accepted Chat turn', () => {
+  let turnStarted = false;
+  const controller = new IpcController({
+    accountService: {},
+    chatSessionStore: {
+      beginTurn: () => {},
+      failTurnStart: () => {},
+      handleStreamEvent: () => {}
+    },
+    localChatTurnExecutor: {
+      startTurn: (request) => {
+        turnStarted = true;
+        return { turnId: request.turnId };
+      }
+    },
+    tokenHubRuntime: {
+      getLocalChatRuntimeState: () => ({
+        status: 'ready',
+        model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label },
+        contextWindowTokens: 16_384,
+        error: null
+      }),
+      subscribe: () => () => {}
+    },
+    localModelManager: {},
+    petRuntimeCoordinator: {
+      subscribe: () => () => {},
+      signalCompanion: () => {
+        throw new Error('Pet observer failed');
+      }
+    }
+  });
+  const sender = { isDestroyed: () => false, send: () => {} };
+
+  assert.deepEqual(
+    controller.startLocalChatTurn({ sender }, CHAT_REQUEST),
+    { turnId: CHAT_REQUEST.turnId }
+  );
+  assert.equal(turnStarted, true);
 });
 
 test('IPC Chat request validation bounds transcript data and rejects endpoint injection', () => {

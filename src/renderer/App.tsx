@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import { useEffect, type ComponentType } from 'react';
 import { type NavItemId } from './navigation';
 import { navItemIdForRoute, type RouteId } from './routing';
 import { AgentDetectionProvider } from './components/AgentDetectionProvider';
@@ -30,6 +30,14 @@ const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
   'sign-in': SignInPage
 };
 
+function focusChatComposer(): void {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      document.getElementById('chat-message-input')?.focus();
+    });
+  });
+}
+
 /**
  * Sidebar plus whichever page the current route names. Selecting a row is a
  * navigation like any other, so it lands in the history the header walks.
@@ -40,6 +48,12 @@ function AppFrame() {
   const ActivePage = PAGE_BY_ROUTE[route];
   const isChatActive = route === 'chat';
   const isAccountPaneOpen = route === 'sign-in';
+
+  useEffect(() => window.tokkey.onPetOpenChat(() => {
+    navigate('chat');
+    focusChatComposer();
+  }), [navigate]);
+  useEffect(() => window.tokkey.onPetOpenSettings(() => navigate('pet')), [navigate]);
 
   return (
     <div

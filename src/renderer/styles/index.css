@@ -29,6 +29,10 @@
   -webkit-app-region: no-drag;
 }
 
+@utility pet-pixel-art {
+  image-rendering: pixelated;
+}
+
 /*
   Design tokens from the Tokkey Figma library. Names mirror the Figma variable
   they come from so a value can be traced back to the design.
@@ -190,6 +194,12 @@ body {
 /* The app padding and inter-panel gap belong to the active page surface too. */
 body:has(.app-theme-chat) {
   background-color: var(--color-chat-frame-border);
+}
+
+/* The detached Pet BrowserWindow is transparent and must not inherit the main
+   window's neutral document background. */
+body:has(.pet-window-surface) {
+  background-color: transparent;
 }
 
 /* Figma 575:1014 uses these exported gradients as alpha masks around the

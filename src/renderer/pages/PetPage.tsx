@@ -1,8 +1,17 @@
-import { useState } from 'react';
-import { Apple, CircleUserRound, Search, SlidersHorizontal, Wifi } from 'lucide-react';
+import { useCallback } from 'react';
+import {
+  Apple,
+  CircleUserRound,
+  Search,
+  SlidersHorizontal,
+  Wifi
+} from 'lucide-react';
+import type { PetSettings, PetSettingsPatch } from '../../shared/types';
 import { PageShell } from '../components/PageShell';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { Switch } from '../components/Switch';
+import { usePetSettings } from '../hooks/usePetSettings';
+import { usePetRuntimeState } from '../hooks/usePetRuntimeState';
 import { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
 
 const PET_ASSET_BASE_PATH = './assets/pet';
@@ -22,6 +31,7 @@ interface PetSettingRowProps {
   onChange: (value: PetSettingValue) => void;
   position: 'first' | 'middle' | 'last';
   testId: string;
+  disabled: boolean;
 }
 
 /** One compact setting row from the enabled Pet panel. */
@@ -31,7 +41,8 @@ function PetSettingRow({
   value,
   onChange,
   position,
-  testId
+  testId,
+  disabled
 }: PetSettingRowProps) {
   const spacingClasses = {
     first: 'pb-3',
@@ -58,6 +69,10 @@ function PetSettingRow({
         testId={testId}
         widthClassName="w-[170px]"
         surfaceClassName="bg-control-recessed"
+        segmentClassName="flex-1"
+        selectedClassName="bg-selected-ink text-white drop-shadow-[0px_0.831px_1.247px_rgba(0,0,0,0.12)]"
+        unselectedClassName="text-control-neutral"
+        disabled={disabled}
       />
     </div>
   );
@@ -66,10 +81,11 @@ function PetSettingRow({
 interface PetToggleCardProps {
   isPetVisible: boolean;
   onChange: (isVisible: boolean) => void;
+  disabled: boolean;
 }
 
 /** The setting shared by the Figma off and on frames. */
-function PetToggleCard({ isPetVisible, onChange }: PetToggleCardProps) {
+function PetToggleCard({ isPetVisible, onChange, disabled }: PetToggleCardProps) {
   return (
     <section
       className="flex w-full shrink-0 items-center justify-between gap-4 overflow-hidden rounded-[12px] border border-surface-panel-border bg-white p-4"
@@ -96,6 +112,7 @@ function PetToggleCard({ isPetVisible, onChange }: PetToggleCardProps) {
       <Switch
         checked={isPetVisible}
         onChange={onChange}
+        disabled={disabled}
         label="Show Pet"
         testId="pet-toggle"
       />
@@ -179,12 +196,14 @@ function PetPreview() {
   );
 }
 
-/** Size, speed, and range controls from the enabled Pet frame. */
-function PetSettings() {
-  const [size, setSize] = useState<PetSettingValue>('mid');
-  const [speed, setSpeed] = useState<PetSettingValue>('mid');
-  const [range, setRange] = useState<PetSettingValue>('small');
+interface PetSettingsPanelProps {
+  settings: PetSettings;
+  disabled: boolean;
+  onChange: (patch: PetSettingsPatch) => void;
+}
 
+/** Size, speed, and range controls backed by the main-process snapshot. */
+function PetSettingsPanel({ settings, disabled, onChange }: PetSettingsPanelProps) {
   return (
     <section
       className="flex w-full shrink-0 flex-col overflow-hidden rounded-[12px] border border-surface-panel-border bg-white p-4"
@@ -194,26 +213,29 @@ function PetSettings() {
       <PetSettingRow
         title="Size"
         description="Choose the pet scale."
-        value={size}
-        onChange={setSize}
+        value={settings.size}
+        onChange={(value) => onChange({ size: value })}
         position="first"
         testId="pet-size"
+        disabled={disabled}
       />
       <PetSettingRow
         title="Move speed"
         description="Choose how fast it moves."
-        value={speed}
-        onChange={setSpeed}
+        value={settings.speed}
+        onChange={(value) => onChange({ speed: value })}
         position="middle"
         testId="pet-speed"
+        disabled={disabled}
       />
       <PetSettingRow
         title="Move range"
         description="Choose its activity range."
-        value={range}
-        onChange={setRange}
+        value={settings.movementRange}
+        onChange={(value) => onChange({ movementRange: value })}
         position="last"
         testId="pet-range"
+        disabled={disabled}
       />
     </section>
   );
@@ -221,20 +243,38 @@ function PetSettings() {
 
 /** Pet settings page represented by Figma's paired off/on frames. */
 export function PetPage() {
-  const [isPetVisible, setIsPetVisible] = useState(false);
+  const { settings, isLoading, isSaving, error, updateSettings } = usePetSettings();
+  const runtimeState = usePetRuntimeState();
+  const isSettingsDisabled = isLoading || isSaving;
+  const handleSettingsChange = useCallback((patch: PetSettingsPatch) => {
+    void updateSettings(patch);
+  }, [updateSettings]);
 
   return (
     <PageShell
       title="Pet"
-      subtitle="A quiet desktop companion for runtime and connection status."
+      subtitle="A desktop companion for runtime and connection status."
       testId="pet"
     >
-      <PetToggleCard isPetVisible={isPetVisible} onChange={setIsPetVisible} />
-      {isPetVisible ? (
+      <PetToggleCard
+        isPetVisible={settings.isEnabled}
+        onChange={(isVisible) => handleSettingsChange({ isEnabled: isVisible })}
+        disabled={isSettingsDisabled}
+      />
+      {settings.isEnabled ? (
         <>
           <PetPreview />
-          <PetSettings />
+          <PetSettingsPanel
+            settings={settings}
+            disabled={isSettingsDisabled}
+            onChange={handleSettingsChange}
+          />
         </>
+      ) : null}
+      {error || runtimeState.error ? (
+        <p className="text-[10px] leading-[12px] text-red-700" data-testid="pet-settings-error">
+          {error ?? runtimeState.error}
+        </p>
       ) : null}
     </PageShell>
   );
