@@ -10,6 +10,10 @@ interface SegmentedControlProps<TValue extends string> {
   /** Announced to assistive tech, since the group carries no visible label. */
   label: string;
   testId?: string;
+  /** Fixed-width Figma instances can opt out of the default content width. */
+  widthClassName?: string;
+  /** Some instances use the quieter opaque quinary fill instead of a tile fill. */
+  surfaceClassName?: string;
 }
 
 /**
@@ -22,13 +26,15 @@ export function SegmentedControl<TValue extends string>({
   value,
   onChange,
   label,
-  testId
+  testId,
+  widthClassName = 'w-fit',
+  surfaceClassName = 'bg-fill-tile'
 }: SegmentedControlProps<TValue>) {
   return (
     <div
       // `w-fit` so the track hugs its segments instead of stretching to the
       // width of whatever column it is dropped into.
-      className="flex h-[24px] w-fit shrink-0 items-stretch rounded-[6px] bg-fill-tile"
+      className={`flex h-[24px] shrink-0 items-stretch overflow-hidden rounded-[6px] ${widthClassName} ${surfaceClassName}`}
       role="tablist"
       aria-label={label}
       data-testid={testId}
@@ -43,10 +49,10 @@ export function SegmentedControl<TValue extends string>({
             role="tab"
             aria-selected={isSelected}
             onClick={() => onChange(option.value)}
-            className={`flex min-w-[43.213px] items-center justify-center rounded-[6px] px-3 py-1 text-[10px] leading-[12px] font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary ${
+            className={`flex min-w-[43.213px] flex-1 items-center justify-center rounded-[6px] px-3 py-1 text-[10px] leading-[12px] font-medium focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary ${
               isSelected
-                ? 'bg-text-primary text-white drop-shadow-[0px_0.831px_1.247px_rgba(0,0,0,0.12)]'
-                : 'text-text-secondary'
+                ? 'bg-selected-ink text-white drop-shadow-[0px_0.831px_1.247px_rgba(0,0,0,0.12)]'
+                : 'text-control-neutral'
             }`}
             data-testid={testId ? `${testId}-${option.value}` : undefined}
           >

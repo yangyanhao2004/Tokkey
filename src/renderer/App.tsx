@@ -8,6 +8,7 @@ import { AddModelPage } from './pages/AddModelPage';
 import { AgentHubPage } from './pages/AgentHubPage';
 import { DiscoverSkillsPage } from './pages/DiscoverSkillsPage';
 import { RouterPage } from './pages/RouterPage';
+import { PetPage } from './pages/PetPage';
 import { TokkeyPage } from './pages/TokkeyPage';
 import { ChatPage } from './pages/ChatPage';
 import { UnbuiltPage } from './pages/UnbuiltPage';
@@ -21,6 +22,7 @@ import { AccountProvider, useAccount } from './components/AccountProvider';
 const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
   tokkey: TokkeyPage,
   router: RouterPage,
+  pet: PetPage,
   'agent-hub': AgentHubPage,
   chat: ChatPage,
   'add-model': AddModelPage,

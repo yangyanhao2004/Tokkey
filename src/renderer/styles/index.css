@@ -163,6 +163,11 @@
   --color-selected-ink: #1d1d1b;
   --color-switch-track-off: rgba(120, 120, 128, 0.16);
 
+  /* Pet page (Figma 194:4622 and 575:894). */
+  --color-pet-icon-tile: #efefed;
+  --color-control-recessed: rgba(0, 0, 0, 0.02);
+  --color-control-neutral: #1a1a1a;
+
   /* SF Pro is the system UI face on macOS; no web font is bundled or fetched. */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "Helvetica Neue", sans-serif;
@@ -185,6 +190,22 @@ body {
 /* The app padding and inter-panel gap belong to the active page surface too. */
 body:has(.app-theme-chat) {
   background-color: var(--color-chat-frame-border);
+}
+
+/* Figma 575:1014 uses these exported gradients as alpha masks around the
+   clipped desktop and its translucent menu bar. */
+.pet-desktop-wallpaper {
+  mask-image: url("./assets/pet/desktop-mask.svg");
+  mask-repeat: no-repeat;
+  mask-size: 559.787px 73.083px;
+}
+
+.pet-menu-bar-effect {
+  background-color: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(11.246px);
+  mask-image: url("./assets/pet/menu-blur-mask.svg");
+  mask-repeat: no-repeat;
+  mask-size: 100% 72px;
 }
 
 /* SKILL.md keeps the dialog's compact Figma typography while restoring the
