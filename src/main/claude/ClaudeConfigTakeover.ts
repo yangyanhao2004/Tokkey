@@ -1,6 +1,5 @@
-import os from 'node:os';
-import path from 'node:path';
 import BackedUpConfigFile from '../config/BackedUpConfigFile';
+import TokkeyHome from '../storage/TokkeyHome';
 import ClaudeHome from './ClaudeHome';
 import ClaudeSettingsDocument, { type ClaudeModelSelection } from './ClaudeSettingsDocument';
 
@@ -32,7 +31,7 @@ export class ClaudeConfigTakeover {
       filePath: home.settingsPath,
       backupPath:
         options.backupPath ??
-        path.join(options.homeDirectory ?? os.homedir(), '.amiswifi', 'claude-settings-backup.json'),
+        new TokkeyHome(options).pathFor('claude-settings-backup.json'),
       label: 'ClaudeConfig'
     });
   }

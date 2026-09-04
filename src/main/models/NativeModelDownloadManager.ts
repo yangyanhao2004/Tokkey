@@ -10,6 +10,7 @@ import type {
   LocalModelRow
 } from '../../shared/types';
 import HostDiskProbe from '../host/HostDiskProbe';
+import TokkeyHome from '../storage/TokkeyHome';
 import type { LocalModelLaunchRequest } from './LocalModelRuntime';
 import DownloadedModelStore from './DownloadedModelStore';
 
@@ -58,9 +59,8 @@ export class NativeModelDownloadManager {
     diskProbe?: HostDiskProbe;
     store?: DownloadedModelStore;
   } = {}) {
-    const homeDirectory = options.homeDirectory ?? os.homedir();
-    this.store = options.store ?? new DownloadedModelStore({ homeDirectory });
-    this.persistencePath = path.join(homeDirectory, '.amiswifi', 'model_downloads.json');
+    this.store = options.store ?? new DownloadedModelStore(options);
+    this.persistencePath = new TokkeyHome(options).pathFor('model_downloads.json');
     this.stateListener = options.stateListener ?? null;
     this.diskProbe = options.diskProbe ?? new HostDiskProbe();
     this.persistenceReady = this.readPersistedDownloads();

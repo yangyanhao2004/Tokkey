@@ -12,7 +12,6 @@ export type NavItemId =
   | 'tokkey'
   | 'router'
   | 'agent-hub'
-  | 'memory'
   | 'pet'
   | 'chat'
   | 'dashboard'
@@ -67,12 +66,6 @@ export const NAV_SECTIONS: readonly SidebarNavSection[] = [
         id: 'agent-hub',
         label: 'Agent Hub',
         iconFile: 'nav-agent-hub.svg',
-        iconSizeClass: DEFAULT_ICON_SIZE_CLASS
-      },
-      {
-        id: 'memory',
-        label: 'Memory',
-        iconFile: 'nav-memory.svg',
         iconSizeClass: DEFAULT_ICON_SIZE_CLASS
       },
       {

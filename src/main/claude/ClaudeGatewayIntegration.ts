@@ -1,7 +1,6 @@
-import GatewayModelClient, { type GatewayEndpoint } from '../gateway/GatewayModelClient';
+import type { GatewayEndpoint } from '../gateway/GatewayModelClient';
 import ClaudeNativeModelCatalog from '../models/ClaudeNativeModelCatalog';
-import CloudModelCatalog from '../models/CloudModelCatalog';
-import CloudModelConnector from '../models/CloudModelConnector';
+import RouterBinding from '../router/RouterBinding';
 import ClaudeConfigTakeover from './ClaudeConfigTakeover';
 import ClaudeDesktopConfigLibrary, { type DesktopInferenceModel } from './ClaudeDesktopConfigLibrary';
 import ClaudeDesktopHome from './ClaudeDesktopHome';
@@ -10,44 +9,42 @@ import ClaudeModelAlias from './ClaudeModelAlias';
 import type { ClaudeModelSelection } from './ClaudeSettingsDocument';
 
 /**
- * Makes the Claude Code CLI see everything the gateway serves, while Tokkey
- * runs.
+ * Makes the Claude Code CLI see what Tokkey serves, while Tokkey runs.
  *
  * One file does the work — `~/.claude/settings.json` — and it carries two
  * decisions that belong together. `env.ANTHROPIC_BASE_URL` sends Claude Code to
- * the gateway; `model` / `availableModels` / `enforceAvailableModels` decide
- * what it may ask that gateway for. Sending it to the gateway without the second
- * half would leave its picker offering Anthropic ids the gateway holds no route
- * for, so the picker is narrowed to exactly the routes that exist: Anthropic's
- * own models, plus the cloud models the user has connected — which is the whole
- * reason to route Claude Code through Tokkey at all, so one of them is what the
- * session starts on.
+ * an endpoint; `model` / `availableModels` / `enforceAvailableModels` decide
+ * what it may ask that endpoint for. Sending it somewhere without the second
+ * half would leave its picker offering Anthropic ids that endpoint holds no
+ * route for, so the picker is narrowed to exactly what can be served.
  *
- * This is the Claude-side counterpart of `CodexGatewayIntegration`, and reads
- * the same two sources it does: the gateway's live route list, and the cloud
- * catalog that names the card behind each route.
+ * Which endpoint, and which model, both come from {@link RouterBinding}: the
+ * router while the Router page's switch is on, the gateway otherwise. The two
+ * move together, because the routed pair the router serves is a model the
+ * gateway would reject, and the addresses differ.
  *
- * In addition to `settings.json` for Claude Code (terminal), this class also
- * manages the Claude Desktop `configLibrary` on macOS, so both surfaces reach
- * the gateway at the same time. The two get different model lists on purpose:
- * Claude Code brings its own Anthropic credential and can use the native Claude
- * routes, and Desktop brings only the static gateway token and cannot. See
- * `buildDesktopModels`.
+ * This is the Claude-side counterpart of `CodexGatewayIntegration`.
+ *
+ * Claude Desktop only ever gets the routed pair, never a plain gateway route:
+ * a cloud model is reached through the router or not at all, and while the
+ * router is off there is nothing for Desktop's configLibrary to point at. The
+ * pair uses the same picker-qualified router slug as Claude Code. The
+ * `anthropic.` prefix satisfies Desktop's managed-config validator without
+ * leaking a rival vendor's name from the cloud route into the model id.
  */
 export class ClaudeGatewayIntegration {
   private readonly gateway: GatewayEndpoint;
-  private readonly client: GatewayModelClient;
+  private readonly routerBinding: RouterBinding;
   private readonly natives: ClaudeNativeModelCatalog;
-  private readonly cloudCatalog: CloudModelCatalog;
   private readonly takeover: ClaudeConfigTakeover;
-  /** null on non-macOS platforms where Claude Desktop uses a different layout. */
+  /** Null on non-macOS platforms, where Claude Desktop uses a different layout. */
   private readonly desktop: ClaudeDesktopConfigLibrary | null;
 
   constructor(options: {
     gateway: GatewayEndpoint;
-    client?: GatewayModelClient;
+    /** Omitted only by a caller with no Router page; Claude then stays on the gateway. */
+    routerBinding?: RouterBinding;
     natives?: ClaudeNativeModelCatalog;
-    cloudCatalog?: CloudModelCatalog;
     takeover?: ClaudeConfigTakeover;
     desktop?: ClaudeDesktopConfigLibrary | null;
     homeDirectory?: string;
@@ -55,9 +52,8 @@ export class ClaudeGatewayIntegration {
   }) {
     const home = new ClaudeHome(options);
     this.gateway = options.gateway;
-    this.client = options.client ?? new GatewayModelClient({ gateway: options.gateway });
+    this.routerBinding = options.routerBinding ?? new RouterBinding();
     this.natives = options.natives ?? new ClaudeNativeModelCatalog();
-    this.cloudCatalog = options.cloudCatalog ?? new CloudModelCatalog();
     this.takeover = options.takeover ?? new ClaudeConfigTakeover({ ...options, home });
     if ('desktop' in options) {
       this.desktop = options.desktop ?? null;
@@ -84,51 +80,57 @@ export class ClaudeGatewayIntegration {
   }
 
   /**
-   * Points Claude Code at this launch's gateway and at the models it serves.
+   * Points Claude Code at this launch's endpoint and at the models it serves.
    *
-   * Call only once the gateway is up and its routes have been registered: the
-   * model list is built from the routes that exist at this moment, and the base
-   * URL carries the port this launch actually bound.
+   * Call only once the gateway is up: the base URL written here carries the
+   * port this launch actually bound.
    *
    * A gateway that never came up leaves the file alone. An `ANTHROPIC_BASE_URL`
    * pointing at nothing would break Claude Code outright, which is far worse
    * than not routing it through Tokkey at all.
    */
   async activate(): Promise<boolean> {
-    const baseUrl = this.gateway.baseUrl();
-    if (baseUrl === null) {
+    const gatewayBaseUrl = this.gateway.baseUrl();
+    if (gatewayBaseUrl === null) {
       console.error('[ClaudeConfig] The gateway is not running; Claude Code was left as configured.');
       return false;
     }
-    const connected = await this.connectedCloudModels();
-    const [codeActivated] = await Promise.all([
-      this.takeover.activate(baseUrl, this.buildModelSelection(connected)),
-      this.desktop?.activate(baseUrl, this.buildDesktopModels(connected)) ?? Promise.resolve(false)
-    ]);
-    return codeActivated;
+    const baseUrl = this.codeBaseUrl(gatewayBaseUrl);
+    this.syncDesktop(baseUrl);
+    return this.takeover.activate(baseUrl, this.buildModelSelection());
   }
 
   /**
-   * Rewrites the settings from the routes the gateway holds right now, which is
-   * how a model connected mid-session reaches Claude Code's picker.
+   * Rewrites the settings from the state that holds right now, which is how the
+   * Router page's switch reaches Claude Code: the picker gains or loses the
+   * routed model, and `ANTHROPIC_BASE_URL` moves with it.
    *
    * @returns whether the settings were rewritten; false when no takeover is in
    *   force, which is the normal state when the gateway never started
    */
   async syncSettings(): Promise<boolean> {
-    const baseUrl = this.gateway.baseUrl();
-    if (baseUrl === null) {
+    const gatewayBaseUrl = this.gateway.baseUrl();
+    if (gatewayBaseUrl === null) {
       return false;
     }
-    const connected = await this.connectedCloudModels();
-    const [codeReapplied] = await Promise.all([
-      this.takeover.reapply(baseUrl, this.buildModelSelection(connected)),
-      this.desktop?.reapply(baseUrl, this.buildDesktopModels(connected)) ?? Promise.resolve(false)
-    ]);
-    return codeReapplied;
+    const baseUrl = this.codeBaseUrl(gatewayBaseUrl);
+    this.syncDesktop(baseUrl);
+    return this.takeover.reapply(baseUrl, this.buildModelSelection());
   }
 
-  /** Puts the user's own `settings.json` and Desktop configLibrary back. Synchronous, for `will-quit`. */
+  /**
+   * Where Claude Code should send a turn: the router while it is on, and the
+   * gateway otherwise.
+   */
+  private codeBaseUrl(gatewayBaseUrl: string): string {
+    return this.routerBinding.baseUrl ?? gatewayBaseUrl;
+  }
+
+  /**
+   * Puts the user's own `settings.json` back, and the Desktop configLibrary
+   * with it on the off chance this session recovered one. Synchronous, for
+   * `will-quit`.
+   */
   deactivate(): boolean {
     const codeRestored = this.takeover.restore();
     this.desktop?.restore();
@@ -136,82 +138,78 @@ export class ClaudeGatewayIntegration {
   }
 
   /**
-   * The model list for Claude Desktop's inference picker: the connected cloud
-   * models, and only those.
+   * Takes Desktop's configLibrary over, refreshes it, or hands it back —
+   * whichever the routed pair's presence now calls for.
    *
-   * The native Claude routes are deliberately left out, unlike on the Claude
-   * Code side. Those routes carry no key — the caller is expected to bring one,
-   * which Claude Code does and Desktop cannot: Desktop authenticates with the
-   * single static token this integration configures, and the gateway would
-   * forward that token to Anthropic, which answers 401. Desktop reads that as
-   * the gateway rejecting its credential and refuses to sign in at all, so one
-   * unusable entry costs the user the whole connection rather than one model.
-   * Listing only routes the gateway holds a key for keeps sign-in honest.
-   *
-   * Each entry is named for its route's id suffix and labelled with the model
-   * it actually serves; see `ClaudeModelAlias.forDesktop` for why the name
-   * cannot carry the model's own name.
+   * Unlike Claude Code's `settings.json`, Desktop's configLibrary is only ever
+   * taken over for the routed pair: `activate` is a no-op with no models to
+   * offer, and `reapply` only rewrites an already-active entry, so neither
+   * alone can carry Desktop across a switch turning on or off. This tries
+   * `reapply` first — the common case once the router is already on — and
+   * falls back to `activate` the one time it returns false because nothing was
+   * taken over yet.
    */
-  private buildDesktopModels(connected: string[]): DesktopInferenceModel[] {
-    const labelsByRoute = new Map(
-      this.cloudCatalog
-        .list()
-        .map((card) => [CloudModelConnector.routeNameFor(card), card.modelName])
-    );
-    return connected.map((routeName, index) => ({
-      name: ClaudeModelAlias.forDesktop(routeName),
-      labelOverride: labelsByRoute.get(routeName) ?? routeName,
-      // The first entry is Desktop's default model, and pinning it to the top
-      // tier is what points Desktop's own bare `opus` alias at a model this
-      // gateway can serve. Left unpinned it would resolve to an Anthropic id
-      // the gateway holds no key for.
-      ...(index === 0 ? { anthropicFamilyTier: 'opus' as const } : {})
-    }));
+  private syncDesktop(baseUrl: string): void {
+    if (!this.desktop) return;
+    const models = this.buildDesktopModels();
+    if (models.length === 0) {
+      this.desktop.restore();
+      return;
+    }
+    if (!this.desktop.reapply(baseUrl, models)) {
+      this.desktop.activate(baseUrl, models);
+    }
+  }
+
+  /**
+   * The routed pair in the picker-qualified shape Desktop accepts. Empty while
+   * the router is off, which `syncDesktop` reads as "hand the configLibrary
+   * back."
+   */
+  private buildDesktopModels(): DesktopInferenceModel[] {
+    const model = this.routerBinding.model;
+    if (model === null) {
+      return [];
+    }
+    return [{ name: ClaudeModelAlias.forRoute(model.slug), labelOverride: model.slug }];
   }
 
   /**
    * The models to restrict Claude Code to, or null to leave its own choice.
    *
-   * Cloud routes go in under their `ClaudeModelAlias` for the same reason they
-   * do on the Desktop side: Claude Code's picker builds no row for a bare route
-   * name, so an unprefixed entry here is an entry the user can never select.
-   * `model` carries the alias too — it has to name something `availableModels`
-   * offers, or `enforceAvailableModels` rejects the session's own start model.
+   * The routed pair goes in through `ClaudeModelAlias.forRoute`, the same alias
+   * every other gateway route gets — no longer the one exception to that scheme
+   * it used to be. The router used to decide a turn's tier by parsing the model
+   * name it was sent. It now recognizes this picker-qualified fixed slug and
+   * reads the pairing out of `router_profiles` instead (see `RouterModel`).
    *
-   * Null when no cloud model is connected: the only thing to impose then would
-   * be Anthropic's own list, which is what Claude Code already offers, and
-   * pinning `model` to one of them would silently move the user off the model
-   * they chose for no gain.
+   * `model` itself stays null even so. Setting it to the routed pair would move
+   * every session onto it the moment the switch goes on, silently overriding
+   * whatever the user already had selected — for no gain, since every request
+   * reaches the router regardless of which name Claude Code happens to send
+   * while it is bound. Null here means "leave the existing `model` key alone"
+   * (see `ClaudeSettingsDocument.setModelSelection`), which offers the routed
+   * model in the picker without forcing it.
+   *
+   * The whole selection is null while the router is off: the only thing left to
+   * impose then would be Anthropic's own list, which is what Claude Code
+   * already offers, and returning null here is what takes the routed model away
+   * again when the switch goes off.
    */
-  private buildModelSelection(connected: string[]): ClaudeModelSelection | null {
-    if (connected.length === 0) {
+  private buildModelSelection(): ClaudeModelSelection | null {
+    const model = this.routerBinding.model;
+    if (model === null) {
       return null;
     }
-    const cloudAliases = connected.map((routeName) => ClaudeModelAlias.forRoute(routeName));
     return {
-      // The most recently registered route is the one the user just connected.
-      model: cloudAliases[cloudAliases.length - 1],
-      // Cloud first: it is the model this session starts on, so the picker
-      // should not open on a scroll past six Anthropic entries to reach it.
-      availableModels: [...cloudAliases, ...this.natives.list().map((model) => model.slug)]
+      model: null,
+      // The pair first, so it heads the picker rather than trailing six
+      // Anthropic entries the user would have to scroll past to find it.
+      availableModels: [
+        ClaudeModelAlias.forRoute(model.slug),
+        ...this.natives.list().map((native) => native.slug)
+      ]
     };
-  }
-
-  /**
-   * The route names of the connected cloud cards, in the gateway's own order.
-   *
-   * A card is "connected" exactly when the gateway holds a route under the name
-   * its card derives, so the live route list is the authority here rather than
-   * the profile database: a profile whose route failed to register would name a
-   * model Claude Code could select and never reach.
-   */
-  private async connectedCloudModels(): Promise<string[]> {
-    const cloudRouteNames = new Set(
-      this.cloudCatalog.list().map((card) => CloudModelConnector.routeNameFor(card))
-    );
-    return (await this.client.listModels())
-      .map((route) => route.modelName)
-      .filter((modelName) => cloudRouteNames.has(modelName));
   }
 }
 

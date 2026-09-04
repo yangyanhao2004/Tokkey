@@ -133,6 +133,18 @@ export class RouterProcessManager {
     return this.publish(RouterProcessManager.stoppedState());
   }
 
+  /**
+   * Takes the router down and reports why, for a caller that got the process up
+   * but could not finish the work that made it worth having.
+   *
+   * The switch has to end up off either way; this is what puts the reason on
+   * the page beside it instead of leaving a silent, pointless router running.
+   */
+  fail(reason: string): RouterRuntimeState {
+    this.stop(reason);
+    return this.publish({ ...RouterProcessManager.stoppedState(), phase: 'error', error: reason });
+  }
+
   private async performStart(): Promise<RouterRuntimeState> {
     this.publish({ ...RouterProcessManager.stoppedState(), phase: 'starting' });
     try {

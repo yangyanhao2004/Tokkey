@@ -1,6 +1,5 @@
-import os from 'node:os';
-import path from 'node:path';
 import BackedUpConfigFile from '../config/BackedUpConfigFile';
+import TokkeyHome from '../storage/TokkeyHome';
 import CodexHome from './CodexHome';
 import CodexTomlDocument from './CodexTomlDocument';
 
@@ -34,7 +33,7 @@ export class CodexConfigTakeover {
       filePath: home.configPath,
       backupPath:
         options.backupPath ??
-        path.join(options.homeDirectory ?? os.homedir(), '.amiswifi', 'codex-config-backup.toml'),
+        new TokkeyHome(options).pathFor('codex-config-backup.toml'),
       label: 'CodexConfig'
     });
   }
@@ -63,19 +62,38 @@ export class CodexConfigTakeover {
   /**
    * Backs up `config.toml` and rewrites it to serve models from the gateway.
    *
-   * @param gatewayBaseUrl the running gateway's base URL, e.g. `http://127.0.0.1:4033`
+   * @param baseUrl the endpoint Codex should call, e.g. `http://127.0.0.1:4033`
    * @param catalogPath the generated catalog to point Codex at, or null to
    *   leave whatever catalog the user had configured in place
    * @returns whether the file was taken over
    */
-  activate(gatewayBaseUrl: string, catalogPath: string | null): boolean {
-    const taken = this.file.activate((original) =>
-      this.rewrite(original, gatewayBaseUrl, catalogPath)
-    );
+  activate(baseUrl: string, catalogPath: string | null): boolean {
+    const taken = this.file.activate((original) => this.rewrite(original, baseUrl, catalogPath));
     if (taken) {
-      console.info(`[CodexConfig] Codex now routes through ${this.providerBaseUrl(gatewayBaseUrl)}.`);
+      console.info(`[CodexConfig] Codex now routes through ${this.providerBaseUrl(baseUrl)}.`);
     }
     return taken;
+  }
+
+  /**
+   * Rewrites a `config.toml` already taken over, for an endpoint that changed
+   * mid-session.
+   *
+   * This is what moves Codex between the gateway and the router: the file is
+   * re-rendered from the user's backed-up original with a different address, so
+   * nothing an earlier write left behind can accumulate. A no-op when no
+   * takeover is in force, since there is then no original to re-render from.
+   *
+   * @param baseUrl the endpoint Codex should call, e.g. a running router's
+   * @param catalogPath the generated catalog, or null to leave the user's own
+   * @returns whether the file was rewritten
+   */
+  reapply(baseUrl: string, catalogPath: string | null): boolean {
+    const rewritten = this.file.reapply((original) => this.rewrite(original, baseUrl, catalogPath));
+    if (rewritten) {
+      console.info(`[CodexConfig] Codex now routes through ${this.providerBaseUrl(baseUrl)}.`);
+    }
+    return rewritten;
   }
 
   /**
@@ -89,7 +107,7 @@ export class CodexConfigTakeover {
   }
 
   /** The document Codex should see while Tokkey is running. */
-  private rewrite(original: string, gatewayBaseUrl: string, catalogPath: string | null): string {
+  private rewrite(original: string, baseUrl: string, catalogPath: string | null): string {
     let document = new CodexTomlDocument(original)
       // Removed first so a table left by an interrupted session is replaced
       // rather than declared twice, which Codex rejects outright.
@@ -103,7 +121,7 @@ export class CodexConfigTakeover {
         ['model_providers', TOKKEY_PROVIDER_ID],
         [
           ['name', 'Tokkey'],
-          ['base_url', this.providerBaseUrl(gatewayBaseUrl)],
+          ['base_url', this.providerBaseUrl(baseUrl)],
           // The gateway speaks the Responses wire, which is what lets a Codex
           // turn reach it unchanged.
           ['wire_api', 'responses'],
@@ -115,9 +133,13 @@ export class CodexConfigTakeover {
       .toString();
   }
 
-  /** The gateway's OpenAI-compatible prefix, which is what Codex appends paths to. */
-  private providerBaseUrl(gatewayBaseUrl: string): string {
-    return `${gatewayBaseUrl.replace(/\/+$/, '')}/v1`;
+  /**
+   * The endpoint's OpenAI-compatible prefix, which is what Codex appends paths
+   * to. The router serves the same prefix as the gateway, so one form covers
+   * both.
+   */
+  private providerBaseUrl(baseUrl: string): string {
+    return `${baseUrl.replace(/\/+$/, '')}/v1`;
   }
 }
 

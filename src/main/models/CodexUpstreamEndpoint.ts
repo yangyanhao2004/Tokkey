@@ -1,8 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import type { GatewayEndpoint } from '../gateway/GatewayModelClient';
 import GatewayPortResolver from '../gateway/GatewayPortResolver';
+import TokkeyHome from '../storage/TokkeyHome';
 import CodexProviderConfig, { type CodexProviderEndpoint } from './CodexProviderConfig';
 
 /** Spellings of "this machine" that a loopback URL may use. */
@@ -117,11 +117,7 @@ export class CodexUpstreamEndpoint {
     this.config = options.config ?? new CodexProviderConfig(options);
     this.probe = options.probe ?? new OpenAiModelsProbe();
     this.gateway = options.gateway ?? null;
-    this.recordFilePath = path.join(
-      options.homeDirectory ?? os.homedir(),
-      '.amiswifi',
-      'codex-upstream-endpoint.json'
-    );
+    this.recordFilePath = new TokkeyHome(options).pathFor('codex-upstream-endpoint.json');
   }
 
   /** The endpoint to register routes with, or null when there is none to use. */

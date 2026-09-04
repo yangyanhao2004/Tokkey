@@ -113,7 +113,7 @@ test('deploying a downloaded model starts the shared local runtime before it bec
   };
   const artifactPath = path.join(
     homeDirectory,
-    '.amiswifi',
+    '.tokkey',
     'models',
     descriptor.id,
     descriptor.fileName

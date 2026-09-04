@@ -65,7 +65,7 @@ import CloudModelConnector from './models/CloudModelConnector';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import HostSnapshotService from './host/HostSnapshotService';
-import RouterProcessManager from './router/RouterProcessManager';
+import RouterAgentIntegration from './router/RouterAgentIntegration';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 import AccountRuntime from './account/AccountRuntime';
 import AccountService from './account/AccountService';
@@ -96,7 +96,7 @@ export interface IpcControllerOptions {
   /** Keeps Claude Code's model settings in step with the gateway's routes. */
   claudeGatewayIntegration?: ClaudeGatewayIntegration;
   /** Owns the router subprocess the Router page's switch turns on and off. */
-  routerProcessManager?: RouterProcessManager;
+  routerAgentIntegration?: RouterAgentIntegration;
 }
 
 /**
@@ -132,7 +132,7 @@ export default class IpcController {
   private readonly cloudModelConnector: CloudModelConnector | null;
   private readonly codexGatewayIntegration: CodexGatewayIntegration | null;
   private readonly claudeGatewayIntegration: ClaudeGatewayIntegration | null;
-  private readonly routerProcessManager: RouterProcessManager | null;
+  private readonly routerAgentIntegration: RouterAgentIntegration | null;
   private readonly mcpConfigurationPreparer = new McpConfigurationPreparer();
 
   constructor(options: IpcControllerOptions = {}) {
@@ -174,10 +174,10 @@ export default class IpcController {
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     this.codexGatewayIntegration = options.codexGatewayIntegration ?? null;
     this.claudeGatewayIntegration = options.claudeGatewayIntegration ?? null;
-    this.routerProcessManager = options.routerProcessManager ?? null;
+    this.routerAgentIntegration = options.routerAgentIntegration ?? null;
     // The router can also stop on its own — a crash, or a start that timed out —
     // so the switch is driven by these events rather than by the click alone.
-    this.routerProcessManager?.subscribe((state) =>
+    this.routerAgentIntegration?.subscribe((state) =>
       this.broadcast('router:state-changed', state)
     );
     // Channel name -> handler function. Add new renderer-callable APIs here.
@@ -285,23 +285,23 @@ export default class IpcController {
 
   /** The router's current phase, which the Router page's switch draws itself from. */
   private getRouterRuntimeState(): RouterRuntimeState {
-    return this.routerProcessManager?.currentState() ?? IpcController.ROUTER_UNAVAILABLE_STATE;
+    return this.routerAgentIntegration?.currentState() ?? IpcController.ROUTER_UNAVAILABLE_STATE;
   }
 
-  /** Turns the router on. Resolves with the failure state rather than throwing. */
+  /**
+   * Turns the router on, which also moves Codex and Claude Code onto it.
+   * Resolves with the failure state rather than throwing.
+   */
   private startRouterRuntime(): Promise<RouterRuntimeState> {
-    if (!this.routerProcessManager) {
+    if (!this.routerAgentIntegration) {
       return Promise.resolve(IpcController.ROUTER_UNAVAILABLE_STATE);
     }
-    return this.routerProcessManager.start();
+    return this.routerAgentIntegration.turnOn();
   }
 
-  /** Turns the router off at the user's request. */
+  /** Turns the router off at the user's request, moving both CLIs back. */
   private stopRouterRuntime(): RouterRuntimeState {
-    return (
-      this.routerProcessManager?.stop('switched off from the Router page') ??
-      IpcController.ROUTER_UNAVAILABLE_STATE
-    );
+    return this.routerAgentIntegration?.turnOff() ?? IpcController.ROUTER_UNAVAILABLE_STATE;
   }
 
   /** Connects native Electron downloads after app.whenReady(). */
@@ -524,7 +524,7 @@ export default class IpcController {
     this.localChatTurnExecutor.cancelTurn(turnId);
   }
 
-  /** Lists the models already stored under ~/.amiswifi/models. */
+  /** Lists the models already stored under ~/.tokkey/models. */
   listInstalledLocalModels(): Promise<InstalledLocalModel[]> {
     return this.localModelManager.listInstalled();
   }
@@ -589,7 +589,7 @@ export default class IpcController {
    */
   private async syncAgentModels(): Promise<void> {
     await Promise.all([
-      this.syncQuietly('CodexCatalog', () => this.codexGatewayIntegration?.syncCatalog()),
+      this.syncQuietly('CodexCatalog', () => this.codexGatewayIntegration?.sync()),
       this.syncQuietly('ClaudeConfig', () => this.claudeGatewayIntegration?.syncSettings())
     ]);
   }

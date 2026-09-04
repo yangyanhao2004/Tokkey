@@ -15,15 +15,13 @@ export interface DesktopInferenceModel {
    * The model name Claude Desktop sends to the gateway.
    *
    * Claude Desktop's managed config drops any name its Anthropic-model check
-   * refuses, so the caller publishes cloud routes under a `ClaudeModelAlias`;
-   * the gateway resolves that alias back to the real route.
+   * refuses, so the caller publishes the router under a `ClaudeModelAlias`.
    */
   name: string;
   /**
    * The name shown in the picker, which the model check never inspects.
    *
-   * This is where the real model name goes: `name` has to survive a validator
-   * that refuses every rival vendor by name, so it cannot carry one.
+   * This keeps the picker label independent from the alias sent to the router.
    */
   labelOverride?: string;
   /**

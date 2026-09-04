@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import TokkeyHome from '../storage/TokkeyHome';
 
 /**
  * Locates the files Claude Desktop reads in 3p (third-party) mode.
@@ -15,9 +16,11 @@ import path from 'node:path';
  */
 export class ClaudeDesktopHome {
   private readonly homeDirectory: string;
+  private readonly tokkeyHome: TokkeyHome;
 
   constructor(options: { homeDirectory?: string } = {}) {
     this.homeDirectory = options.homeDirectory ?? os.homedir();
+    this.tokkeyHome = new TokkeyHome({ homeDirectory: this.homeDirectory });
   }
 
   /**
@@ -33,7 +36,7 @@ export class ClaudeDesktopHome {
 
   /** Where the `_meta.json` backup is kept while Tokkey's takeover is in force. */
   get metaBackupPath(): string {
-    return path.join(this.homeDirectory, '.amiswifi', 'desktop-config-meta-backup.json');
+    return this.tokkeyHome.pathFor('desktop-config-meta-backup.json');
   }
 }
 

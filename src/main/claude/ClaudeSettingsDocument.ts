@@ -12,8 +12,13 @@ interface ClaudeSettings {
  * that fails at the first turn.
  */
 export interface ClaudeModelSelection {
-  /** The model every session starts on — the cloud model the user connected. */
-  model: string;
+  /**
+   * The model every session starts on, or null to leave Claude Code's own
+   * `model` setting untouched. Null is how a model can be offered in
+   * `availableModels` without being forced on the user — the routed model, in
+   * particular, is never worth silently switching an existing session onto.
+   */
+  model: string | null;
   /** Every model the picker may offer, in display order. */
   availableModels: readonly string[];
 }
@@ -66,15 +71,18 @@ export class ClaudeSettingsDocument {
    * `enforceAvailableModels` is what makes the list binding rather than
    * advisory: without it Claude Code still offers the models it ships with, and
    * picking one sends a name the gateway holds no route for. The user's own
-   * `model` is overwritten for the same reason — while the takeover is in force
-   * it names a model this gateway cannot answer for — and the backup puts it
-   * back at quit.
+   * `model` is overwritten the same way whenever `selection.model` is given —
+   * while the takeover is in force it would otherwise name a model this gateway
+   * cannot answer for — and the backup puts it back at quit. A null
+   * `selection.model` leaves the existing `model` key alone instead, which is
+   * how an entry can be added to the picker without moving the user onto it.
    */
   setModelSelection(selection: ClaudeModelSelection): ClaudeSettingsDocument {
+    const { model, availableModels } = selection;
     return new ClaudeSettingsDocument({
       ...this.settings,
-      [MODEL_KEY]: selection.model,
-      [AVAILABLE_MODELS_KEY]: [...selection.availableModels],
+      ...(model !== null ? { [MODEL_KEY]: model } : {}),
+      [AVAILABLE_MODELS_KEY]: [...availableModels],
       [ENFORCE_AVAILABLE_MODELS_KEY]: true
     });
   }

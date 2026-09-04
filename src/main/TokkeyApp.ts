@@ -8,6 +8,8 @@ import ClaudeNativeModelRegistrar from './models/ClaudeNativeModelRegistrar';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import RouterProcessManager from './router/RouterProcessManager';
+import RouterAgentIntegration from './router/RouterAgentIntegration';
+import RouterBinding from './router/RouterBinding';
 import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
 import LocalChatTurnExecutor from './chat/LocalChatTurnExecutor';
 import LocalModelManager from './models/LocalModelManager';
@@ -39,7 +41,9 @@ export class TokkeyApp {
   private readonly codexGatewayIntegration: CodexGatewayIntegration;
   private readonly claudeGatewayIntegration: ClaudeGatewayIntegration;
   private readonly tokenHubRuntime: TokenHubRuntime;
+  private readonly routerBinding: RouterBinding;
   private readonly routerProcessManager: RouterProcessManager;
+  private readonly routerAgentIntegration: RouterAgentIntegration;
   private readonly isDev: boolean;
   private readonly evidenceMode: boolean;
   private readonly evidenceCapture: RendererEvidenceCapture | null;
@@ -70,11 +74,17 @@ export class TokkeyApp {
     this.cloudModelConnector = CloudModelConnector.forGateway(this.gatewayProcessManager);
     this.codexNativeModelRegistrar = CodexNativeModelRegistrar.forGateway(this.gatewayProcessManager);
     this.claudeNativeModelRegistrar = ClaudeNativeModelRegistrar.forGateway(this.gatewayProcessManager);
+    // Read by both CLI integrations on every write, and by nothing else: it is
+    // the single answer to "is the router on", so the two can never disagree
+    // about which endpoint and which model they are configuring.
+    this.routerBinding = new RouterBinding();
     this.codexGatewayIntegration = new CodexGatewayIntegration({
-      gateway: this.gatewayProcessManager
+      gateway: this.gatewayProcessManager,
+      routerBinding: this.routerBinding
     });
     this.claudeGatewayIntegration = new ClaudeGatewayIntegration({
-      gateway: this.gatewayProcessManager
+      gateway: this.gatewayProcessManager,
+      routerBinding: this.routerBinding
     });
     this.tokenHubRuntime = new TokenHubRuntime({
       runtimeLocator: new TokenHubRuntimeLocator({
@@ -95,6 +105,16 @@ export class TokkeyApp {
       gateway: this.gatewayProcessManager,
       resourcesPath: app.isPackaged ? process.resourcesPath : undefined
     });
+    // Everything the switch has to do beyond starting a process: pick the cloud
+    // tier, set the binding, and rewrite both CLIs from it.
+    this.routerAgentIntegration = new RouterAgentIntegration({
+      router: this.routerProcessManager,
+      binding: this.routerBinding,
+      cloudModels: this.cloudModelConnector,
+      codex: this.codexGatewayIntegration,
+      claude: this.claudeGatewayIntegration,
+      gateway: this.gatewayProcessManager
+    });
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
       cloudModelConnector: this.cloudModelConnector,
@@ -103,7 +123,7 @@ export class TokkeyApp {
       localModelManager: this.localModelManager,
       localChatTurnExecutor: this.localChatTurnExecutor,
       tokenHubRuntime: this.tokenHubRuntime,
-      routerProcessManager: this.routerProcessManager
+      routerAgentIntegration: this.routerAgentIntegration
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
     this.isDev = TokkeyApp.shouldOpenDevTools(this.evidenceMode, process.argv);

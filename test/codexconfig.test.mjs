@@ -8,8 +8,10 @@ import { CodexTomlDocument } from '../dist/main/codex/CodexTomlDocument.js';
 import { CodexCatalogGenerator, CatalogEntryFactory } from '../dist/main/codex/CodexCatalogGenerator.js';
 import { CodexConfigTakeover } from '../dist/main/codex/CodexConfigTakeover.js';
 import { CodexGatewayIntegration } from '../dist/main/codex/CodexGatewayIntegration.js';
+import { RouterBinding } from '../dist/main/router/RouterBinding.js';
+import { RouterModel } from '../dist/main/router/RouterModel.js';
 
-/** A throwaway home holding both `.codex` and `.amiswifi`. */
+/** A throwaway home holding both `.codex` and `.tokkey`. */
 function makeHome() {
   return mkdtempSync(path.join(tmpdir(), 'tokkey-codexconfig-'));
 }
@@ -299,9 +301,11 @@ test('leaves every model without the fields codex derives for itself', () => {
     { effort: 'high' }
   ]);
   assert.deepEqual(result.models[0].default_reasoning_level, { effort: 'high' });
-  // ...while a routed row keeps the field but empty, so it never advertises the
-  // levels of the model it was cloned from, and carries no default into it.
-  assert.deepEqual(result.models[1].supported_reasoning_levels, []);
+  // ...while a routed row carries an explicit sentinel instead of advertising
+  // the levels of the model it was cloned from, and carries no default into it.
+  assert.deepEqual(result.models[1].supported_reasoning_levels, [
+    { description: 'not supported', effort: 'none' }
+  ]);
   assert.equal('default_reasoning_level' in result.models[1], false);
   // The compaction threshold survives, derived from the window it was given.
   assert.equal(result.models[1].auto_compact_token_limit, 230400);
@@ -367,17 +371,6 @@ test('still produces a usable row when no native template exists', () => {
 // CodexGatewayIntegration
 // ---------------------------------------------------------------------------
 
-/** A gateway client answering with a fixed set of routes. */
-class FakeGatewayModelClient {
-  constructor(routes) {
-    this.routes = routes;
-  }
-
-  async listModels() {
-    return this.routes;
-  }
-}
-
 /** A bundled catalog that never shells out. */
 class FakeBundledCatalog {
   constructor(models) {
@@ -393,40 +386,84 @@ class FakeBundledCatalog {
   }
 }
 
-function makeIntegration(home, routes) {
+const GATEWAY_URL = 'http://127.0.0.1:4173';
+const ROUTER_URL = 'http://127.0.0.1:5173';
+
+/** The route the one shipped cloud card derives; see `CloudModelCatalog`. */
+const CLOUD_ROUTE = 'custom-gpt-5.6-terra-openai-c05442';
+/** What the catalog carries for the routed pair: a fixed slug, same for every pairing. */
+const ROUTER_SLUG = RouterModel.DISPLAY_NAME;
+
+/** A binding already switched on, as `RouterAgentIntegration.turnOn` leaves it. */
+function boundRouter() {
+  const binding = new RouterBinding();
+  binding.bind(ROUTER_URL, RouterModel.forSingleModel({ routeName: CLOUD_ROUTE, displayName: 'gpt-5.6-terra' }));
+  return binding;
+}
+
+function makeIntegration(home, { routerBinding, baseUrl = GATEWAY_URL } = {}) {
   const codexHome = codexHomeOf(home);
   return new CodexGatewayIntegration({
-    gateway: { startIfNeeded: async () => {}, baseUrl: () => 'http://127.0.0.1:4173' },
-    client: new FakeGatewayModelClient(routes),
+    gateway: { startIfNeeded: async () => {}, baseUrl: () => baseUrl },
+    routerBinding: routerBinding ?? new RouterBinding(),
     bundled: new FakeBundledCatalog([nativeEntry('gpt-5.5')]),
     homeDirectory: home,
     codexHome
   });
 }
 
-test('catalogues the routes the gateway serves and points codex at the file', async () => {
+function readCatalog(home) {
+  return JSON.parse(readFileSync(path.join(codexHomeOf(home), 'amis-catalog.json'), 'utf8'));
+}
+
+test('catalogues the routed pair beside codex own models and points codex at the file', async () => {
   const home = makeHome();
   const configPath = writeConfig(home, USER_CONFIG);
-  const integration = makeIntegration(home, [
-    { modelId: '1', modelName: 'gpt-5.5' },
-    { modelId: '2', modelName: 'custom-gpt-5.6-terra-openai-c05442' }
-  ]);
+  const integration = makeIntegration(home, { routerBinding: boundRouter() });
 
   assert.equal(await integration.activate(), true);
 
   const config = readFileSync(configPath, 'utf8');
   const catalogPath = path.join(codexHomeOf(home), 'amis-catalog.json');
   assert.ok(config.includes(`model_catalog_json = "${catalogPath}"`));
-  const catalog = JSON.parse(readFileSync(catalogPath, 'utf8'));
-  // The native route keeps Codex's own row rather than a derived clone.
-  assert.deepEqual(catalog.models.map((entry) => entry.slug), [
-    'gpt-5.5',
-    'custom-gpt-5.6-terra-openai-c05442'
-  ]);
-  assert.equal(CatalogEntryFactory.isTokkeyAuthored(catalog.models[0]), false);
-  // The card behind the route names it, so the picker reads as the user connected it.
-  assert.equal(catalog.models[1].display_name, 'custom/gpt-5.6-terra');
+  // Codex follows the router, not the gateway, whenever a pair is bound.
+  assert.ok(config.includes(`base_url = "${ROUTER_URL}/v1"`));
 
+  const catalog = readCatalog(home);
+  // The native model keeps Codex's own row rather than a derived clone.
+  assert.deepEqual(catalog.models.map((entry) => entry.slug), ['gpt-5.5', ROUTER_SLUG]);
+  assert.equal(CatalogEntryFactory.isTokkeyAuthored(catalog.models[0]), false);
+  assert.equal(catalog.models[1].display_name, 'Tokkey-Router');
+  // The slug shows only route names, so the description names both models.
+  assert.ok(catalog.models[1].description.includes('local gpt-5.6-terra, cloud gpt-5.6-terra'));
+
+  integration.deactivate();
+  assert.equal(readFileSync(configPath, 'utf8'), USER_CONFIG);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('the router switch moves codex both ways, and the backup survives it', async () => {
+  const home = makeHome();
+  const configPath = writeConfig(home, USER_CONFIG);
+  // The launch takes over before the Router page is touched...
+  const binding = new RouterBinding();
+  const integration = makeIntegration(home, { routerBinding: binding });
+  await integration.activate();
+  assert.deepEqual(readCatalog(home).models.map((entry) => entry.slug), ['gpt-5.5']);
+
+  // ...the switch goes on, and the republish that follows adds the pair.
+  binding.bind(ROUTER_URL, RouterModel.forSingleModel({ routeName: CLOUD_ROUTE, displayName: 'gpt-5.6-terra' }));
+  await integration.sync();
+  assert.deepEqual(readCatalog(home).models.map((entry) => entry.slug), ['gpt-5.5', ROUTER_SLUG]);
+  assert.ok(readFileSync(configPath, 'utf8').includes(`base_url = "${ROUTER_URL}/v1"`));
+
+  // ...and off again, which takes the pair away and hands the port back.
+  binding.release();
+  await integration.sync();
+  assert.deepEqual(readCatalog(home).models.map((entry) => entry.slug), ['gpt-5.5']);
+  assert.ok(readFileSync(configPath, 'utf8').includes(`base_url = "${GATEWAY_URL}/v1"`));
+
+  // Every refresh rewrote the file, not the backup: quit still returns the original.
   integration.deactivate();
   assert.equal(readFileSync(configPath, 'utf8'), USER_CONFIG);
   rmSync(home, { recursive: true, force: true });
@@ -435,13 +472,7 @@ test('catalogues the routes the gateway serves and points codex at the file', as
 test('leaves config.toml alone when the gateway is not running', async () => {
   const home = makeHome();
   const configPath = writeConfig(home, USER_CONFIG);
-  const integration = new CodexGatewayIntegration({
-    gateway: { startIfNeeded: async () => {}, baseUrl: () => null },
-    client: new FakeGatewayModelClient([]),
-    bundled: new FakeBundledCatalog([]),
-    homeDirectory: home,
-    codexHome: codexHomeOf(home)
-  });
+  const integration = makeIntegration(home, { baseUrl: null });
 
   assert.equal(await integration.activate(), false);
 
@@ -453,10 +484,9 @@ test('does not point codex at a catalog that came out empty', async () => {
   const home = makeHome();
   const configPath = writeConfig(home, USER_CONFIG);
 
-  // No routes and no bundled natives: nothing to catalogue.
+  // No router model and no bundled natives: nothing to catalogue.
   await new CodexGatewayIntegration({
-    gateway: { startIfNeeded: async () => {}, baseUrl: () => 'http://127.0.0.1:4173' },
-    client: new FakeGatewayModelClient([]),
+    gateway: { startIfNeeded: async () => {}, baseUrl: () => GATEWAY_URL },
     bundled: new FakeBundledCatalog([]),
     homeDirectory: home,
     codexHome: codexHomeOf(home)

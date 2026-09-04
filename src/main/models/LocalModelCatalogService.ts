@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import type { LocalModelDescriptor } from '../../shared/types';
+import TokkeyHome from '../storage/TokkeyHome';
 
 const MODEL_CATALOG_ROOT = 'https://cpilot.net/api/model-catalog';
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
@@ -23,8 +23,7 @@ export class LocalModelCatalogService {
   private cache: CatalogCache | null = null;
 
   constructor(options: { homeDirectory?: string; fetcher?: ModelCatalogFetch } = {}) {
-    const homeDirectory = options.homeDirectory ?? os.homedir();
-    this.cachePath = path.join(homeDirectory, '.amiswifi', 'model_catalog_cache.json');
+    this.cachePath = new TokkeyHome(options).pathFor('model_catalog_cache.json');
     this.fetcher = options.fetcher ?? ((input) => fetch(input));
   }
 
