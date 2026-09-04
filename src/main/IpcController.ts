@@ -71,7 +71,7 @@ import CloudModelConnector from './models/CloudModelConnector';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import HostSnapshotService from './host/HostSnapshotService';
-import RouterProcessManager from './router/RouterProcessManager';
+import RouterAgentIntegration from './router/RouterAgentIntegration';
 import { PetSettingsStore, assertPetSettings, type PetSettingsStoring } from './pet/PetSettingsStore';
 import type { PetRuntimeCoordinating } from './pet/PetRuntimeCoordinator';
 import type { PetCompanionSignal } from './pet/PetCompanionStatus';
@@ -105,7 +105,7 @@ export interface IpcControllerOptions {
   /** Keeps Claude Code's model settings in step with the gateway's routes. */
   claudeGatewayIntegration?: ClaudeGatewayIntegration;
   /** Owns the router subprocess the Router page's switch turns on and off. */
-  routerProcessManager?: RouterProcessManager;
+  routerAgentIntegration?: RouterAgentIntegration;
   /** Persists Pet settings; injected in tests, user-data-backed in production. */
   petSettingsStore?: PetSettingsStoring;
   /** Runs the independent desktop Pet window when settings enable it. */
@@ -145,7 +145,7 @@ export default class IpcController {
   private readonly cloudModelConnector: CloudModelConnector | null;
   private readonly codexGatewayIntegration: CodexGatewayIntegration | null;
   private readonly claudeGatewayIntegration: ClaudeGatewayIntegration | null;
-  private readonly routerProcessManager: RouterProcessManager | null;
+  private readonly routerAgentIntegration: RouterAgentIntegration | null;
   private readonly petSettingsStore: PetSettingsStoring;
   private readonly petRuntimeCoordinator: PetRuntimeCoordinating | null;
   private petSettings: PetSettings | null = null;
@@ -192,14 +192,14 @@ export default class IpcController {
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     this.codexGatewayIntegration = options.codexGatewayIntegration ?? null;
     this.claudeGatewayIntegration = options.claudeGatewayIntegration ?? null;
-    this.routerProcessManager = options.routerProcessManager ?? null;
+    this.routerAgentIntegration = options.routerAgentIntegration ?? null;
     this.petSettingsStore = options.petSettingsStore ?? new PetSettingsStore(
       () => path.join(app.getPath('userData'), 'pet-settings.json')
     );
     this.petRuntimeCoordinator = options.petRuntimeCoordinator ?? null;
     // The router can also stop on its own — a crash, or a start that timed out —
     // so the switch is driven by these events rather than by the click alone.
-    this.routerProcessManager?.subscribe((state) =>
+    this.routerAgentIntegration?.subscribe((state) =>
       this.broadcast('router:state-changed', state)
     );
     this.petRuntimeCoordinator?.subscribe((state) =>
@@ -315,23 +315,23 @@ export default class IpcController {
 
   /** The router's current phase, which the Router page's switch draws itself from. */
   private getRouterRuntimeState(): RouterRuntimeState {
-    return this.routerProcessManager?.currentState() ?? IpcController.ROUTER_UNAVAILABLE_STATE;
+    return this.routerAgentIntegration?.currentState() ?? IpcController.ROUTER_UNAVAILABLE_STATE;
   }
 
-  /** Turns the router on. Resolves with the failure state rather than throwing. */
+  /**
+   * Turns the router on, which also moves Codex and Claude Code onto it.
+   * Resolves with the failure state rather than throwing.
+   */
   private startRouterRuntime(): Promise<RouterRuntimeState> {
-    if (!this.routerProcessManager) {
+    if (!this.routerAgentIntegration) {
       return Promise.resolve(IpcController.ROUTER_UNAVAILABLE_STATE);
     }
-    return this.routerProcessManager.start();
+    return this.routerAgentIntegration.turnOn();
   }
 
-  /** Turns the router off at the user's request. */
+  /** Turns the router off at the user's request, moving both CLIs back. */
   private stopRouterRuntime(): RouterRuntimeState {
-    return (
-      this.routerProcessManager?.stop('switched off from the Router page') ??
-      IpcController.ROUTER_UNAVAILABLE_STATE
-    );
+    return this.routerAgentIntegration?.turnOff() ?? IpcController.ROUTER_UNAVAILABLE_STATE;
   }
 
   /** Reads the shared Pet settings snapshot, caching it for this app run. */
@@ -656,7 +656,7 @@ export default class IpcController {
     this.localChatTurnExecutor.cancelTurn(turnId);
   }
 
-  /** Lists the models already stored under ~/.amiswifi/models. */
+  /** Lists the models already stored under ~/.tokkey/models. */
   listInstalledLocalModels(): Promise<InstalledLocalModel[]> {
     return this.localModelManager.listInstalled();
   }
@@ -721,7 +721,7 @@ export default class IpcController {
    */
   private async syncAgentModels(): Promise<void> {
     await Promise.all([
-      this.syncQuietly('CodexCatalog', () => this.codexGatewayIntegration?.syncCatalog()),
+      this.syncQuietly('CodexCatalog', () => this.codexGatewayIntegration?.sync()),
       this.syncQuietly('ClaudeConfig', () => this.claudeGatewayIntegration?.syncSettings())
     ]);
   }

@@ -92,16 +92,16 @@ test('keeps only listed models and drops the instruction blobs', async () => {
   ]);
   // The cache behind it keeps the rows whole, because the catalog Tokkey
   // generates for Codex is built by cloning one of them.
-  const cached = readFileSync(path.join(home, '.amiswifi', 'codex-bundled-catalog.json'), 'utf8');
+  const cached = readFileSync(path.join(home, '.tokkey', 'codex-bundled-catalog.json'), 'utf8');
   assert.ok(cached.includes('instructions_template'));
   rmSync(home, { recursive: true, force: true });
 });
 
 test('reuses the cache when the installed codex version is unchanged', async () => {
   const home = makeHome();
-  mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
+  mkdirSync(path.join(home, '.tokkey'), { recursive: true });
   writeFileSync(
-    path.join(home, '.amiswifi', 'codex-bundled-catalog.json'),
+    path.join(home, '.tokkey', 'codex-bundled-catalog.json'),
     JSON.stringify({ codexVersion: CODEX_VERSION, models: [catalogEntry('gpt-5.5')] })
   );
   const runner = new FakeShellRunner({ catalog: [catalogJson([catalogEntry('gpt-5.6-sol')])] });
@@ -116,9 +116,9 @@ test('reuses the cache when the installed codex version is unchanged', async () 
 
 test('refreshes the cache when codex has been upgraded', async () => {
   const home = makeHome();
-  mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
+  mkdirSync(path.join(home, '.tokkey'), { recursive: true });
   writeFileSync(
-    path.join(home, '.amiswifi', 'codex-bundled-catalog.json'),
+    path.join(home, '.tokkey', 'codex-bundled-catalog.json'),
     JSON.stringify({ codexVersion: 'codex-cli 0.1.0', models: [] })
   );
   const runner = new FakeShellRunner({ catalog: [catalogJson([catalogEntry('gpt-5.5')])] });
@@ -131,9 +131,9 @@ test('refreshes the cache when codex has been upgraded', async () => {
 
 test('falls back to the cached list when codex cannot be run', async () => {
   const home = makeHome();
-  mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
+  mkdirSync(path.join(home, '.tokkey'), { recursive: true });
   writeFileSync(
-    path.join(home, '.amiswifi', 'codex-bundled-catalog.json'),
+    path.join(home, '.tokkey', 'codex-bundled-catalog.json'),
     JSON.stringify({ codexVersion: CODEX_VERSION, models: [catalogEntry('gpt-5.5')] })
   );
   const runner = new FakeShellRunner({ failing: true });
@@ -291,7 +291,7 @@ function modelsProbeFor(serving = {}) {
 
 /** The record file as one launch would leave it behind. */
 function recordedEndpoint(home) {
-  const file = path.join(home, '.amiswifi', 'codex-upstream-endpoint.json');
+  const file = path.join(home, '.tokkey', 'codex-upstream-endpoint.json');
   try {
     return JSON.parse(readFileSync(file, 'utf8')).baseUrl;
   } catch {

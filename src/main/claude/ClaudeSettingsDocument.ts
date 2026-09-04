@@ -12,8 +12,13 @@ interface ClaudeSettings {
  * that fails at the first turn.
  */
 export interface ClaudeModelSelection {
-  /** The model every session starts on — the cloud model the user connected. */
-  model: string;
+  /**
+   * The model every session starts on, or null to leave Claude Code's own
+   * `model` setting untouched. Null is how a model can be offered in
+   * `availableModels` without being forced on the user — the routed model, in
+   * particular, is never worth silently switching an existing session onto.
+   */
+  model: string | null;
   /** Every model the picker may offer, in display order. */
   availableModels: readonly string[];
 }
@@ -66,15 +71,18 @@ export class ClaudeSettingsDocument {
    * `enforceAvailableModels` is what makes the list binding rather than
    * advisory: without it Claude Code still offers the models it ships with, and
    * picking one sends a name the gateway holds no route for. The user's own
-   * `model` is overwritten for the same reason — while the takeover is in force
-   * it names a model this gateway cannot answer for — and the backup puts it
-   * back at quit.
+   * `model` is overwritten the same way whenever `selection.model` is given —
+   * while the takeover is in force it would otherwise name a model this gateway
+   * cannot answer for — and the backup puts it back at quit. A null
+   * `selection.model` leaves the existing `model` key alone instead, which is
+   * how an entry can be added to the picker without moving the user onto it.
    */
   setModelSelection(selection: ClaudeModelSelection): ClaudeSettingsDocument {
+    const { model, availableModels } = selection;
     return new ClaudeSettingsDocument({
       ...this.settings,
-      [MODEL_KEY]: selection.model,
-      [AVAILABLE_MODELS_KEY]: [...selection.availableModels],
+      ...(model !== null ? { [MODEL_KEY]: model } : {}),
+      [AVAILABLE_MODELS_KEY]: [...availableModels],
       [ENFORCE_AVAILABLE_MODELS_KEY]: true
     });
   }
@@ -83,6 +91,71 @@ export class ClaudeSettingsDocument {
   environmentVariable(name: string): string | null {
     const value = this.settings.env?.[name];
     return typeof value === 'string' ? value : null;
+  }
+
+  /** The JSON-encoded value at a dotted path (e.g. `['env', 'ANTHROPIC_BASE_URL']`), or null if unset. */
+  getPath(pathSegments: readonly string[]): string | null {
+    let node: unknown = this.settings;
+    for (const segment of pathSegments) {
+      if (typeof node !== 'object' || node === null || Array.isArray(node)) return null;
+      node = (node as Record<string, unknown>)[segment];
+    }
+    return node === undefined ? null : JSON.stringify(node);
+  }
+
+  /** The document with a dotted path set to a JSON-encoded value, creating intermediate objects as needed. */
+  setPath(pathSegments: readonly string[], jsonValue: string): ClaudeSettingsDocument {
+    return new ClaudeSettingsDocument(
+      ClaudeSettingsDocument.withPath(this.settings, pathSegments, JSON.parse(jsonValue))
+    );
+  }
+
+  /** The document with a dotted path removed entirely, leaving its siblings alone. */
+  deletePath(pathSegments: readonly string[]): ClaudeSettingsDocument {
+    return new ClaudeSettingsDocument(ClaudeSettingsDocument.withoutPath(this.settings, pathSegments));
+  }
+
+  /** Whether every top-level key is gone, the JSON equivalent of an empty file. */
+  isEmpty(): boolean {
+    return Object.keys(this.settings).length === 0;
+  }
+
+  private static withPath(node: ClaudeSettings, pathSegments: readonly string[], value: unknown): ClaudeSettings {
+    const [key, ...rest] = pathSegments;
+    if (key === undefined) return node;
+    if (rest.length === 0) return { ...node, [key]: value };
+    const child = typeof node[key] === 'object' && node[key] !== null ? (node[key] as ClaudeSettings) : {};
+    return { ...node, [key]: ClaudeSettingsDocument.withPath(child, rest, value) };
+  }
+
+  /**
+   * Removes a dotted path, and cascades the removal up through any parent
+   * object that a nested delete leaves with no keys of its own.
+   *
+   * A parent that is left empty by this specific delete was never meaningful
+   * on its own — nothing here writes an object just to leave it standing empty
+   * — so pruning it is what lets `env` disappear once `ANTHROPIC_BASE_URL` is
+   * the last thing gone from it, the same way it would if Tokkey had never
+   * added it in the first place.
+   */
+  private static withoutPath(node: ClaudeSettings, pathSegments: readonly string[]): ClaudeSettings {
+    const [key, ...rest] = pathSegments;
+    if (key === undefined) return node;
+    if (rest.length === 0) {
+      const remainder = { ...node };
+      delete remainder[key];
+      return remainder;
+    }
+    const child = node[key];
+    if (typeof child !== 'object' || child === null || Array.isArray(child)) return node;
+    const prunedChild = ClaudeSettingsDocument.withoutPath(child as ClaudeSettings, rest);
+    const remainder = { ...node };
+    if (Object.keys(prunedChild).length === 0) {
+      delete remainder[key];
+    } else {
+      remainder[key] = prunedChild;
+    }
+    return remainder;
   }
 
   toString(): string {

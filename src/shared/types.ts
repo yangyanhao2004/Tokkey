@@ -589,7 +589,7 @@ export interface LocalModelRow extends LocalModelDescriptor {
 
 /**
  * A GGUF whose bytes are on this Mac, found recursively under
- * `~/.amiswifi/models`. Independent of the remote catalog, so the Tokkey page
+ * `~/.tokkey/models`. Independent of the remote catalog, so the Tokkey page
  * can list what is installed while offline.
  */
 export interface InstalledLocalModel {

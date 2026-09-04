@@ -1,39 +1,47 @@
-import os from 'node:os';
-import path from 'node:path';
-import BackedUpConfigFile from '../config/BackedUpConfigFile';
+import OwnedConfigFile, { type SlotEditor, type SlotWrite } from '../config/OwnedConfigFile';
+import TokkeyHome from '../storage/TokkeyHome';
 import ClaudeHome from './ClaudeHome';
 import ClaudeSettingsDocument, { type ClaudeModelSelection } from './ClaudeSettingsDocument';
 
 /** The setting Claude Code reads to decide which host serves its Messages calls. */
 const BASE_URL_KEY = 'ANTHROPIC_BASE_URL';
+const ENV_PATH = ['env', BASE_URL_KEY] as const;
+const MODEL_PATH = ['model'] as const;
+const AVAILABLE_MODELS_PATH = ['availableModels'] as const;
+const ENFORCE_AVAILABLE_MODELS_PATH = ['enforceAvailableModels'] as const;
 
 /**
  * Points the Claude Code CLI at the local gateway for as long as Tokkey runs.
  *
  * The mechanism is `~/.claude/settings.json`, whose `env` block Claude applies
  * to every session it starts, and the one entry Tokkey sets there is
- * `ANTHROPIC_BASE_URL`. Nothing else is touched — no credential, in particular.
- * Claude Code carries its own login and sends it with the request, and the
- * gateway's Claude routes are registered keyless precisely so that credential
- * is the one that gets spent; writing a key here would supersede the user's
+ * `ANTHROPIC_BASE_URL`. When a model selection is in force it also owns
+ * `model`, `availableModels` and `enforceAvailableModels` — never anything
+ * else. Nothing else is touched — no credential, in particular. Claude Code
+ * carries its own login and sends it with the request, and the gateway's
+ * Claude routes are registered keyless precisely so that credential is the
+ * one that gets spent; writing a key here would supersede the user's
  * claude.ai subscription and bill an API account instead.
  *
- * The borrow-and-return contract, the crash recovery and the byte-for-byte
- * restore all live in {@link BackedUpConfigFile}, which `CodexConfigTakeover`
- * shares. Read that class for why the original is copied aside rather than
- * edited back out at quit.
+ * The per-key loan-and-return contract, the crash recovery and the
+ * independent-slot restore all live in {@link OwnedConfigFile}, which
+ * `CodexConfigTakeover` shares. Read that class for why each slot is given
+ * back on its own instead of the whole file being restored as one unit.
  */
 export class ClaudeConfigTakeover {
-  private readonly file: BackedUpConfigFile;
+  private readonly file: OwnedConfigFile;
 
-  constructor(options: { home?: ClaudeHome; homeDirectory?: string; claudeHome?: string; backupPath?: string } = {}) {
+  constructor(options: { home?: ClaudeHome; homeDirectory?: string; claudeHome?: string; ledgerPath?: string } = {}) {
     const home = options.home ?? new ClaudeHome(options);
-    this.file = new BackedUpConfigFile({
+    this.file = new OwnedConfigFile({
       filePath: home.settingsPath,
-      backupPath:
-        options.backupPath ??
-        path.join(options.homeDirectory ?? os.homedir(), '.amiswifi', 'claude-settings-backup.json'),
-      label: 'ClaudeConfig'
+      ledgerPath:
+        options.ledgerPath ??
+        new TokkeyHome(options).pathFor('claude-settings-ledger.json'),
+      label: 'ClaudeConfig',
+      // A JSON document with every owned key gone still serializes to `{}`,
+      // never to whitespace, so emptiness has to be asked of the parsed form.
+      isEmpty: (text) => new ClaudeSettingsDocument(text).isEmpty()
     });
   }
 
@@ -41,22 +49,23 @@ export class ClaudeConfigTakeover {
     return this.file.configPath;
   }
 
-  /** Where the user's own settings are held while the takeover is in force. */
-  get backupFilePath(): string {
-    return this.file.backupFilePath;
+  /** Where the ledger of Tokkey's owned keys is kept while the takeover is in force. */
+  get ledgerFilePath(): string {
+    return this.file.ledgerFilePath;
   }
 
   /**
    * Undoes a takeover a previous run never got to undo.
    *
-   * @returns whether a leftover backup was found and restored
+   * @returns whether a leftover ledger was found and reverted
    */
   recoverInterruptedSession(): boolean {
-    return this.file.recoverInterruptedSession();
+    return this.file.recoverInterruptedSession(this.allEditors());
   }
 
   /**
-   * Backs up `settings.json` and rewrites it to send Claude to the gateway.
+   * Writes `env.ANTHROPIC_BASE_URL` and — when given — the model selection,
+   * recording each slot's pre-takeover value the first time it is touched.
    *
    * @param gatewayBaseUrl the running gateway's base URL, e.g. `http://127.0.0.1:4033`
    * @param selection the models to restrict Claude Code to, or null to leave
@@ -65,7 +74,7 @@ export class ClaudeConfigTakeover {
    */
   activate(gatewayBaseUrl: string, selection: ClaudeModelSelection | null = null): boolean {
     const baseUrl = ClaudeConfigTakeover.normalizeBaseUrl(gatewayBaseUrl);
-    const taken = this.file.activate((original) => this.rewrite(original, baseUrl, selection));
+    const taken = this.file.activate(this.writesFor(baseUrl, selection), this.allEditors());
     if (taken) {
       console.info(`[ClaudeConfig] Claude Code now routes through ${baseUrl}.`);
     }
@@ -73,35 +82,65 @@ export class ClaudeConfigTakeover {
   }
 
   /**
-   * Rewrites the settings for a model set that changed after `activate` ran,
+   * Rewrites the same slots for a model set that changed after `activate` ran,
    * which is how a model connected mid-session reaches Claude Code's picker.
    *
-   * Does nothing when no takeover is in force: taking the file over is
-   * `activate`'s decision, and a connect should not make it for it.
+   * Only the keys Tokkey owns are touched, so anything the user changed
+   * elsewhere in `settings.json` — permissions, hooks, their own model choice
+   * when no selection is given — survives untouched. Does nothing when no
+   * takeover is in force: taking the file over is `activate`'s decision, and a
+   * refresh should not make it for it.
    *
    * @returns whether the settings were rewritten
    */
   reapply(gatewayBaseUrl: string, selection: ClaudeModelSelection | null): boolean {
     const baseUrl = ClaudeConfigTakeover.normalizeBaseUrl(gatewayBaseUrl);
-    return this.file.reapply((original) => this.rewrite(original, baseUrl, selection));
+    return this.file.reapply(this.writesFor(baseUrl, selection), this.allEditors());
   }
 
-  /** The settings Claude Code should see while Tokkey is running. */
-  private rewrite(
-    original: string,
-    baseUrl: string,
-    selection: ClaudeModelSelection | null
-  ): string {
-    const document = new ClaudeSettingsDocument(original).setEnvironmentVariable(
-      BASE_URL_KEY,
-      baseUrl
-    );
-    return (selection ? document.setModelSelection(selection) : document).toString();
-  }
-
-  /** Puts the user's own `settings.json` back. Synchronous, for `will-quit`. */
+  /**
+   * Puts every owned slot back to what it held before the takeover — except a
+   * slot the user changed while Tokkey was running, which is left as they set
+   * it. Synchronous, for `will-quit`.
+   */
   restore(): boolean {
-    return this.file.restore();
+    return this.file.restore(this.allEditors());
+  }
+
+  /** The slots this takeover writes for a given gateway address and selection. */
+  private writesFor(baseUrl: string, selection: ClaudeModelSelection | null): SlotWrite[] {
+    const writes: SlotWrite[] = [this.pathSlot(ENV_PATH, JSON.stringify(baseUrl))];
+    if (selection) {
+      if (selection.model !== null) {
+        writes.push(this.pathSlot(MODEL_PATH, JSON.stringify(selection.model)));
+      }
+      writes.push(this.pathSlot(AVAILABLE_MODELS_PATH, JSON.stringify([...selection.availableModels])));
+      writes.push(this.pathSlot(ENFORCE_AVAILABLE_MODELS_PATH, JSON.stringify(true)));
+    }
+    return writes;
+  }
+
+  /** Every slot this takeover might ever hold, for recovery and restore. */
+  private allEditors(): SlotEditor[] {
+    return [
+      this.pathEditor(ENV_PATH),
+      this.pathEditor(MODEL_PATH),
+      this.pathEditor(AVAILABLE_MODELS_PATH),
+      this.pathEditor(ENFORCE_AVAILABLE_MODELS_PATH)
+    ];
+  }
+
+  private pathEditor(pathSegments: readonly string[]): SlotEditor {
+    return {
+      id: pathSegments.join('.'),
+      read: (text) => new ClaudeSettingsDocument(text).getPath(pathSegments),
+      write: (text, value) => new ClaudeSettingsDocument(text).setPath(pathSegments, value).toString(),
+      clear: (text) => new ClaudeSettingsDocument(text).deletePath(pathSegments).toString()
+    };
+  }
+
+  private pathSlot(pathSegments: readonly string[], jsonValue: string): SlotWrite {
+    return { ...this.pathEditor(pathSegments), value: jsonValue };
   }
 
   /**

@@ -18,6 +18,12 @@ export interface CatalogModelInput {
   /** Vendor named in the row description; falls back to the slug. */
   ownedBy?: string;
   /**
+   * What the row's description says about the model, after the marker that
+   * identifies the row as Tokkey's. Only for a row whose slug does not explain
+   * itself — a routed pair names two models the slug shows only as route names.
+   */
+  describedAs?: string;
+  /**
    * Only the compaction threshold is derived from this. The window itself is
    * never written — see `OMITTED_FIELDS`.
    */
@@ -94,7 +100,7 @@ const OMITTED_FIELDS: readonly string[] = [
 export class CatalogEntryFactory {
   /** The description doubles as the ownership marker the merge keys off. */
   static describe(model: CatalogModelInput): string {
-    return `${ROUTED_DESCRIPTION_PREFIX}${model.ownedBy ?? model.slug}.`;
+    return `${ROUTED_DESCRIPTION_PREFIX}${model.describedAs ?? model.ownedBy ?? model.slug}.`;
   }
 
   /** Whether Tokkey is the author of this row. */
@@ -225,13 +231,13 @@ export class CatalogEntryFactory {
   ): CatalogEntry {
     // Rewritten on a routed row only: it is a clone, so the ladder it inherited
     // describes the native model rather than the one the gateway forwards to,
-    // and an absent field would let Codex fall back to a ladder of its own. An
-    // empty list says plainly that this row offers none, and the default that
-    // indexed into the old ladder goes with it. A native row's ladder is the
-    // model's own and is left exactly as Codex wrote it, so the picker still
-    // offers the reasoning levels those models really support.
+    // and an absent field would let Codex fall back to a ladder of its own. The
+    // explicit sentinel says that this row does not support reasoning levels,
+    // and the default that indexed into the old ladder goes with it. A native
+    // row's ladder is the model's own and is left exactly as Codex wrote it, so
+    // the picker still offers the reasoning levels those models really support.
     if (options.routed) {
-      entry.supported_reasoning_levels = [];
+      entry.supported_reasoning_levels = [{ description: 'not supported', effort: 'none' }];
       delete entry.default_reasoning_level;
     }
     if (typeof entry.supports_reasoning_summaries !== 'boolean') entry.supports_reasoning_summaries = false;

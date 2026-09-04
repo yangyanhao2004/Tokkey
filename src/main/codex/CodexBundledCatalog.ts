@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import { ShellRunner } from '../agents/ShellRunner';
 import type { ShellRunner as ShellRunnerContract } from '../agents/AgentTypes';
+import TokkeyHome from '../storage/TokkeyHome';
 import type { CatalogDocument, CatalogEntry } from './CodexCatalogFile';
 
 /** The Codex CLI prints its bundled catalog as one JSON document on stdout. */
@@ -45,11 +45,7 @@ export class CodexBundledCatalog {
 
   constructor(options: { runner?: ShellRunnerContract; homeDirectory?: string } = {}) {
     this.runner = options.runner ?? new ShellRunner();
-    this.cacheFilePath = path.join(
-      options.homeDirectory ?? os.homedir(),
-      '.amiswifi',
-      'codex-bundled-catalog.json'
-    );
+    this.cacheFilePath = new TokkeyHome(options).pathFor('codex-bundled-catalog.json');
   }
 
   /** Every native row, from the cache when it matches the installed CLI. */

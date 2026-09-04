@@ -1,48 +1,50 @@
-import type { CloudModelCard } from '../../shared/types';
-import GatewayModelClient, { type GatewayEndpoint } from '../gateway/GatewayModelClient';
-import CloudModelCatalog from '../models/CloudModelCatalog';
-import CloudModelConnector from '../models/CloudModelConnector';
+import type { GatewayEndpoint } from '../gateway/GatewayModelClient';
+import RouterBinding from '../router/RouterBinding';
+import RouterModel from '../router/RouterModel';
 import CodexBundledCatalog from './CodexBundledCatalog';
 import CodexCatalogGenerator, { type CatalogModelInput } from './CodexCatalogGenerator';
 import CodexConfigTakeover from './CodexConfigTakeover';
 import CodexHome from './CodexHome';
 
 /**
- * Makes the Codex CLI see everything the gateway serves, while Tokkey runs.
+ * Makes the Codex CLI see what Tokkey serves, while Tokkey runs.
  *
  * Two files do the work together and neither is useful without the other. The
- * catalog lists the models — the ones Codex ships with, plus one row per route
- * Tokkey has registered — and `config.toml` points Codex at both the catalog
- * and the gateway that answers for it. So they are written as a pair, and the
- * catalog is written first: pointing Codex at a catalog that turned out empty
- * would cost the user their model picker, which is worse than not taking over
- * at all.
+ * catalog lists the models — the ones Codex ships with, plus the Tokkey model —
+ * and `config.toml` points Codex at both the catalog and the endpoint that
+ * answers for it. So they are written as a pair, and the catalog is written
+ * first: pointing Codex at a catalog that turned out empty would cost the user
+ * their model picker, which is worse than not taking over at all.
  *
- * Both are undone at quit by `CodexConfigTakeover`. The catalog file itself is
- * left on disk; with `model_catalog_json` gone from the restored config nothing
- * reads it, and keeping it means the next launch starts from the natives it
- * already holds instead of shelling out to the CLI again.
+ * Which endpoint that is depends on the Router page's switch, and which model
+ * is offered depends on it too — the router is the only thing that can serve a
+ * routed pair, and it is the pair that is worth offering. So both come from
+ * {@link RouterBinding}, and both change together on every toggle.
+ *
+ * Both files are undone at quit by `CodexConfigTakeover`. The catalog file
+ * itself is left on disk; with `model_catalog_json` gone from the restored
+ * config nothing reads it, and keeping it means the next launch starts from the
+ * natives it already holds instead of shelling out to the CLI again.
  */
 export class CodexGatewayIntegration {
   private readonly gateway: GatewayEndpoint;
-  private readonly client: GatewayModelClient;
+  private readonly routerBinding: RouterBinding;
   private readonly bundled: CodexBundledCatalog;
   private readonly generator: CodexCatalogGenerator;
   private readonly takeover: CodexConfigTakeover;
-  private readonly cloudCatalog: CloudModelCatalog;
 
   constructor(options: {
     gateway: GatewayEndpoint;
-    client?: GatewayModelClient;
+    /** Omitted only by a caller with no Router page; the CLI then stays on the gateway. */
+    routerBinding?: RouterBinding;
     bundled?: CodexBundledCatalog;
     generator?: CodexCatalogGenerator;
     takeover?: CodexConfigTakeover;
-    cloudCatalog?: CloudModelCatalog;
     homeDirectory?: string;
   }) {
     const home = new CodexHome(options);
     this.gateway = options.gateway;
-    this.client = options.client ?? new GatewayModelClient({ gateway: options.gateway });
+    this.routerBinding = options.routerBinding ?? new RouterBinding();
     this.bundled = options.bundled ?? new CodexBundledCatalog(options);
     this.generator =
       options.generator ??
@@ -51,7 +53,6 @@ export class CodexGatewayIntegration {
         nativeSource: () => this.bundled.readCached()
       });
     this.takeover = options.takeover ?? new CodexConfigTakeover({ ...options, home });
-    this.cloudCatalog = options.cloudCatalog ?? new CloudModelCatalog();
   }
 
   /**
@@ -63,16 +64,15 @@ export class CodexGatewayIntegration {
   }
 
   /**
-   * Writes the catalog and points Codex at the gateway.
+   * Writes the catalog and points Codex at whatever is currently serving.
    *
-   * Call only once the gateway is up and its routes have been registered: the
-   * catalog is built from the routes that exist at this moment, and the
-   * provider URL carries the port this launch actually bound.
+   * Call only once the gateway is up: the provider URL carries the port this
+   * launch actually bound.
    */
   async activate(): Promise<boolean> {
-    const baseUrl = this.gateway.baseUrl();
+    const baseUrl = this.targetBaseUrl();
     if (baseUrl === null) {
-      console.error('[CodexConfig] The gateway is not running; Codex was left as configured.');
+      console.error('[CodexConfig] Nothing is serving; Codex was left as configured.');
       return false;
     }
     // Refreshing the bundled catalog is what seeds the native rows, and it
@@ -83,11 +83,20 @@ export class CodexGatewayIntegration {
   }
 
   /**
-   * Rebuilds the catalog from the routes the gateway holds right now, which is
-   * how a model connected mid-session becomes visible to Codex.
+   * Rewrites both files from the state that holds right now, which is how the
+   * Router page's switch reaches Codex: the catalog gains or loses the routed
+   * row, and `config.toml` moves between the router and the gateway with it.
+   *
+   * Both halves have to move together — a routed row only resolves at the
+   * router, and the router only serves routed rows — so the config write is not
+   * skipped even when the catalog could not be written.
    */
-  async syncCatalog(): Promise<void> {
-    await this.writeCatalog();
+  async sync(): Promise<void> {
+    const baseUrl = this.targetBaseUrl();
+    const catalogPath = await this.writeCatalog();
+    if (baseUrl !== null) {
+      this.takeover.reapply(baseUrl, catalogPath);
+    }
   }
 
   /** Puts the user's own `config.toml` back. Synchronous, for `will-quit`. */
@@ -95,10 +104,18 @@ export class CodexGatewayIntegration {
     return this.takeover.restore();
   }
 
+  /**
+   * Where Codex should send a turn: the router while it is on, the gateway
+   * otherwise, and null when neither is up.
+   */
+  private targetBaseUrl(): string | null {
+    return this.routerBinding.baseUrl ?? this.gateway.baseUrl();
+  }
+
   /** Writes the catalog and reports its path, or null when it holds no models. */
   private async writeCatalog(): Promise<string | null> {
     try {
-      const result = this.generator.generate(await this.routedModels());
+      const result = this.generator.generate(this.tokkeyModels());
       if (result.models.length === 0) {
         console.error('[CodexCatalog] No models could be catalogued for Codex.');
         return null;
@@ -115,34 +132,32 @@ export class CodexGatewayIntegration {
   }
 
   /**
-   * One catalog input per gateway route that Codex does not already know.
+   * The rows Tokkey contributes to the catalog: the routed pair while the
+   * router is on, and nothing at all while it is off.
    *
-   * Routes named after a native model are skipped: Codex ships a far richer row
-   * for those than anything derived here, and the gateway registers them under
-   * exactly that name, so the native row already routes correctly.
+   * Nothing at all is the point of the empty case. The merge replaces every row
+   * Tokkey authored with this run's set, so returning none is what removes the
+   * routed row when the switch goes off — the same call that repoints Codex
+   * back at the gateway also takes away the model only the router could serve.
+   *
+   * A cloud model on its own is deliberately not offered. It is reachable
+   * through the gateway, but a turn sent to it is a turn the router never sees,
+   * which is the one thing the Router page exists to prevent.
    */
-  private async routedModels(): Promise<CatalogModelInput[]> {
-    const natives = new Set((await this.bundled.list()).map((entry) => entry.slug));
-    const cards = this.describeCards();
-    return (await this.client.listModels())
-      .filter((route) => !natives.has(route.modelName))
-      .map((route) => cards.get(route.modelName) ?? { slug: route.modelName });
-  }
-
-  /** The cloud cards keyed by the route name each one is served under. */
-  private describeCards(): Map<string, CatalogModelInput> {
-    return new Map(
-      this.cloudCatalog.list().map((card: CloudModelCard) => [
-        CloudModelConnector.routeNameFor(card),
-        {
-          slug: CloudModelConnector.routeNameFor(card),
-          // The picker shows what the user connected, not the route name that
-          // keeps two connections of the same model apart.
-          displayName: `${card.provider}/${card.modelName}`,
-          ownedBy: card.provider
-        }
-      ])
-    );
+  private tokkeyModels(): CatalogModelInput[] {
+    const model = this.routerBinding.model;
+    if (model === null) {
+      return [];
+    }
+    return [
+      {
+        slug: model.slug,
+        displayName: RouterModel.DISPLAY_NAME,
+        // The slug carries route names, which say nothing about which models
+        // are paired; the description is where the picker can read them.
+        describedAs: model.description
+      }
+    ];
   }
 }
 

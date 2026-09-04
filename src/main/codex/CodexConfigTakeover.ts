@@ -1,6 +1,5 @@
-import os from 'node:os';
-import path from 'node:path';
-import BackedUpConfigFile from '../config/BackedUpConfigFile';
+import OwnedConfigFile, { type SlotEditor, type SlotWrite } from '../config/OwnedConfigFile';
+import TokkeyHome from '../storage/TokkeyHome';
 import CodexHome from './CodexHome';
 import CodexTomlDocument from './CodexTomlDocument';
 
@@ -11,14 +10,20 @@ const TOKKEY_PROVIDER_ID = 'tokkey';
 const MODEL_PROVIDER_KEY = 'model_provider';
 const MODEL_CATALOG_KEY = 'model_catalog_json';
 
+/** The table Tokkey's provider lives in, addressed the way `CodexTomlDocument` wants it. */
+const TOKKEY_TABLE_PATH = ['model_providers', TOKKEY_PROVIDER_ID] as const;
+
 /**
  * Points the Codex CLI at the local gateway for as long as Tokkey is running.
  *
  * Codex reads one file, `~/.codex/config.toml`, and that file is the user's:
  * hand-written, full of comments, and shared with every other tool that
- * configures Codex. The borrow-and-return contract that makes editing it
- * acceptable — backup, crash recovery, byte-for-byte restore — lives in
- * {@link BackedUpConfigFile}, which `ClaudeConfigTakeover` shares.
+ * configures Codex. Tokkey only ever touches three things in it — the
+ * `model_provider` and `model_catalog_json` root keys, and the
+ * `[model_providers.tokkey]` table — and gives back exactly those, never the
+ * rest of the file, whatever else the user does to it while Tokkey runs. That
+ * per-key loan-and-return contract lives in {@link OwnedConfigFile}, which
+ * `ClaudeConfigTakeover` shares.
  *
  * Restoring before anything reads the file matters here beyond tidiness:
  * `CodexUpstreamEndpoint` learns the user's real upstream from this same file,
@@ -26,15 +31,15 @@ const MODEL_CATALOG_KEY = 'model_catalog_json';
  * that the gateway is its own upstream.
  */
 export class CodexConfigTakeover {
-  private readonly file: BackedUpConfigFile;
+  private readonly file: OwnedConfigFile;
 
-  constructor(options: { home?: CodexHome; homeDirectory?: string; backupPath?: string } = {}) {
+  constructor(options: { home?: CodexHome; homeDirectory?: string; ledgerPath?: string } = {}) {
     const home = options.home ?? new CodexHome(options);
-    this.file = new BackedUpConfigFile({
+    this.file = new OwnedConfigFile({
       filePath: home.configPath,
-      backupPath:
-        options.backupPath ??
-        path.join(options.homeDirectory ?? os.homedir(), '.amiswifi', 'codex-config-backup.toml'),
+      ledgerPath:
+        options.ledgerPath ??
+        new TokkeyHome(options).pathFor('codex-config-ledger.json'),
       label: 'CodexConfig'
     });
   }
@@ -43,81 +48,139 @@ export class CodexConfigTakeover {
     return this.file.configPath;
   }
 
-  /** Where the user's own file is held while the takeover is in force. */
-  get backupFilePath(): string {
-    return this.file.backupFilePath;
+  /** Where the ledger of Tokkey's owned keys is kept while the takeover is in force. */
+  get ledgerFilePath(): string {
+    return this.file.ledgerFilePath;
   }
 
   /**
    * Undoes a takeover a previous run never got to undo.
    *
    * Called before anything reads `config.toml`, so a crashed session cannot
-   * leave Tokkey's own configuration to be mistaken for the user's.
+   * leave Tokkey's own keys to be mistaken for the user's.
    *
-   * @returns whether a leftover backup was found and restored
+   * @returns whether a leftover ledger was found and reverted
    */
   recoverInterruptedSession(): boolean {
-    return this.file.recoverInterruptedSession();
+    return this.file.recoverInterruptedSession(this.allEditors());
   }
 
   /**
-   * Backs up `config.toml` and rewrites it to serve models from the gateway.
+   * Writes `model_provider`, `[model_providers.tokkey]`, and — when given —
+   * `model_catalog_json`, recording each one's pre-takeover value the first
+   * time it is touched.
    *
-   * @param gatewayBaseUrl the running gateway's base URL, e.g. `http://127.0.0.1:4033`
+   * @param baseUrl the endpoint Codex should call, e.g. `http://127.0.0.1:4033`
    * @param catalogPath the generated catalog to point Codex at, or null to
    *   leave whatever catalog the user had configured in place
    * @returns whether the file was taken over
    */
-  activate(gatewayBaseUrl: string, catalogPath: string | null): boolean {
-    const taken = this.file.activate((original) =>
-      this.rewrite(original, gatewayBaseUrl, catalogPath)
-    );
+  activate(baseUrl: string, catalogPath: string | null): boolean {
+    const taken = this.file.activate(this.writesFor(baseUrl, catalogPath), this.allEditors());
     if (taken) {
-      console.info(`[CodexConfig] Codex now routes through ${this.providerBaseUrl(gatewayBaseUrl)}.`);
+      console.info(`[CodexConfig] Codex now routes through ${this.providerBaseUrl(baseUrl)}.`);
     }
     return taken;
   }
 
   /**
-   * Puts the user's own `config.toml` back. Synchronous on purpose: this runs
-   * from Electron's `will-quit`, which does not wait for a promise.
+   * Rewrites the same three slots for an endpoint that changed mid-session.
    *
-   * @returns whether a restore happened
+   * This is what moves Codex between the gateway and the router: only the
+   * keys Tokkey owns are touched, so anything the user changed elsewhere in
+   * the file — or even in one of Tokkey's own slots — survives untouched. A
+   * no-op when no takeover is in force, since there is then nothing to refresh.
+   *
+   * @param baseUrl the endpoint Codex should call, e.g. a running router's
+   * @param catalogPath the generated catalog, or null to leave the user's own
+   * @returns whether the slots were rewritten
+   */
+  reapply(baseUrl: string, catalogPath: string | null): boolean {
+    const rewritten = this.file.reapply(this.writesFor(baseUrl, catalogPath), this.allEditors());
+    if (rewritten) {
+      console.info(`[CodexConfig] Codex now routes through ${this.providerBaseUrl(baseUrl)}.`);
+    }
+    return rewritten;
+  }
+
+  /**
+   * Puts every owned slot back to what it held before the takeover — except a
+   * slot the user changed while Tokkey was running, which is left as they set
+   * it. Synchronous on purpose: this runs from Electron's `will-quit`, which
+   * does not wait for a promise.
+   *
+   * @returns whether a restore was attempted
    */
   restore(): boolean {
-    return this.file.restore();
+    return this.file.restore(this.allEditors());
   }
 
-  /** The document Codex should see while Tokkey is running. */
-  private rewrite(original: string, gatewayBaseUrl: string, catalogPath: string | null): string {
-    let document = new CodexTomlDocument(original)
-      // Removed first so a table left by an interrupted session is replaced
-      // rather than declared twice, which Codex rejects outright.
-      .removeTable(['model_providers', TOKKEY_PROVIDER_ID])
-      .setRootKey(MODEL_PROVIDER_KEY, TOKKEY_PROVIDER_ID);
+  /** The slots this takeover writes for a given endpoint and catalog. */
+  private writesFor(baseUrl: string, catalogPath: string | null): SlotWrite[] {
+    const writes: SlotWrite[] = [
+      this.rootKeySlot(MODEL_PROVIDER_KEY, TOKKEY_PROVIDER_ID),
+      this.tableSlot(TOKKEY_TABLE_PATH, [
+        ['name', 'Tokkey'],
+        ['base_url', this.providerBaseUrl(baseUrl)],
+        // The gateway speaks the Responses wire, which is what lets a Codex
+        // turn reach it unchanged.
+        ['wire_api', 'responses'],
+        // Codex sends its own login with the request; the gateway decides per
+        // request whether that credential or a route's own key is spent.
+        ['requires_openai_auth', true]
+      ])
+    ];
     if (catalogPath !== null) {
-      document = document.setRootKey(MODEL_CATALOG_KEY, catalogPath);
+      writes.push(this.rootKeySlot(MODEL_CATALOG_KEY, catalogPath));
     }
-    return document
-      .appendTable(
-        ['model_providers', TOKKEY_PROVIDER_ID],
-        [
-          ['name', 'Tokkey'],
-          ['base_url', this.providerBaseUrl(gatewayBaseUrl)],
-          // The gateway speaks the Responses wire, which is what lets a Codex
-          // turn reach it unchanged.
-          ['wire_api', 'responses'],
-          // Codex sends its own login with the request; the gateway decides per
-          // request whether that credential or a route's own key is spent.
-          ['requires_openai_auth', true]
-        ]
-      )
-      .toString();
+    return writes;
   }
 
-  /** The gateway's OpenAI-compatible prefix, which is what Codex appends paths to. */
-  private providerBaseUrl(gatewayBaseUrl: string): string {
-    return `${gatewayBaseUrl.replace(/\/+$/, '')}/v1`;
+  /** Every slot this takeover might ever hold, for recovery and restore. */
+  private allEditors(): SlotEditor[] {
+    return [
+      this.rootKeyEditor(MODEL_PROVIDER_KEY),
+      this.rootKeyEditor(MODEL_CATALOG_KEY),
+      this.tableEditor(TOKKEY_TABLE_PATH)
+    ];
+  }
+
+  private rootKeyEditor(key: string): SlotEditor {
+    return {
+      id: `root:${key}`,
+      read: (text) => new CodexTomlDocument(text).getRootKey(key),
+      write: (text, value) => new CodexTomlDocument(text).setRootKeyRaw(key, value).toString(),
+      clear: (text) => new CodexTomlDocument(text).removeRootKey(key).toString()
+    };
+  }
+
+  private rootKeySlot(key: string, value: string): SlotWrite {
+    return { ...this.rootKeyEditor(key), value: JSON.stringify(value) };
+  }
+
+  private tableEditor(tablePath: readonly string[]): SlotEditor {
+    return {
+      id: `table:${tablePath.join('.')}`,
+      read: (text) => new CodexTomlDocument(text).getTable(tablePath),
+      write: (text, value) => new CodexTomlDocument(text).setTable(tablePath, value).toString(),
+      clear: (text) => new CodexTomlDocument(text).setTable(tablePath, null).toString()
+    };
+  }
+
+  private tableSlot(
+    tablePath: readonly string[],
+    entries: ReadonlyArray<[string, string | boolean]>
+  ): SlotWrite {
+    return { ...this.tableEditor(tablePath), value: CodexTomlDocument.renderTable(tablePath, entries) };
+  }
+
+  /**
+   * The endpoint's OpenAI-compatible prefix, which is what Codex appends paths
+   * to. The router serves the same prefix as the gateway, so one form covers
+   * both.
+   */
+  private providerBaseUrl(baseUrl: string): string {
+    return `${baseUrl.replace(/\/+$/, '')}/v1`;
   }
 }
 

@@ -29,7 +29,18 @@ export class CodexTomlDocument {
    * is a different key with a different meaning.
    */
   setRootKey(key: string, value: string): CodexTomlDocument {
-    const rendered = `${key} = ${JSON.stringify(value)}`;
+    return this.setRootKeyRaw(key, JSON.stringify(value));
+  }
+
+  /**
+   * Sets one root-level key to an already-rendered right-hand side, verbatim.
+   *
+   * The plain-value {@link setRootKey} always JSON-encodes; this is what lets a
+   * caller restore exactly the RHS text a key held before Tokkey touched it,
+   * whatever TOML type that was, without re-encoding it as a string.
+   */
+  setRootKeyRaw(key: string, rawValue: string): CodexTomlDocument {
+    const rendered = `${key} = ${rawValue}`;
     const lines = this.text.split('\n');
     const assignment = new RegExp(`^\\s*${CodexTomlDocument.escape(key)}\\s*=`);
 
@@ -49,6 +60,36 @@ export class CodexTomlDocument {
     return new CodexTomlDocument(inserted.join('\n'));
   }
 
+  /** The raw right-hand side of a root-level key, or null if it is not set there. */
+  getRootKey(key: string): string | null {
+    const assignment = new RegExp(`^\\s*${CodexTomlDocument.escape(key)}\\s*=\\s*(.*)$`);
+    for (const line of this.text.split('\n')) {
+      if (CodexTomlDocument.readHeaderPath(line)) break;
+      const match = assignment.exec(line);
+      if (match) return match[1]!.trim();
+    }
+    return null;
+  }
+
+  /** Drops one root-level key's line entirely, the undo of {@link setRootKey}. */
+  removeRootKey(key: string): CodexTomlDocument {
+    const assignment = new RegExp(`^\\s*${CodexTomlDocument.escape(key)}\\s*=`);
+    const lines = this.text.split('\n');
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]!;
+      if (CodexTomlDocument.readHeaderPath(line)) break;
+      if (!assignment.test(line)) continue;
+      // A key inserted just before the first table left a blank separator line
+      // behind it (see the insert branch of `setRootKeyRaw`); drop that too, or
+      // removing only the key would leave an orphaned gap before the table.
+      const next = lines[index + 1];
+      const dropsSeparator = next === '' && CodexTomlDocument.readHeaderPath(lines[index + 2] ?? '') !== null;
+      const kept = [...lines.slice(0, index), ...lines.slice(index + (dropsSeparator ? 2 : 1))];
+      return new CodexTomlDocument(kept.join('\n'));
+    }
+    return this;
+  }
+
   /** Drops one table and every table nested under it. */
   removeTable(tablePath: readonly string[]): CodexTomlDocument {
     let isDropping = false;
@@ -64,14 +105,46 @@ export class CodexTomlDocument {
     return new CodexTomlDocument(remaining.length === 0 ? '' : `${remaining}\n`);
   }
 
+  /** The raw text of one table, header through its last line, or null if it is absent. */
+  getTable(tablePath: readonly string[]): string | null {
+    let isInside = false;
+    const collected: string[] = [];
+    for (const line of this.text.split('\n')) {
+      const headerPath = CodexTomlDocument.readHeaderPath(line);
+      if (headerPath) {
+        isInside = CodexTomlDocument.isUnderPath(headerPath, tablePath);
+      }
+      if (isInside) collected.push(line);
+    }
+    if (collected.length === 0) return null;
+    const joined = collected.join('\n').replace(/\s+$/, '');
+    return joined.length === 0 ? null : joined;
+  }
+
+  /** Replaces one table wholesale with already-rendered text, or drops it when `renderedText` is null. */
+  setTable(tablePath: readonly string[], renderedText: string | null): CodexTomlDocument {
+    const cleared = this.removeTable(tablePath);
+    return renderedText === null ? cleared : cleared.insertTable(renderedText);
+  }
+
   /** Appends one table, keeping exactly one blank line before it. */
   appendTable(tablePath: readonly string[], entries: ReadonlyArray<[string, string | boolean]>): CodexTomlDocument {
+    return this.insertTable(CodexTomlDocument.renderTable(tablePath, entries));
+  }
+
+  /** Renders a table's header and entries, with no surrounding document context. */
+  static renderTable(tablePath: readonly string[], entries: ReadonlyArray<[string, string | boolean]>): string {
     const header = `[${tablePath.map((segment) => CodexTomlDocument.renderKey(segment)).join('.')}]`;
     const lines = entries.map(
       ([key, value]) => `${key} = ${typeof value === 'boolean' ? String(value) : JSON.stringify(value)}`
     );
+    return [header, ...lines].join('\n');
+  }
+
+  /** Appends an already-rendered table block, keeping exactly one blank line before it. */
+  private insertTable(renderedText: string): CodexTomlDocument {
     const separator = this.text.length === 0 ? '' : this.text.endsWith('\n\n') ? '' : this.text.endsWith('\n') ? '\n' : '\n\n';
-    return new CodexTomlDocument(`${this.text}${separator}${[header, ...lines].join('\n')}\n`);
+    return new CodexTomlDocument(`${this.text}${separator}${renderedText}\n`);
   }
 
   /** A bare key where TOML allows one, quoted where it does not. */

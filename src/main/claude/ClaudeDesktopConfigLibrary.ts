@@ -15,15 +15,13 @@ export interface DesktopInferenceModel {
    * The model name Claude Desktop sends to the gateway.
    *
    * Claude Desktop's managed config drops any name its Anthropic-model check
-   * refuses, so the caller publishes cloud routes under a `ClaudeModelAlias`;
-   * the gateway resolves that alias back to the real route.
+   * refuses, so the caller publishes the router under a `ClaudeModelAlias`.
    */
   name: string;
   /**
    * The name shown in the picker, which the model check never inspects.
    *
-   * This is where the real model name goes: `name` has to survive a validator
-   * that refuses every rival vendor by name, so it cannot carry one.
+   * This keeps the picker label independent from the alias sent to the router.
    */
   labelOverride?: string;
   /**
@@ -68,7 +66,8 @@ const INDENT_WIDTH = 2;
  *   and the model list. This file is purely Tokkey's and is deleted on restore
  *   rather than reverted, since there is no "original" state to return to.
  *
- * The backup/restore contract mirrors {@link BackedUpConfigFile}: the original
+ * The backup/restore contract mirrors the whole-file loan {@link OwnedConfigFile}
+ * replaced for Codex and Claude Code's own configs: the original
  * `_meta.json` is kept at a stable path outside the configLibrary, and the
  * next launch restores it before anything reads the directory, so a crash
  * cannot leave Tokkey's configuration in place indefinitely.

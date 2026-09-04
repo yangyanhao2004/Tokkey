@@ -13,19 +13,13 @@
  * branch that takes a name unconditionally, so `forRoute` keeps the route name
  * whole behind it and the row still reads as the model it serves.
  *
- * Claude Desktop is stricter, and in a way the prefix alone does not satisfy.
- * Its managed-config validator lowercases the name, refuses it outright if it
- * matches a denylist of rival-vendor fragments (`gpt`, `openai`, `deepseek`,
- * `qwen`, and about forty more), and otherwise requires it to contain one of
- * `claude`/`anthropic`/`opus`/`sonnet`/`haiku`/`fable`/`mythos`. A route named
- * for the model it fronts — `custom-gpt-5.6-terra-openai-c05442` — trips that
- * denylist twice over, whatever prefix it carries, and Desktop drops the entry
- * with an `is not an Anthropic model` warning. `forDesktop` therefore publishes
- * only the route's id suffix, which names no vendor at all; the real model name
- * travels in the entry's `labelOverride`, which the validator never inspects.
+ * Claude Desktop also rejects model names containing rival-vendor fragments.
+ * The router's fixed slug carries no backend route details, so the same
+ * `anthropic.` alias satisfies Desktop without exposing a denied fragment.
  *
- * Both forms are resolved by `PickerModelAlias` in the gateway, so the model
- * sent upstream is unaffected by either.
+ * Ordinary gateway routes are resolved by `PickerModelAlias` in the gateway.
+ * The router accepts this same prefix around its fixed profile slug and removes
+ * the indirection by loading that profile before forwarding any model call.
  *
  * Native Claude models are published unprefixed: their slugs are real Anthropic
  * ids that both pickers already know, and prefixing them would trade a properly
@@ -35,22 +29,17 @@ export class ClaudeModelAlias {
   /** Kept in step with `PickerModelAlias.PREFIX` in the gateway. */
   static readonly PREFIX = 'anthropic.';
 
-  /** The Claude Code picker alias for a gateway route. */
+  /**
+   * The Claude Code picker alias for a gateway route.
+   *
+   * Used for the routed pair's fixed slug (`RouterModel.DISPLAY_NAME`) same as
+   * any other route. The router recognizes both its bare slug and this
+   * picker-qualified spelling, then reads the pairing from `RouterProfileStore`
+   * instead of parsing route names out of the slug. This is also the form a
+   * plain route will use once a local model can be started on its own.
+   */
   static forRoute(routeName: string): string {
     return `${ClaudeModelAlias.PREFIX}${routeName}`;
-  }
-
-  /**
-   * The Claude Desktop picker alias for a gateway route.
-   *
-   * The body is the route name's last segment, which `routeNameFor` builds from
-   * the card's id — the one part of the name that can carry no vendor fragment
-   * for Desktop's denylist to catch. The gateway resolves the route back from
-   * it by that same suffix.
-   */
-  static forDesktop(routeName: string): string {
-    const suffix = routeName.slice(routeName.lastIndexOf('-') + 1);
-    return `${ClaudeModelAlias.PREFIX}${suffix}`;
   }
 }
 

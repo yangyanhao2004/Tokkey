@@ -89,8 +89,8 @@ function createHomeDirectory() {
 }
 
 function writeCache(home, cache) {
-  mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
-  writeFileSync(path.join(home, '.amiswifi', 'model_catalog_cache.json'), JSON.stringify(cache), 'utf8');
+  mkdirSync(path.join(home, '.tokkey'), { recursive: true });
+  writeFileSync(path.join(home, '.tokkey', 'model_catalog_cache.json'), JSON.stringify(cache), 'utf8');
 }
 
 test('catalog walks brands to artifacts and normalizes every unit it is given', async () => {
@@ -234,7 +234,7 @@ const NO_LIMITS = { target: 'mac', freeDiskBytes: null, totalRamBytes: null, pla
 
 /** Writes a model file of `size` bytes where the manager expects to find it. */
 function writeModelFile(home, size) {
-  const directory = path.join(home, '.amiswifi', 'models', ARTIFACT.id.replaceAll(':', '_'));
+  const directory = path.join(home, '.tokkey', 'models', ARTIFACT.id.replaceAll(':', '_'));
   mkdirSync(directory, { recursive: true });
   writeFileSync(path.join(directory, ARTIFACT.fileName), Buffer.alloc(size));
 }
@@ -254,9 +254,9 @@ test('a file left behind by an interrupted transfer is offered for download agai
   const home = createHomeDirectory();
   writeModelFile(home, 4096);
   // The resume point Chromium saved when the app stopped mid-transfer.
-  mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
+  mkdirSync(path.join(home, '.tokkey'), { recursive: true });
   writeFileSync(
-    path.join(home, '.amiswifi', 'model_downloads.json'),
+    path.join(home, '.tokkey', 'model_downloads.json'),
     JSON.stringify([{ modelId: ARTIFACT.id, path: 'x', urlChain: ['https://huggingface.co/example.gguf'], offset: 4096, length: 9999 }]),
     'utf8'
   );
@@ -337,7 +337,7 @@ test('a model folder with no manifest is still listed, named after its artifact'
 
 test('GGUF files are discovered at the models root and in every nested directory', async () => {
   const home = createHomeDirectory();
-  const modelsRoot = path.join(home, '.amiswifi', 'models');
+  const modelsRoot = path.join(home, '.tokkey', 'models');
   const nestedDirectory = path.join(modelsRoot, 'imports', 'qwen', 'weights');
   mkdirSync(nestedDirectory, { recursive: true });
   writeFileSync(path.join(modelsRoot, 'root-model.gguf'), Buffer.alloc(1024));
@@ -371,7 +371,7 @@ test('an emptied model folder drops out of the installed list', async () => {
   writeModelFile(home, 4096);
   await store.writeManifest(ARTIFACT);
   // The artifact deleted from Finder; only the manifest is left behind.
-  rmSync(path.join(home, '.amiswifi', 'models', ARTIFACT.id.replaceAll(':', '_'), ARTIFACT.fileName));
+  rmSync(path.join(home, '.tokkey', 'models', ARTIFACT.id.replaceAll(':', '_'), ARTIFACT.fileName));
 
   assert.deepEqual(await store.listInstalled(), []);
 });
@@ -383,9 +383,9 @@ test('a half-transferred file is not offered as an installed model', async () =>
   await store.writeManifest(ARTIFACT);
   // Chromium writes straight to the final path, so only the saved resume point
   // tells a partial file apart from a finished one.
-  mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
+  mkdirSync(path.join(home, '.tokkey'), { recursive: true });
   writeFileSync(
-    path.join(home, '.amiswifi', 'model_downloads.json'),
+    path.join(home, '.tokkey', 'model_downloads.json'),
     JSON.stringify([{ modelId: ARTIFACT.id, path: 'x', urlChain: ['https://huggingface.co/example.gguf'], offset: 4096, length: 9999 }]),
     'utf8'
   );
@@ -399,9 +399,9 @@ test('a half-transferred GGUF is hidden before its manifest exists', async () =>
   const home = createHomeDirectory();
   const store = new DownloadedModelStore({ homeDirectory: home });
   writeModelFile(home, 4096);
-  mkdirSync(path.join(home, '.amiswifi'), { recursive: true });
+  mkdirSync(path.join(home, '.tokkey'), { recursive: true });
   writeFileSync(
-    path.join(home, '.amiswifi', 'model_downloads.json'),
+    path.join(home, '.tokkey', 'model_downloads.json'),
     JSON.stringify([
       {
         modelId: ARTIFACT.id,
@@ -521,7 +521,7 @@ test('a download redirected to another host is still claimed by the model that s
   ]);
   downloadSession.handler({}, item);
 
-  assert.equal(item.getSavePath(), path.join(home, '.amiswifi', 'models', ARTIFACT.id.replaceAll(':', '_'), ARTIFACT.fileName));
+  assert.equal(item.getSavePath(), path.join(home, '.tokkey', 'models', ARTIFACT.id.replaceAll(':', '_'), ARTIFACT.fileName));
 });
 
 test('a finished transfer records the manifest and reports the model as downloaded', async () => {

@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
 import type { InstalledLocalModel, LocalModelDescriptor } from '../../shared/types';
+import TokkeyHome from '../storage/TokkeyHome';
 
 /** Written beside the artifact so an installed model can be described offline. */
 const MANIFEST_FILE_NAME = 'model.json';
@@ -25,7 +25,7 @@ interface LocatedManifest {
 }
 
 /**
- * Owns `~/.amiswifi/models`: where a model's bytes land, whether they are all
+ * Owns `~/.tokkey/models`: where a model's bytes land, whether they are all
  * there, and how to describe what is on disk without the remote catalog.
  *
  * The Tokkey page lists installed models on launch, long before — and often
@@ -37,7 +37,7 @@ export class DownloadedModelStore {
   readonly root: string;
 
   constructor(options: { homeDirectory?: string } = {}) {
-    this.root = path.join(options.homeDirectory ?? os.homedir(), '.amiswifi', 'models');
+    this.root = new TokkeyHome(options).pathFor('models');
   }
 
   /** The folder one model owns; every file it downloads stays inside it. */
