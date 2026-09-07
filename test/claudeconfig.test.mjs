@@ -102,6 +102,47 @@ test('restricts the model list without disturbing the rest of the file', () => {
   assert.deepEqual(parsed.permissions.allow, ['Bash(npm run test)']);
 });
 
+test('adds an allow rule after the rules already there, and only once', () => {
+  const allowed = new ClaudeSettingsDocument(USER_SETTINGS).withPermissionRule('mcp__tokkey-router');
+
+  assert.deepEqual(JSON.parse(allowed.toString()).permissions.allow, [
+    'Bash(npm run test)',
+    'mcp__tokkey-router'
+  ]);
+  // Asked for twice, listed once: the rule is a membership, not an append.
+  assert.deepEqual(JSON.parse(allowed.withPermissionRule('mcp__tokkey-router').toString()), JSON.parse(allowed.toString()));
+});
+
+test('removes one allow rule without disturbing the rules beside it', () => {
+  const parsed = JSON.parse(
+    new ClaudeSettingsDocument(USER_SETTINGS)
+      .withPermissionRule('mcp__tokkey-router')
+      .withoutPermissionRule('mcp__tokkey-router')
+      .toString()
+  );
+
+  assert.deepEqual(parsed.permissions.allow, ['Bash(npm run test)']);
+});
+
+test('an allow list left holding nothing takes its permissions block with it', () => {
+  const parsed = JSON.parse(
+    new ClaudeSettingsDocument('{}')
+      .withPermissionRule('mcp__tokkey-router')
+      .withoutPermissionRule('mcp__tokkey-router')
+      .toString()
+  );
+
+  assert.deepEqual(parsed, {});
+});
+
+test('an allow list that is not a list is left as the user wrote it', () => {
+  const source = JSON.stringify({ permissions: { allow: 'everything' } });
+
+  const parsed = JSON.parse(new ClaudeSettingsDocument(source).withPermissionRule('mcp__tokkey-router').toString());
+
+  assert.equal(parsed.permissions.allow, 'everything');
+});
+
 test('editing does not mutate the document it was derived from', () => {
   const original = new ClaudeSettingsDocument(USER_SETTINGS);
 
@@ -211,6 +252,15 @@ const ROUTER_ALIAS = `anthropic.${RouterModel.DISPLAY_NAME}`;
 const GATEWAY_URL = 'http://127.0.0.1:4173';
 const ROUTER_URL = 'http://127.0.0.1:5173';
 
+/** The CLI's own state file, where user-scope MCP servers are declared. */
+function userConfigPathOf(home) {
+  return path.join(claudeHomeOf(home), '.claude.json');
+}
+
+function readUserConfig(home) {
+  return JSON.parse(readFileSync(userConfigPathOf(home), 'utf8'));
+}
+
 /** A binding already switched on, as `RouterAgentIntegration.turnOn` leaves it. */
 function boundRouter() {
   const binding = new RouterBinding();
@@ -282,6 +332,8 @@ test('the router switch moves claude both ways, and the backup survives it', asy
   const integration = makeIntegration(home, { routerBinding: binding });
   await integration.activate();
   assert.equal(JSON.parse(readFileSync(settingsPath, 'utf8')).model, 'opus');
+  // Nothing serves the router's tools yet, so nothing declares them.
+  assert.equal(existsSync(userConfigPathOf(home)), false);
 
   // ...the switch goes on, and the republish that follows moves the picker.
   binding.bind(ROUTER_URL, RouterModel.forSingleModel({ routeName: CLOUD_ROUTE, displayName: 'gpt-5.6-terra' }));
@@ -291,7 +343,13 @@ test('the router switch moves claude both ways, and the backup survives it', asy
   assert.equal(routed.model, 'opus');
   assert.ok(routed.availableModels.includes(ROUTER_ALIAS));
   assert.equal(routed.env.ANTHROPIC_BASE_URL, ROUTER_URL);
-  assert.deepEqual(routed.permissions.allow, ['Bash(npm run test)']);
+  // The user's own rule keeps its place; the router's tools are added after it.
+  assert.deepEqual(routed.permissions.allow, ['Bash(npm run test)', 'mcp__tokkey-router']);
+  // The tool server comes with it, at the port the router actually bound.
+  assert.deepEqual(readUserConfig(home).mcpServers['tokkey-router'], {
+    type: 'http',
+    url: `${ROUTER_URL}/mcp`
+  });
 
   // ...and off again, which takes the pair away and hands the port back.
   binding.release();
@@ -300,10 +358,77 @@ test('the router switch moves claude both ways, and the backup survives it', asy
   assert.equal(reverted.model, 'opus');
   assert.equal(reverted.availableModels, undefined);
   assert.equal(reverted.env.ANTHROPIC_BASE_URL, GATEWAY_URL);
+  // Allowing tools no server serves any more would outlive its reason.
+  assert.deepEqual(reverted.permissions.allow, ['Bash(npm run test)']);
+  // An endpoint that stopped answering must not be left declared, and the file
+  // Tokkey brought into being on the way in goes with the entry it held.
+  assert.equal(existsSync(userConfigPathOf(home)), false);
 
   // Every refresh rewrote the file, not the backup: quit still returns the original.
   integration.deactivate();
   assertSettingsRestored(settingsPath);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('declares the router tools beside the user own mcp servers, and takes only its own back', async () => {
+  const home = makeHome();
+  writeSettings(home, USER_SETTINGS);
+  // A real `~/.claude.json`: the CLI's own state, plus a server the user added.
+  const userConfig = {
+    numStartups: 12,
+    mcpServers: { mine: { type: 'http', url: 'https://example.invalid/mcp' } }
+  };
+  writeFileSync(userConfigPathOf(home), `${JSON.stringify(userConfig, null, 2)}\n`);
+  const integration = makeIntegration(home, { routerBinding: boundRouter() });
+
+  await integration.activate();
+
+  const taken = readUserConfig(home);
+  assert.deepEqual(taken.mcpServers.mine, userConfig.mcpServers.mine);
+  assert.equal(taken.mcpServers['tokkey-router'].url, `${ROUTER_URL}/mcp`);
+  assert.equal(taken.numStartups, 12);
+
+  integration.deactivate();
+  // Only Tokkey's entry is given back; the file itself is never deleted, since
+  // it holds state that was there before.
+  assert.deepEqual(readUserConfig(home), userConfig);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('a rule the user adds mid-session survives, and tokkey own rule still goes', async () => {
+  const home = makeHome();
+  const settingsPath = writeSettings(home, USER_SETTINGS);
+  const integration = makeIntegration(home, { routerBinding: boundRouter() });
+  await integration.activate();
+
+  // The user edits their allow list while Tokkey is running — the case that
+  // used to strand Tokkey's rule, back when the slot was the whole list.
+  const live = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  writeFileSync(
+    settingsPath,
+    JSON.stringify({ ...live, permissions: { allow: [...live.permissions.allow, 'Bash(git status)'] } }, null, 2)
+  );
+
+  integration.deactivate();
+
+  const restored = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  assert.deepEqual(restored.permissions.allow, ['Bash(npm run test)', 'Bash(git status)']);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('an allow rule the user already wrote themselves is left behind at quit', async () => {
+  const home = makeHome();
+  const settingsPath = writeSettings(
+    home,
+    JSON.stringify({ permissions: { allow: ['mcp__tokkey-router'] } }, null, 2)
+  );
+  const integration = makeIntegration(home, { routerBinding: boundRouter() });
+
+  await integration.activate();
+  integration.deactivate();
+
+  // Tokkey gives back what it borrowed, and it never borrowed this one.
+  assert.deepEqual(JSON.parse(readFileSync(settingsPath, 'utf8')).permissions.allow, ['mcp__tokkey-router']);
   rmSync(home, { recursive: true, force: true });
 });
 

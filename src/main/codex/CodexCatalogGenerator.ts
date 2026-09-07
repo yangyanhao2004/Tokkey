@@ -179,6 +179,9 @@ export class CatalogEntryFactory {
   private normalizeRouted(entry: CatalogEntry): CatalogEntry {
     for (const field of [
       'model_messages',
+      // Code mode hides MCP tools behind exec, but the router emits a direct
+      // receive_step function call and must see its declared name.
+      'tool_mode',
       'multi_agent_version',
       'use_responses_lite',
       'supports_websockets',
@@ -193,7 +196,10 @@ export class CatalogEntryFactory {
       delete entry[field];
     }
     entry.web_search_tool_type = 'text_and_image';
-    entry.supports_search_tool = true;
+    // Tool search defers MCP definitions even after the server connects. The
+    // router requires receive_step in the first request to assign a step, so
+    // routed rows must load tools eagerly. Web search is configured separately.
+    entry.supports_search_tool = false;
     return entry;
   }
 
@@ -314,7 +320,7 @@ export class CatalogMerger {
  *
  * Codex builds a static model list from that file and never refreshes it, so
  * the file has to carry everything the user should see: the native models Codex
- * ships with, seeded once from its own bundled catalog, plus one row per model
+ * ships with, kept in step with its own bundled catalog, plus one row per model
  * Tokkey routes through the gateway.
  */
 export class CodexCatalogGenerator {
@@ -328,9 +334,9 @@ export class CodexCatalogGenerator {
   constructor(options: {
     catalogPath: string;
     /**
-     * The native rows to seed a catalog that has none, read synchronously.
-     * Acquiring them costs a CLI call, so it is the caller's job to do that off
-     * the critical path and hand over a cached result.
+     * The native rows, read synchronously on every run. Acquiring them costs a
+     * CLI call, so it is the caller's job to do that off the critical path and
+     * hand over a cached result.
      */
     nativeSource?: () => CatalogDocument | null;
   }) {
@@ -346,14 +352,26 @@ export class CodexCatalogGenerator {
   generate(models: readonly CatalogModelInput[]): CatalogGenerationResult {
     const existing = this.store.read(this.catalogPath);
     const existingModels = existing?.models ?? [];
-    // The seed only fills a catalog that carries no rows but Tokkey's own. Rows
-    // already on disk always win: they hold per-account state a bundled dump
-    // cannot know about, and a catalog holding only our rows would leave the
-    // user without the native models and without a template to clone.
-    const natives = existingModels.some((entry) => !CatalogEntryFactory.isTokkeyAuthored(entry))
-      ? []
-      : this.readNatives();
-    const available: CatalogDocument = { models: [...existingModels, ...natives] };
+    // The bundled catalog is authoritative for the native rows. It is a dump of
+    // the very CLI that will read this file, so a row on disk under the same
+    // slug is never anything but an older copy of the same row, and adopting
+    // the dump is what lets a CLI upgrade reach the picker: preserving the disk
+    // copy instead froze the natives at whatever the first run happened to see,
+    // and a model added by a later release could never appear.
+    //
+    // An empty seed means Codex could not be run, not that it ships no models,
+    // so nothing is superseded and the rows on disk are left exactly as they
+    // are. Rows the seed does not name keep their place either — a row another
+    // tool wrote is that tool's business, and a native the CLI has since
+    // dropped is indistinguishable from one.
+    const natives = this.readNatives();
+    const supersededSlugs = new Set(
+      natives.flatMap((entry) => (typeof entry.slug === 'string' ? [entry.slug] : []))
+    );
+    const carried = existingModels.filter(
+      (entry) => !(typeof entry.slug === 'string' && supersededSlugs.has(entry.slug))
+    );
+    const available: CatalogDocument = { models: [...carried, ...natives] };
 
     const template = CatalogEntryFactory.findTemplate(available);
     const routed = models.map((model) => this.factory.build(template, model));
@@ -374,7 +392,7 @@ export class CodexCatalogGenerator {
     return Object.fromEntries(kept);
   }
 
-  /** The seed rows, or none when the source is absent or unreadable. */
+  /** The native rows, or none when the source is absent or unreadable. */
   private readNatives(): CatalogEntry[] {
     try {
       const models = this.nativeSource()?.models ?? [];

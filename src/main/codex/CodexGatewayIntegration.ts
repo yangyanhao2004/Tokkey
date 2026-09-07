@@ -79,13 +79,14 @@ export class CodexGatewayIntegration {
     // shells out to the CLI, so it happens here rather than inside the writer.
     await this.bundled.list();
     const catalogPath = await this.writeCatalog();
-    return this.takeover.activate(baseUrl, catalogPath);
+    return this.takeover.activate(baseUrl, catalogPath, this.routerBinding.mcpUrl);
   }
 
   /**
    * Rewrites both files from the state that holds right now, which is how the
    * Router page's switch reaches Codex: the catalog gains or loses the routed
-   * row, and `config.toml` moves between the router and the gateway with it.
+   * row, and `config.toml` moves between the router and the gateway with it,
+   * taking the router's own MCP server with it in both directions.
    *
    * Both halves have to move together — a routed row only resolves at the
    * router, and the router only serves routed rows — so the config write is not
@@ -95,7 +96,7 @@ export class CodexGatewayIntegration {
     const baseUrl = this.targetBaseUrl();
     const catalogPath = await this.writeCatalog();
     if (baseUrl !== null) {
-      this.takeover.reapply(baseUrl, catalogPath);
+      this.takeover.reapply(baseUrl, catalogPath, this.routerBinding.mcpUrl);
     }
   }
 

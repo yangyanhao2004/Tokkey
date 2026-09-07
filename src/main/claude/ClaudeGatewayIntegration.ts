@@ -5,6 +5,7 @@ import ClaudeConfigTakeover from './ClaudeConfigTakeover';
 import ClaudeDesktopConfigLibrary, { type DesktopInferenceModel } from './ClaudeDesktopConfigLibrary';
 import ClaudeDesktopHome from './ClaudeDesktopHome';
 import ClaudeHome from './ClaudeHome';
+import ClaudeMcpTakeover from './ClaudeMcpTakeover';
 import ClaudeModelAlias from './ClaudeModelAlias';
 import type { ClaudeModelSelection } from './ClaudeSettingsDocument';
 
@@ -25,6 +26,13 @@ import type { ClaudeModelSelection } from './ClaudeSettingsDocument';
  *
  * This is the Claude-side counterpart of `CodexGatewayIntegration`.
  *
+ * The router brings a tool server with it, and that is a third file again —
+ * `~/.claude.json`, where user-scope MCP servers live — held by
+ * {@link ClaudeMcpTakeover} for exactly as long as the router is up. Being a
+ * user-scope server, it is never gated behind the approval prompt `.mcp.json`
+ * servers face; what would still stop on every call is each tool call, so for
+ * as long as that server is declared the settings file allows it too.
+ *
  * Claude Desktop only ever gets the routed pair, never a plain gateway route:
  * a cloud model is reached through the router or not at all, and while the
  * router is off there is nothing for Desktop's configLibrary to point at. The
@@ -37,6 +45,7 @@ export class ClaudeGatewayIntegration {
   private readonly routerBinding: RouterBinding;
   private readonly natives: ClaudeNativeModelCatalog;
   private readonly takeover: ClaudeConfigTakeover;
+  private readonly mcp: ClaudeMcpTakeover;
   /** Null on non-macOS platforms, where Claude Desktop uses a different layout. */
   private readonly desktop: ClaudeDesktopConfigLibrary | null;
 
@@ -46,6 +55,7 @@ export class ClaudeGatewayIntegration {
     routerBinding?: RouterBinding;
     natives?: ClaudeNativeModelCatalog;
     takeover?: ClaudeConfigTakeover;
+    mcp?: ClaudeMcpTakeover;
     desktop?: ClaudeDesktopConfigLibrary | null;
     homeDirectory?: string;
     claudeHome?: string;
@@ -55,6 +65,15 @@ export class ClaudeGatewayIntegration {
     this.routerBinding = options.routerBinding ?? new RouterBinding();
     this.natives = options.natives ?? new ClaudeNativeModelCatalog();
     this.takeover = options.takeover ?? new ClaudeConfigTakeover({ ...options, home });
+    // Its own ledger: `ledgerPath` in `options` names the settings ledger, and
+    // sharing one file would have each takeover's write erase the other's.
+    this.mcp =
+      options.mcp ??
+      new ClaudeMcpTakeover({
+        home,
+        homeDirectory: options.homeDirectory,
+        claudeHome: options.claudeHome
+      });
     if ('desktop' in options) {
       this.desktop = options.desktop ?? null;
     } else {
@@ -75,8 +94,9 @@ export class ClaudeGatewayIntegration {
    */
   recoverInterruptedSession(): boolean {
     const codeRecovered = this.takeover.recoverInterruptedSession();
+    const mcpRecovered = this.mcp.recoverInterruptedSession();
     const desktopRecovered = this.desktop?.recoverInterruptedSession() ?? false;
-    return codeRecovered || desktopRecovered;
+    return codeRecovered || mcpRecovered || desktopRecovered;
   }
 
   /**
@@ -97,7 +117,7 @@ export class ClaudeGatewayIntegration {
     }
     const baseUrl = this.codeBaseUrl(gatewayBaseUrl);
     this.syncDesktop(baseUrl);
-    return this.takeover.activate(baseUrl, this.buildModelSelection());
+    return this.takeover.activate(baseUrl, this.buildModelSelection(), this.syncMcp());
   }
 
   /**
@@ -115,7 +135,7 @@ export class ClaudeGatewayIntegration {
     }
     const baseUrl = this.codeBaseUrl(gatewayBaseUrl);
     this.syncDesktop(baseUrl);
-    return this.takeover.reapply(baseUrl, this.buildModelSelection());
+    return this.takeover.reapply(baseUrl, this.buildModelSelection(), this.syncMcp());
   }
 
   /**
@@ -133,6 +153,7 @@ export class ClaudeGatewayIntegration {
    */
   deactivate(): boolean {
     const codeRestored = this.takeover.restore();
+    this.mcp.restore();
     this.desktop?.restore();
     return codeRestored;
   }
@@ -159,6 +180,31 @@ export class ClaudeGatewayIntegration {
     if (!this.desktop.reapply(baseUrl, models)) {
       this.desktop.activate(baseUrl, models);
     }
+  }
+
+  /**
+   * Declares the router's tool server, refreshes it, or takes it back out —
+   * whichever the router's presence now calls for.
+   *
+   * Same shape as {@link syncDesktop}, and for the same reason: this entry is
+   * only ever borrowed while the router is up, so neither `activate` nor
+   * `reapply` alone can carry it across a switch moving in both directions.
+   *
+   * @returns whether the tool server is now declared, which is what decides
+   *   whether `settings.json` also allows its tools to be called without a
+   *   prompt per call — an allow rule for a server that is not there would
+   *   outlive the reason it was written
+   */
+  private syncMcp(): boolean {
+    const mcpUrl = this.routerBinding.mcpUrl;
+    if (mcpUrl === null) {
+      this.mcp.restore();
+      return false;
+    }
+    if (!this.mcp.reapply(mcpUrl)) {
+      this.mcp.activate(mcpUrl);
+    }
+    return true;
   }
 
   /**

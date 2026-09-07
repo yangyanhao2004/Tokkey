@@ -1,5 +1,5 @@
 /** The settings shape this document touches; every other key is carried through. */
-interface ClaudeSettings {
+export interface ClaudeSettings {
   env?: Record<string, unknown>;
   [key: string]: unknown;
 }
@@ -27,6 +27,14 @@ export interface ClaudeModelSelection {
 const MODEL_KEY = 'model';
 const AVAILABLE_MODELS_KEY = 'availableModels';
 const ENFORCE_AVAILABLE_MODELS_KEY = 'enforceAvailableModels';
+
+/**
+ * Where Claude Code keeps the tool calls it may make without stopping to ask.
+ *
+ * Only ever appended to and filtered here, never rewritten wholesale: the list
+ * is the user's, and Tokkey's interest in it is one entry.
+ */
+const PERMISSIONS_ALLOW_PATH = ['permissions', 'allow'] as const;
 
 /** What Claude Code writes when it has never been configured. */
 const EMPTY_SETTINGS: ClaudeSettings = {};
@@ -115,9 +123,59 @@ export class ClaudeSettingsDocument {
     return new ClaudeSettingsDocument(ClaudeSettingsDocument.withoutPath(this.settings, pathSegments));
   }
 
+  /** Whether `rule` is already listed in `permissions.allow`. */
+  hasPermissionRule(rule: string): boolean {
+    return this.permissionRules()?.includes(rule) ?? false;
+  }
+
+  /**
+   * The document with `rule` appended to `permissions.allow`, unchanged if it
+   * is already there.
+   */
+  withPermissionRule(rule: string): ClaudeSettingsDocument {
+    const rules = this.permissionRules();
+    if (rules === null) {
+      console.warn(`[ClaudeConfig] permissions.allow is not a list; left it alone rather than allowing ${rule}.`);
+      return this;
+    }
+    if (rules.includes(rule)) {
+      return this;
+    }
+    return this.setPath(PERMISSIONS_ALLOW_PATH, JSON.stringify([...rules, rule]));
+  }
+
+  /**
+   * The document with `rule` removed from `permissions.allow`, keeping every
+   * other rule in it and dropping the key once `rule` was the last one left.
+   */
+  withoutPermissionRule(rule: string): ClaudeSettingsDocument {
+    const rules = this.permissionRules();
+    if (rules === null || !rules.includes(rule)) {
+      return this;
+    }
+    const remaining = rules.filter((entry) => entry !== rule);
+    return remaining.length === 0
+      ? this.deletePath(PERMISSIONS_ALLOW_PATH)
+      : this.setPath(PERMISSIONS_ALLOW_PATH, JSON.stringify(remaining));
+  }
+
   /** Whether every top-level key is gone, the JSON equivalent of an empty file. */
   isEmpty(): boolean {
     return Object.keys(this.settings).length === 0;
+  }
+
+  /**
+   * The rules currently allowed, an empty list when the key is unset, and null
+   * when it holds something that is not a list — malformed, and so not
+   * something to edit around rather than over.
+   */
+  private permissionRules(): unknown[] | null {
+    const encoded = this.getPath(PERMISSIONS_ALLOW_PATH);
+    if (encoded === null) {
+      return [];
+    }
+    const parsed: unknown = JSON.parse(encoded);
+    return Array.isArray(parsed) ? parsed : null;
   }
 
   private static withPath(node: ClaudeSettings, pathSegments: readonly string[], value: unknown): ClaudeSettings {

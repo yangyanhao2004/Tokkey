@@ -12,9 +12,11 @@ import path from 'node:path';
  */
 export class ClaudeHome {
   private readonly home: string;
+  private readonly userConfigDir: string;
 
   constructor(options: { homeDirectory?: string; claudeHome?: string } = {}) {
     this.home = ClaudeHome.resolve(options);
+    this.userConfigDir = ClaudeHome.resolveUserConfigDir(options);
   }
 
   /** The Claude home this machine uses, without touching the filesystem. */
@@ -24,6 +26,19 @@ export class ClaudeHome {
       return path.resolve(ClaudeHome.expandUser(explicit));
     }
     return path.join(options.homeDirectory ?? os.homedir(), '.claude');
+  }
+
+  /**
+   * The directory holding `.claude.json`, which is not the Claude home.
+   *
+   * With no override the CLI keeps that file *beside* `~/.claude` rather than
+   * inside it, so deriving it from {@link resolve} would aim at
+   * `~/.claude/.claude.json` — a file nothing reads. An override moves the
+   * whole config directory, and this file goes with it.
+   */
+  static resolveUserConfigDir(options: { homeDirectory?: string; claudeHome?: string } = {}): string {
+    const explicit = options.claudeHome?.trim() || process.env.CLAUDE_CONFIG_DIR?.trim();
+    return explicit ? ClaudeHome.resolve(options) : (options.homeDirectory ?? os.homedir());
   }
 
   /** Expands a leading `~`, which the shell resolves but Node's path helpers do not. */
@@ -40,6 +55,11 @@ export class ClaudeHome {
   /** The user-level settings file, whose `env` block Claude applies to every session. */
   get settingsPath(): string {
     return path.join(this.home, 'settings.json');
+  }
+
+  /** The CLI's own state file, which is where user-scope MCP servers are declared. */
+  get userConfigPath(): string {
+    return path.join(this.userConfigDir, '.claude.json');
   }
 }
 

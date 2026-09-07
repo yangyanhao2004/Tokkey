@@ -1,4 +1,5 @@
 import OwnedConfigFile, { type SlotEditor, type SlotWrite } from '../config/OwnedConfigFile';
+import RouterMcpServer from '../router/RouterMcpServer';
 import TokkeyHome from '../storage/TokkeyHome';
 import CodexHome from './CodexHome';
 import CodexTomlDocument from './CodexTomlDocument';
@@ -13,14 +14,18 @@ const MODEL_CATALOG_KEY = 'model_catalog_json';
 /** The table Tokkey's provider lives in, addressed the way `CodexTomlDocument` wants it. */
 const TOKKEY_TABLE_PATH = ['model_providers', TOKKEY_PROVIDER_ID] as const;
 
+/** The table the router's own MCP server is declared in, while there is one. */
+const MCP_TABLE_PATH = ['mcp_servers', RouterMcpServer.NAME] as const;
+
 /**
  * Points the Codex CLI at the local gateway for as long as Tokkey is running.
  *
  * Codex reads one file, `~/.codex/config.toml`, and that file is the user's:
  * hand-written, full of comments, and shared with every other tool that
- * configures Codex. Tokkey only ever touches three things in it — the
- * `model_provider` and `model_catalog_json` root keys, and the
- * `[model_providers.tokkey]` table — and gives back exactly those, never the
+ * configures Codex. Tokkey only ever touches four things in it — the
+ * `model_provider` and `model_catalog_json` root keys, the
+ * `[model_providers.tokkey]` table, and, while the router is on, the
+ * `[mcp_servers.tokkey-router]` table — and gives back exactly those, never the
  * rest of the file, whatever else the user does to it while Tokkey runs. That
  * per-key loan-and-return contract lives in {@link OwnedConfigFile}, which
  * `ClaudeConfigTakeover` shares.
@@ -67,16 +72,17 @@ export class CodexConfigTakeover {
 
   /**
    * Writes `model_provider`, `[model_providers.tokkey]`, and — when given —
-   * `model_catalog_json`, recording each one's pre-takeover value the first
-   * time it is touched.
+   * `model_catalog_json` and the router's MCP server, recording each one's
+   * pre-takeover value the first time it is touched.
    *
    * @param baseUrl the endpoint Codex should call, e.g. `http://127.0.0.1:4033`
    * @param catalogPath the generated catalog to point Codex at, or null to
    *   leave whatever catalog the user had configured in place
+   * @param mcpUrl the router's MCP endpoint, or null while nothing serves one
    * @returns whether the file was taken over
    */
-  activate(baseUrl: string, catalogPath: string | null): boolean {
-    const taken = this.file.activate(this.writesFor(baseUrl, catalogPath), this.allEditors());
+  activate(baseUrl: string, catalogPath: string | null, mcpUrl: string | null = null): boolean {
+    const taken = this.file.activate(this.writesFor(baseUrl, catalogPath, mcpUrl), this.allEditors());
     if (taken) {
       console.info(`[CodexConfig] Codex now routes through ${this.providerBaseUrl(baseUrl)}.`);
     }
@@ -93,10 +99,11 @@ export class CodexConfigTakeover {
    *
    * @param baseUrl the endpoint Codex should call, e.g. a running router's
    * @param catalogPath the generated catalog, or null to leave the user's own
+   * @param mcpUrl the router's MCP endpoint, or null to take the entry back out
    * @returns whether the slots were rewritten
    */
-  reapply(baseUrl: string, catalogPath: string | null): boolean {
-    const rewritten = this.file.reapply(this.writesFor(baseUrl, catalogPath), this.allEditors());
+  reapply(baseUrl: string, catalogPath: string | null, mcpUrl: string | null = null): boolean {
+    const rewritten = this.file.reapply(this.writesFor(baseUrl, catalogPath, mcpUrl), this.allEditors());
     if (rewritten) {
       console.info(`[CodexConfig] Codex now routes through ${this.providerBaseUrl(baseUrl)}.`);
     }
@@ -115,8 +122,8 @@ export class CodexConfigTakeover {
     return this.file.restore(this.allEditors());
   }
 
-  /** The slots this takeover writes for a given endpoint and catalog. */
-  private writesFor(baseUrl: string, catalogPath: string | null): SlotWrite[] {
+  /** The slots this takeover writes for a given endpoint, catalog and tool server. */
+  private writesFor(baseUrl: string, catalogPath: string | null, mcpUrl: string | null): SlotWrite[] {
     const writes: SlotWrite[] = [
       this.rootKeySlot(MODEL_PROVIDER_KEY, TOKKEY_PROVIDER_ID),
       this.tableSlot(TOKKEY_TABLE_PATH, [
@@ -133,6 +140,11 @@ export class CodexConfigTakeover {
     if (catalogPath !== null) {
       writes.push(this.rootKeySlot(MODEL_CATALOG_KEY, catalogPath));
     }
+    if (mcpUrl !== null) {
+      // Streamable HTTP, which is all a bare `url` means to Codex — the same
+      // shape the Manage MCP dialog writes for a remote server.
+      writes.push(this.tableSlot(MCP_TABLE_PATH, [['url', mcpUrl]]));
+    }
     return writes;
   }
 
@@ -141,7 +153,8 @@ export class CodexConfigTakeover {
     return [
       this.rootKeyEditor(MODEL_PROVIDER_KEY),
       this.rootKeyEditor(MODEL_CATALOG_KEY),
-      this.tableEditor(TOKKEY_TABLE_PATH)
+      this.tableEditor(TOKKEY_TABLE_PATH),
+      this.tableEditor(MCP_TABLE_PATH)
     ];
   }
 

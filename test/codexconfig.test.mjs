@@ -365,6 +365,43 @@ test('preserves a row another tool wrote into the same catalog', () => {
   rmSync(home, { recursive: true, force: true });
 });
 
+test('adopts the bundled rows over the stale copies already on disk', () => {
+  const home = makeHome();
+  const catalogPath = path.join(home, 'amis-catalog.json');
+  // What an earlier CLI left behind: one native row, plus a row another tool
+  // wrote that no bundled catalog will ever name.
+  writeFileSync(
+    catalogPath,
+    JSON.stringify({
+      models: [
+        nativeEntry('gpt-5.5', { priority: 1, display_name: 'Old label' }),
+        { slug: 'other/model', description: 'Routed via something else.' }
+      ]
+    })
+  );
+  // What the upgraded CLI reports: the same model renumbered, and a new one.
+  const generator = makeGenerator(home, [
+    nativeEntry('gpt-5.5', { priority: 6, display_name: 'New label' }),
+    nativeEntry('gpt-6-astra', { priority: 1 })
+  ]);
+
+  const result = generator.generate([{ slug: 'first' }]);
+
+  // The model the upgrade added reaches the picker, and the foreign row keeps
+  // its place because nothing in the bundled catalog supersedes it.
+  assert.deepEqual(result.models.map((entry) => entry.slug), [
+    'other/model',
+    'gpt-5.5',
+    'gpt-6-astra',
+    'first'
+  ]);
+  // The row that existed under both CLIs is the bundled one, not the stale copy.
+  const refreshed = result.models.find((entry) => entry.slug === 'gpt-5.5');
+  assert.equal(refreshed.priority, 6);
+  assert.equal(refreshed.display_name, 'New label');
+  rmSync(home, { recursive: true, force: true });
+});
+
 test('writes byte-identical output when nothing changed', () => {
   const home = makeHome();
   const generator = makeGenerator(home, [nativeEntry('gpt-5.5')]);
@@ -391,6 +428,27 @@ test('still produces a usable row when no native template exists', () => {
   assert.equal(result.models[0].auto_compact_token_limit, 115200);
   assert.equal(CatalogEntryFactory.isTokkeyAuthored(result.models[0]), true);
   rmSync(home, { recursive: true, force: true });
+});
+
+test('exposes router MCP tools directly for code-mode templates and fallback rows', (context) => {
+  // A connected MCP server can still be deferred when the model enables tool
+  // search. The router needs receive_step in the very first request's tools.
+  for (const natives of [[nativeEntry('gpt-5.5', {
+    supports_search_tool: true,
+    tool_mode: 'code_mode_only'
+  })], null]) {
+    const home = makeHome();
+    context.after(() => rmSync(home, { recursive: true, force: true }));
+    const result = makeGenerator(home, natives).generate([{ slug: RouterModel.DISPLAY_NAME }]);
+    const router = result.models.find((entry) => entry.slug === RouterModel.DISPLAY_NAME);
+    assert.equal(router.supports_search_tool, false);
+    assert.equal('tool_mode' in router, false);
+    assert.equal(router.web_search_tool_type, 'text_and_image');
+    if (natives !== null) {
+      assert.equal(result.models.find((entry) => entry.slug === 'gpt-5.5').supports_search_tool, true);
+      assert.equal(result.models.find((entry) => entry.slug === 'gpt-5.5').tool_mode, 'code_mode_only');
+    }
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -432,7 +490,7 @@ function makeIntegration(home, { routerBinding, baseUrl = GATEWAY_URL } = {}) {
   return new CodexGatewayIntegration({
     gateway: { startIfNeeded: async () => {}, baseUrl: () => baseUrl },
     routerBinding: routerBinding ?? new RouterBinding(),
-    bundled: new FakeBundledCatalog([nativeEntry('gpt-5.5')]),
+    bundled: new FakeBundledCatalog([nativeEntry('gpt-5.5', { tool_mode: 'code_mode_only' })]),
     homeDirectory: home,
     codexHome
   });
@@ -460,6 +518,8 @@ test('catalogues the routed pair beside codex own models and points codex at the
   assert.deepEqual(catalog.models.map((entry) => entry.slug), ['gpt-5.5', ROUTER_SLUG]);
   assert.equal(CatalogEntryFactory.isTokkeyAuthored(catalog.models[0]), false);
   assert.equal(catalog.models[1].display_name, 'Tokkey-Router');
+  assert.equal(catalog.models[1].supports_search_tool, false);
+  assert.equal('tool_mode' in catalog.models[1], false);
   // The slug shows only route names, so the description names both models.
   assert.ok(catalog.models[1].description.includes('local gpt-5.6-terra, cloud gpt-5.6-terra'));
 
@@ -476,18 +536,29 @@ test('the router switch moves codex both ways, and the backup survives it', asyn
   const integration = makeIntegration(home, { routerBinding: binding });
   await integration.activate();
   assert.deepEqual(readCatalog(home).models.map((entry) => entry.slug), ['gpt-5.5']);
+  // Nothing serves the router's tools yet, so nothing declares them.
+  assert.ok(!readFileSync(configPath, 'utf8').includes('[mcp_servers.tokkey-router]'));
 
   // ...the switch goes on, and the republish that follows adds the pair.
   binding.bind(ROUTER_URL, RouterModel.forSingleModel({ routeName: CLOUD_ROUTE, displayName: 'gpt-5.6-terra' }));
   await integration.sync();
   assert.deepEqual(readCatalog(home).models.map((entry) => entry.slug), ['gpt-5.5', ROUTER_SLUG]);
   assert.ok(readFileSync(configPath, 'utf8').includes(`base_url = "${ROUTER_URL}/v1"`));
+  // The tool server comes with it, at the port the router actually bound.
+  assert.ok(
+    readFileSync(configPath, 'utf8').includes(`[mcp_servers.tokkey-router]\nurl = "${ROUTER_URL}/mcp"`)
+  );
+  // The user's own MCP server is none of Tokkey's business either way.
+  assert.ok(readFileSync(configPath, 'utf8').includes('[mcp_servers.testhttp]'));
 
   // ...and off again, which takes the pair away and hands the port back.
   binding.release();
   await integration.sync();
   assert.deepEqual(readCatalog(home).models.map((entry) => entry.slug), ['gpt-5.5']);
   assert.ok(readFileSync(configPath, 'utf8').includes(`base_url = "${GATEWAY_URL}/v1"`));
+  // An endpoint that stopped answering must not be left declared.
+  assert.ok(!readFileSync(configPath, 'utf8').includes('[mcp_servers.tokkey-router]'));
+  assert.ok(readFileSync(configPath, 'utf8').includes('[mcp_servers.testhttp]'));
 
   // Every refresh rewrote the file, not the backup: quit still returns the original.
   integration.deactivate();
