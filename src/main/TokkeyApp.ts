@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, Menu, nativeImage, shell, Tray } from 'electron';
 import IpcController from './IpcController';
 import GatewayProcessManager from './gateway/GatewayProcessManager';
 import CloudModelConnector from './models/CloudModelConnector';
@@ -16,6 +16,9 @@ import LocalModelManager from './models/LocalModelManager';
 import HubModelConnector from './models/HubModelConnector';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 import TokenHubRuntimeLocator from './models/tokenhub/TokenHubRuntimeLocator';
+import PetRuntimeCoordinator from './pet/PetRuntimeCoordinator';
+import { PetPositionStore } from './pet/PetPositionStore';
+import type { PetCompanionSignal } from './pet/PetCompanionStatus';
 
 interface TokkeyAppOptions {
   width?: number;
@@ -43,11 +46,13 @@ export class TokkeyApp {
   private readonly tokenHubRuntime: TokenHubRuntime;
   private readonly routerBinding: RouterBinding;
   private readonly routerProcessManager: RouterProcessManager;
+  private readonly petRuntimeCoordinator: PetRuntimeCoordinator;
   private readonly routerAgentIntegration: RouterAgentIntegration;
   private readonly isDev: boolean;
   private readonly evidenceMode: boolean;
   private readonly evidenceCapture: RendererEvidenceCapture | null;
   private mainWindow: BrowserWindow | null;
+  private tray: Tray | null = null;
   /** True once the borrowed config files have been handed back this session. */
   private configsReleased = false;
 
@@ -105,6 +110,13 @@ export class TokkeyApp {
       gateway: this.gatewayProcessManager,
       resourcesPath: app.isPackaged ? process.resourcesPath : undefined
     });
+    this.petRuntimeCoordinator = new PetRuntimeCoordinator({
+      onOpenChat: () => this.presentChatFromPet(),
+      onContextMenu: (window) => this.showPetMenu(window),
+      positionStore: new PetPositionStore(
+        () => path.join(app.getPath('userData'), 'pet-position.json')
+      )
+    });
     // Everything the switch has to do beyond starting a process: pick the cloud
     // tier, set the binding, and rewrite both CLIs from it.
     this.routerAgentIntegration = new RouterAgentIntegration({
@@ -115,6 +127,15 @@ export class TokkeyApp {
       claude: this.claudeGatewayIntegration,
       gateway: this.gatewayProcessManager
     });
+    this.gatewayProcessManager.subscribe((state) => {
+      this.signalPetCompanion({ source: 'gateway', phase: state.phase });
+    });
+    this.routerAgentIntegration.subscribe((state) => {
+      this.signalPetCompanion({ source: 'router', phase: state.phase });
+    });
+    this.tokenHubRuntime.subscribe((state) => {
+      this.signalPetCompanion({ source: 'model', phase: state.phase });
+    });
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
       cloudModelConnector: this.cloudModelConnector,
@@ -123,7 +144,8 @@ export class TokkeyApp {
       localModelManager: this.localModelManager,
       localChatTurnExecutor: this.localChatTurnExecutor,
       tokenHubRuntime: this.tokenHubRuntime,
-      routerAgentIntegration: this.routerAgentIntegration
+      routerAgentIntegration: this.routerAgentIntegration,
+      petRuntimeCoordinator: this.petRuntimeCoordinator
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
     this.isDev = TokkeyApp.shouldOpenDevTools(this.evidenceMode, process.argv);
@@ -206,8 +228,10 @@ export class TokkeyApp {
   onReady(): void {
     this.ipcController.attachModelDownloadSession();
     this.tokenHubRuntime.startMonitoring();
+    this.createTray();
     this.createMainWindow();
     if (!this.evidenceMode) {
+      void this.startPetRuntime();
       // Before anything reads Codex's config.toml or Claude's settings.json: a
       // run that was killed left Tokkey's own configuration in those files, and
       // every reader downstream — the upstream endpoint resolver above all —
@@ -218,6 +242,15 @@ export class TokkeyApp {
       // hands the user's own file back.
       this.claudeGatewayIntegration.recoverInterruptedSession();
       this.startGateway();
+    }
+  }
+
+  /** Applies persisted Pet settings after Electron is ready to create windows. */
+  private async startPetRuntime(): Promise<void> {
+    try {
+      await this.petRuntimeCoordinator.applySettings(await this.ipcController.getPetSettings());
+    } catch (error) {
+      console.error('[Pet] Could not restore Pet runtime:', error);
     }
   }
 
@@ -236,6 +269,9 @@ export class TokkeyApp {
     this.releaseBorrowedConfigs();
     this.ipcController.cancelAccountSignIn();
     this.tokenHubRuntime.shutdownNow();
+    this.petRuntimeCoordinator.stop('application quit');
+    this.tray?.destroy();
+    this.tray = null;
     // The router goes down before the gateway it forwards to, so it never spends
     // its last moments proxying to an address that has already stopped answering.
     this.routerProcessManager.stop('application quit');
@@ -298,16 +334,98 @@ export class TokkeyApp {
 
   /** On macOS, clicking the dock icon re-opens a window when none is left. */
   onActivate(): void {
-    if (BrowserWindow.getAllWindows().length === 0) {
+    // The floating Pet window can remain alive after the main window closes, so
+    // checking only the global window count would leave the Dock click inert.
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
       this.createMainWindow();
+    }
+  }
+
+  /** Shows the main window and tells its renderer to select the Chat route. */
+  private presentChatFromPet(): void {
+    this.presentRendererIntentFromPet('pet:open-chat');
+  }
+
+  private presentRendererIntentFromPet(channel: 'pet:open-chat' | 'pet:open-settings'): void {
+    const mainWindow = this.mainWindow;
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      const createdWindow = this.createMainWindow();
+      createdWindow.webContents.once('did-finish-load', () => {
+        if (!createdWindow.isDestroyed()) createdWindow.webContents.send(channel);
+      });
+      return;
+    }
+
+    this.focusMainWindow();
+    if (mainWindow.webContents.isLoading()) {
+      mainWindow.webContents.once('did-finish-load', () => {
+        if (!mainWindow.isDestroyed()) mainWindow.webContents.send(channel);
+      });
+      return;
+    }
+    mainWindow.webContents.send(channel);
+  }
+
+  /** Pet status is observational and must not alter service lifecycle outcomes. */
+  private signalPetCompanion(signal: PetCompanionSignal): void {
+    try {
+      this.petRuntimeCoordinator.signalCompanion(signal);
+    } catch (error) {
+      console.error('[Pet] Companion signal failed:', error);
     }
   }
 
   /** On Windows/Linux the app exits with its last window; macOS keeps running. */
   onWindowAllClosed(): void {
-    if (process.platform !== 'darwin') {
+    if (!this.tray && process.platform !== 'darwin') {
       app.quit();
     }
+  }
+
+  /** Creates the persistent desktop entry point used when the main window is closed. */
+  private createTray(): void {
+    if (this.evidenceMode || this.tray) return;
+    const iconPath = path.join(__dirname, '../renderer/assets/pet/pet-idle-yawn.png');
+    const icon = nativeImage.createFromPath(iconPath).resize({ width: 18, height: 18 });
+    this.tray = new Tray(icon);
+    this.tray.setToolTip('Tokkey');
+    this.tray.on('click', () => this.showPetMenu());
+    this.tray.on('right-click', () => this.showPetMenu());
+  }
+
+  /** Builds the Pet controls from current runtime state every time the menu opens. */
+  private showPetMenu(sourceWindow: BrowserWindow | null = null): void {
+    const runtimeState = this.petRuntimeCoordinator.getState();
+    const petCanPause = runtimeState.phase !== 'hidden' && runtimeState.phase !== 'error';
+    const menu = Menu.buildFromTemplate([
+      {
+        label: 'Open Chat',
+        click: () => this.presentChatFromPet()
+      },
+      {
+        label: runtimeState.isPaused ? 'Resume Movement' : 'Pause Movement',
+        enabled: petCanPause,
+        click: () => {
+          this.petRuntimeCoordinator.setPaused(!runtimeState.isPaused);
+        }
+      },
+      { type: 'separator' },
+      {
+        label: 'Pet Settings',
+        click: () => this.presentPetSettings()
+      },
+      { type: 'separator' },
+      {
+        label: 'Quit Tokkey',
+        click: () => app.quit()
+      }
+    ]);
+    menu.popup({ window: sourceWindow ?? undefined });
+  }
+
+  /** Shows the Pet settings route without coupling the Pet renderer to navigation. */
+  private presentPetSettings(): void {
+    this.presentRendererIntentFromPet('pet:open-settings');
   }
 
   /**
@@ -397,7 +515,8 @@ export class TokkeyApp {
 
   /** Restores and focuses the main window, used when a second instance starts. */
   focusMainWindow(): void {
-    if (!this.mainWindow) {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+      this.createMainWindow();
       return;
     }
     if (this.mainWindow.isMinimized()) {

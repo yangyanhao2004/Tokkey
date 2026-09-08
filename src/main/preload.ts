@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type {
   LocalChatEvent,
   LocalModelRuntimeState,
+  PetInteraction,
+  PetRuntimeState,
+  PetSettingsPatch,
   RouterRuntimeState,
   TokkeyApi
 } from '../shared/types';
@@ -25,6 +28,29 @@ class PreloadBridge {
       cancelGoogleSignIn: () => ipcRenderer.invoke('account:cancel-google'),
       signOutAccount: () => ipcRenderer.invoke('account:sign-out'),
       getHostSnapshot: () => ipcRenderer.invoke('host:snapshot'),
+      getPetSettings: () => ipcRenderer.invoke('pet:get-settings'),
+      updatePetSettings: (patch: PetSettingsPatch) =>
+        ipcRenderer.invoke('pet:update-settings', patch),
+      getPetRuntimeState: () => ipcRenderer.invoke('pet:get-runtime-state'),
+      setPetPaused: (isPaused) => ipcRenderer.invoke('pet:set-paused', isPaused),
+      onPetRuntimeStateChanged: (listener: (state: PetRuntimeState) => void) => {
+        const handler = (_event: IpcRendererEvent, state: PetRuntimeState) => listener(state);
+        ipcRenderer.on('pet:runtime-state-changed', handler);
+        return () => ipcRenderer.removeListener('pet:runtime-state-changed', handler);
+      },
+      sendPetInteraction: (interaction: PetInteraction) => {
+        ipcRenderer.send('pet:interaction', interaction);
+      },
+      onPetOpenChat: (listener: () => void) => {
+        const handler = () => listener();
+        ipcRenderer.on('pet:open-chat', handler);
+        return () => ipcRenderer.removeListener('pet:open-chat', handler);
+      },
+      onPetOpenSettings: (listener: () => void) => {
+        const handler = () => listener();
+        ipcRenderer.on('pet:open-settings', handler);
+        return () => ipcRenderer.removeListener('pet:open-settings', handler);
+      },
       detectAgents: () => ipcRenderer.invoke('agents:detect'),
       getInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),
       scanInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),

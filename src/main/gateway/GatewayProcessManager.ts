@@ -23,6 +23,13 @@ export interface GatewayProcessManagerOptions {
   delay?: (milliseconds: number) => Promise<void>;
 }
 
+export interface GatewayRuntimeState {
+  phase: 'stopped' | 'starting' | 'running' | 'error';
+  error: string | null;
+}
+
+type GatewayStateListener = (state: GatewayRuntimeState) => void;
+
 /** Raised when the gateway cannot be started, carrying launch diagnostics. */
 export class GatewayStartupError extends Error {
   constructor(message: string, readonly diagnostics: string) {
@@ -73,6 +80,8 @@ export class GatewayProcessManager {
   private restartAttempts = 0;
   private restartTimer: NodeJS.Timeout | null = null;
   private stopped = false;
+  private state: GatewayRuntimeState = { phase: 'stopped', error: null };
+  private readonly listeners = new Set<GatewayStateListener>();
 
   constructor(options: GatewayProcessManagerOptions = {}) {
     const projectRoot = options.projectRoot ?? path.resolve(__dirname, '../../..');
@@ -94,6 +103,15 @@ export class GatewayProcessManager {
   /** Base URL clients should call, available only once the gateway is running. */
   baseUrl(): string | null {
     return this.port === null ? null : `http://127.0.0.1:${this.port}`;
+  }
+
+  currentState(): GatewayRuntimeState {
+    return { ...this.state };
+  }
+
+  subscribe(listener: GatewayStateListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   /** Starts the gateway unless this launch already owns a healthy instance. */
@@ -119,16 +137,31 @@ export class GatewayProcessManager {
     this.clearRestartTimer();
     const child = this.child;
     if (!child) {
+      this.publish({ phase: 'stopped', error: null });
       return;
     }
     // Clearing the handle first makes the exit handler treat this as intentional.
     this.child = null;
     this.port = null;
     child.kill('SIGTERM');
+    this.publish({ phase: 'stopped', error: null });
     console.info(`[AmisGateway] Gateway stopped: ${reason}`);
   }
 
   private async performStartup(): Promise<void> {
+    this.publish({ phase: 'starting', error: null });
+    try {
+      await this.launchAndWaitForReadiness();
+    } catch (error) {
+      this.publish({
+        phase: 'error',
+        error: error instanceof Error ? error.message : String(error)
+      });
+      throw error;
+    }
+  }
+
+  private async launchAndWaitForReadiness(): Promise<void> {
     const location = this.locator.locate();
     if (!location) {
       throw new GatewayStartupError(
@@ -144,6 +177,7 @@ export class GatewayProcessManager {
       if (await this.healthProbe.isHealthy(port)) {
         this.port = port;
         this.restartAttempts = 0;
+        this.publish({ phase: 'running', error: null });
         console.info(`[AmisGateway] Gateway ready on port ${port} (${location.source} runtime).`);
         return;
       }
@@ -229,6 +263,10 @@ export class GatewayProcessManager {
     }
     this.child = null;
     this.port = null;
+    this.publish({
+      phase: 'error',
+      error: `Gateway exited unexpectedly (code ${code}, signal ${signal}).`
+    });
     console.error(
       `[AmisGateway] Gateway exited unexpectedly (code ${code}, signal ${signal}). ` +
         `Recent stderr:\n${this.diagnostics()}`
@@ -282,6 +320,12 @@ export class GatewayProcessManager {
       clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
+  }
+
+  private publish(state: GatewayRuntimeState): void {
+    this.state = { ...state };
+    const snapshot = this.currentState();
+    this.listeners.forEach((listener) => listener(snapshot));
   }
 
   private static sleep(milliseconds: number): Promise<void> {

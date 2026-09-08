@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import { useEffect, type ComponentType } from 'react';
 import { type NavItemId } from './navigation';
 import { navItemIdForRoute, type RouteId } from './routing';
 import { AgentDetectionProvider } from './components/AgentDetectionProvider';
@@ -8,6 +8,7 @@ import { AddModelPage } from './pages/AddModelPage';
 import { AgentHubPage } from './pages/AgentHubPage';
 import { DiscoverSkillsPage } from './pages/DiscoverSkillsPage';
 import { RouterPage } from './pages/RouterPage';
+import { PetPage } from './pages/PetPage';
 import { TokkeyPage } from './pages/TokkeyPage';
 import { ChatPage } from './pages/ChatPage';
 import { UnbuiltPage } from './pages/UnbuiltPage';
@@ -21,12 +22,21 @@ import { AccountProvider, useAccount } from './components/AccountProvider';
 const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
   tokkey: TokkeyPage,
   router: RouterPage,
+  pet: PetPage,
   'agent-hub': AgentHubPage,
   chat: ChatPage,
   'add-model': AddModelPage,
   'discover-skills': DiscoverSkillsPage,
   'sign-in': SignInPage
 };
+
+function focusChatComposer(): void {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(() => {
+      document.getElementById('chat-message-input')?.focus();
+    });
+  });
+}
 
 /**
  * Sidebar plus whichever page the current route names. Selecting a row is a
@@ -38,6 +48,12 @@ function AppFrame() {
   const ActivePage = PAGE_BY_ROUTE[route];
   const isChatActive = route === 'chat';
   const isAccountPaneOpen = route === 'sign-in';
+
+  useEffect(() => window.tokkey.onPetOpenChat(() => {
+    navigate('chat');
+    focusChatComposer();
+  }), [navigate]);
+  useEffect(() => window.tokkey.onPetOpenSettings(() => navigate('pet')), [navigate]);
 
   return (
     <div
