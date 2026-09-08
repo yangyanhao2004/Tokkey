@@ -2,7 +2,6 @@ import { useState, type ReactNode } from 'react';
 import {
   CHEVRON_ICON_FILE,
   CLIENT_ROW_TITLE,
-  FEEDBACK_FAILED_MESSAGE,
   GENERAL_SECTION_TITLE,
   ICON_BASE_PATH,
   LAUNCH_AT_LOGIN_DESCRIPTION,
@@ -25,6 +24,7 @@ import { IconTile } from '../components/IconTile';
 import { PageShell, PagePlaceholder } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
 import { Switch } from '../components/Switch';
+import { SendFeedbackDialog } from '../components/SendFeedbackDialog';
 import { TitleBlock } from '../components/TitleBlock';
 import AppUpdatePresentation from '../../shared/AppUpdatePresentation';
 
@@ -113,18 +113,7 @@ function SettingsRow({ iconFile, title, description, trailing, onClick, testId }
  */
 export function SettingsPage() {
   const { state, isSaving, updatePreferences, isUpdating, updateError, performUpdateAction } = useSystemSettings();
-  // Set only when opening the mail client fails, which is otherwise silent.
-  const [feedbackError, setFeedbackError] = useState<string | null>(null);
-
-  const openFeedback = async () => {
-    try {
-      setFeedbackError(null);
-      await window.tokkey.sendFeedback();
-    } catch (error) {
-      console.error('Opening the feedback mail client failed:', error);
-      setFeedbackError(FEEDBACK_FAILED_MESSAGE);
-    }
-  };
+  const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
 
   if (!state) {
     return (
@@ -197,8 +186,8 @@ export function SettingsPage() {
         <SettingsRow
           iconFile={ROW_ICON_FILES.feedback}
           title={SEND_FEEDBACK_TITLE}
-          description={feedbackError ?? SEND_FEEDBACK_DESCRIPTION}
-          onClick={() => void openFeedback()}
+          description={SEND_FEEDBACK_DESCRIPTION}
+          onClick={() => setIsFeedbackOpen(true)}
           testId="settings-feedback-row"
           trailing={
             <img
@@ -209,6 +198,13 @@ export function SettingsPage() {
           }
         />
       </SettingsSection>
+
+      {isFeedbackOpen && (
+        <SendFeedbackDialog
+          onSend={(message, email) => window.tokkey.sendFeedback(message, email)}
+          onClose={() => setIsFeedbackOpen(false)}
+        />
+      )}
     </PageShell>
   );
 }

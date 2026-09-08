@@ -62,7 +62,8 @@ class PreloadBridge {
         return () => ipcRenderer.removeListener('updates:state-changed', handler);
       },
       updateSystemPreferences: (patch) => ipcRenderer.invoke('settings:update-preferences', patch),
-      sendFeedback: () => ipcRenderer.invoke('settings:send-feedback'),
+      sendFeedback: (message: string, email?: string) =>
+        ipcRenderer.invoke('settings:send-feedback', message, email),
       detectAgents: () => ipcRenderer.invoke('agents:detect'),
       getInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),
       scanInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),

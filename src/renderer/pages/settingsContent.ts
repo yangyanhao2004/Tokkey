@@ -21,7 +21,7 @@ export const SUPPORT_SECTION_TITLE = 'Support';
 
 export const CLIENT_ROW_TITLE = 'Tokkey Client';
 
-export const LAUNCH_AT_LOGIN_TITLE = 'Launch at login';
+export const LAUNCH_AT_LOGIN_TITLE = 'Launch at Login';
 export const LAUNCH_AT_LOGIN_DESCRIPTION = 'Start Tokkey when you sign in to macOS.';
 
 export const PREVENT_SLEEP_TITLE = 'Prevent System Sleep';
@@ -29,9 +29,15 @@ export const PREVENT_SLEEP_DESCRIPTION =
   'Keep your Mac awake and connected to the internet while allowing the display to sleep.';
 
 export const SEND_FEEDBACK_TITLE = 'Send Feedback';
-export const SEND_FEEDBACK_DESCRIPTION = 'Tell us what you think about Tokkey.';
+export const SEND_FEEDBACK_DESCRIPTION = 'Tell us what support do you need from Tokkey.';
 
 export const SETTINGS_LOADING_MESSAGE = 'Reading your preferences…';
+
+/** The "Send Feedback" dialog (Figma 531:5666). */
+export const FEEDBACK_FIELD_LABEL = 'Feedback';
+export const FEEDBACK_PLACEHOLDER = 'Share a suggestion or report an issue...';
+export const FEEDBACK_SEND_LABEL = 'Send';
+export const FEEDBACK_SENDING_LABEL = 'Sending…';
 export const FEEDBACK_FAILED_MESSAGE = 'Could not open your mail client.';
 
 /** The icon fronting each row, keyed the way the row is named. */

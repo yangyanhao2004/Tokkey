@@ -299,7 +299,7 @@ export interface TokkeyApi {
   installAppUpdate(): Promise<ClientVersionInfo>;
   onAppUpdateStateChanged(listener: (state: ClientVersionInfo) => void): () => void;
   updateSystemPreferences(patch: SystemPreferencesPatch): Promise<SystemSettingsState>;
-  sendFeedback(): Promise<void>;
+  sendFeedback(message: string, email?: string): Promise<void>;
   detectAgents(): Promise<AgentInstallation[]>;
   getInstalledMcps(): Promise<McpCatalogScan>;
   scanInstalledMcps(): Promise<McpCatalogScan>;

@@ -1,4 +1,4 @@
-import { app, powerSaveBlocker, shell } from 'electron';
+import { app, powerSaveBlocker } from 'electron';
 import type {
   ClientVersionInfo,
   SystemPreferences,
@@ -7,9 +7,7 @@ import type {
 } from '../../shared/types';
 import SystemPreferencesStore, { DEFAULT_SYSTEM_PREFERENCES } from './SystemPreferencesStore';
 import AppUpdateService from '../updates/AppUpdateService';
-
-/** Where the "Send Feedback" row points. */
-export const FEEDBACK_MAILTO_URL = 'mailto:feedback@tokkey.app?subject=Tokkey%20feedback';
+import FeedbackApiClient, { type FeedbackSubmitter } from './FeedbackApiClient';
 
 /**
  * The Electron surfaces the settings actually act on, named so tests can stand
@@ -23,7 +21,6 @@ export interface SystemPreferencesPlatform {
   startSleepBlocker(): number;
   stopSleepBlocker(blockerId: number): void;
   appVersion(): string;
-  openExternalUrl(url: string): Promise<void>;
 }
 
 /** The real surfaces, used everywhere outside tests. */
@@ -34,14 +31,14 @@ const ELECTRON_PLATFORM: SystemPreferencesPlatform = {
   // the Mac stays awake and networked while the display is still free to sleep.
   startSleepBlocker: () => powerSaveBlocker.start('prevent-app-suspension'),
   stopSleepBlocker: (blockerId) => powerSaveBlocker.stop(blockerId),
-  appVersion: () => app.getVersion(),
-  openExternalUrl: (url) => shell.openExternal(url)
+  appVersion: () => app.getVersion()
 };
 
 export interface SystemPreferencesServiceOptions {
   store?: SystemPreferencesStore;
   platform?: SystemPreferencesPlatform;
   clientVersion?: () => ClientVersionInfo;
+  feedbackSubmitter?: FeedbackSubmitter;
 }
 
 /**
@@ -57,6 +54,7 @@ export class SystemPreferencesService {
   private readonly store: SystemPreferencesStore;
   private readonly platform: SystemPreferencesPlatform;
   private readonly clientVersion: () => ClientVersionInfo;
+  private readonly feedbackSubmitter: FeedbackSubmitter;
   private preferences: SystemPreferences;
   /** The live power blocker's id, or null whenever sleep is not being held off. */
   private sleepBlockerId: number | null = null;
@@ -65,6 +63,7 @@ export class SystemPreferencesService {
     this.store = options.store ?? new SystemPreferencesStore();
     this.platform = options.platform ?? ELECTRON_PLATFORM;
     this.clientVersion = options.clientVersion ?? (() => AppUpdateService.unavailableState(this.platform.appVersion()));
+    this.feedbackSubmitter = options.feedbackSubmitter ?? new FeedbackApiClient();
     this.preferences = { ...DEFAULT_SYSTEM_PREFERENCES };
   }
 
@@ -106,9 +105,12 @@ export class SystemPreferencesService {
     return this.getState();
   }
 
-  /** Opens the user's mail client on the feedback address. */
-  async sendFeedback(): Promise<void> {
-    await this.platform.openExternalUrl(FEEDBACK_MAILTO_URL);
+  /**
+   * Posts one message to the feedback endpoint. Rejecting is meaningful: the
+   * dialog holds the typed message open rather than claiming it was sent.
+   */
+  async sendFeedback(message: string, email?: string): Promise<void> {
+    await this.feedbackSubmitter.submit(message, email);
   }
 
   /** Releases the power blocker; call when the app is shutting down. */

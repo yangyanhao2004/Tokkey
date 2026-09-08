@@ -19,7 +19,6 @@ class StubPlatform {
     this.loginItemThrows = loginItemThrows;
     this.startedBlockers = 0;
     this.stoppedBlockers = [];
-    this.openedUrls = [];
     this.nextBlockerId = 1;
   }
 
@@ -44,16 +43,26 @@ class StubPlatform {
   appVersion() {
     return '0.9.4';
   }
+}
 
-  async openExternalUrl(url) {
-    this.openedUrls.push(url);
+/** Records every feedback message the service tries to deliver. */
+class StubFeedbackSubmitter {
+  constructor({ fails = false } = {}) {
+    this.submitted = [];
+    this.fails = fails;
+  }
+
+  async submit(message, email) {
+    if (this.fails) throw new Error('Failed to send feedback');
+    this.submitted.push({ message, email });
   }
 }
 
-function serviceWith(platform, homeDirectory) {
+function serviceWith(platform, homeDirectory, feedbackSubmitter = new StubFeedbackSubmitter()) {
   return new SystemPreferencesService({
     store: new SystemPreferencesStore({ homeDirectory }),
-    platform
+    platform,
+    feedbackSubmitter
   });
 }
 
@@ -169,10 +178,23 @@ test('the client row reports the installed version and no phantom update', () =>
   assert.equal(state.client.status, 'unavailable');
 });
 
-test('send feedback opens the mail client once', async () => {
-  const platform = new StubPlatform();
-  await serviceWith(platform, temporaryHome()).sendFeedback();
+test('send feedback posts the typed message and reply address once', async () => {
+  const submitter = new StubFeedbackSubmitter();
+  const service = serviceWith(new StubPlatform(), temporaryHome(), submitter);
 
-  assert.equal(platform.openedUrls.length, 1);
-  assert.match(platform.openedUrls[0], /^mailto:/);
+  await service.sendFeedback('Line one\nR&D idea', 'user@example.com');
+
+  assert.deepEqual(submitter.submitted, [
+    { message: 'Line one\nR&D idea', email: 'user@example.com' }
+  ]);
+});
+
+test('a failed send rejects, so the dialog can keep the message', async () => {
+  const service = serviceWith(
+    new StubPlatform(),
+    temporaryHome(),
+    new StubFeedbackSubmitter({ fails: true })
+  );
+
+  await assert.rejects(() => service.sendFeedback('Never delivered'), /Failed to send feedback/);
 });

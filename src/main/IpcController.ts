@@ -242,7 +242,11 @@ export default class IpcController {
       'updates:install': () => options.appUpdateService?.installUpdate() ?? this.getSystemSettings().client,
       'settings:update-preferences': (patch: unknown) =>
         this.updateSystemPreferences(this.requireSystemPreferencesPatch(patch)),
-      'settings:send-feedback': () => this.sendFeedback(),
+      'settings:send-feedback': (message: unknown, email: unknown) =>
+        this.sendFeedback(
+          this.requireString(message, 'Feedback message'),
+          this.requireOptionalEmail(email)
+        ),
       'agents:detect': () => this.detectAgents(),
       'mcps:list-installed': () => this.scanInstalledMcps(),
       'mcps:apply-configuration': (request: unknown) =>
@@ -479,9 +483,9 @@ export default class IpcController {
     return this.systemPreferencesService.update(patch);
   }
 
-  /** Opens the user's mail client on the feedback address. */
-  sendFeedback(): Promise<void> {
-    return this.systemPreferencesService.sendFeedback();
+  /** Opens the user's mail client on a draft carrying the typed message. */
+  sendFeedback(message: string, email?: string): Promise<void> {
+    return this.systemPreferencesService.sendFeedback(message, email);
   }
 
   /**
@@ -1095,7 +1099,7 @@ export default class IpcController {
     const narrowed: SystemPreferencesPatch = {};
 
     if (patch.launchAtLogin !== undefined) {
-      narrowed.launchAtLogin = this.requireBoolean(patch.launchAtLogin, 'Launch at login');
+      narrowed.launchAtLogin = this.requireBoolean(patch.launchAtLogin, 'Launch at Login');
     }
     if (patch.preventSystemSleep !== undefined) {
       narrowed.preventSystemSleep = this.requireBoolean(patch.preventSystemSleep, 'Prevent system sleep');
@@ -1108,6 +1112,17 @@ export default class IpcController {
       throw new TypeError(`${label} must be a non-empty string`);
     }
     return value;
+  }
+
+  /** An email is optional on feedback, so only a typed-in one has to be valid. */
+  private requireOptionalEmail(value: unknown): string | undefined {
+    if (value === undefined || value === null || value === '') {
+      return undefined;
+    }
+    if (typeof value !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) {
+      throw new TypeError('Reply email must be a valid email address');
+    }
+    return value.trim();
   }
 
   private requireOptionalString(value: unknown): string {
