@@ -248,6 +248,34 @@ export interface PetRuntimeState {
   isPaused: boolean;
 }
 
+/** How the window follows (or overrides) the macOS appearance setting. */
+export type AppearancePreference = 'system' | 'light' | 'dark';
+
+/** The three system-level switches the Settings page owns. */
+export interface SystemPreferences {
+  /** True when macOS launches Tokkey at sign-in. */
+  launchAtLogin: boolean;
+  appearance: AppearancePreference;
+  /** True while Tokkey holds the Mac awake, display sleep still allowed. */
+  preventSystemSleep: boolean;
+}
+
+/** A change to one or more preferences; anything omitted is left alone. */
+export type SystemPreferencesPatch = Partial<SystemPreferences>;
+
+/** What the "Tokkey Client" row reports about this build. */
+export interface ClientVersionInfo {
+  installedVersion: string;
+  /** The newer version on offer, or null when this build is the newest known. */
+  availableVersion: string | null;
+}
+
+/** Everything the Settings page renders in one reading. */
+export interface SystemSettingsState {
+  preferences: SystemPreferences;
+  client: ClientVersionInfo;
+}
+
 /** Renderer-facing API exposed by the preload bridge. */
 export interface TokkeyApi {
   getAppInfo(): Promise<AppInfo>;
@@ -266,6 +294,9 @@ export interface TokkeyApi {
   setPetPaused(isPaused: boolean): Promise<PetRuntimeState>;
   onPetOpenChat(listener: () => void): () => void;
   onPetOpenSettings(listener: () => void): () => void;
+  getSystemSettings(): Promise<SystemSettingsState>;
+  updateSystemPreferences(patch: SystemPreferencesPatch): Promise<SystemSettingsState>;
+  sendFeedback(): Promise<void>;
   detectAgents(): Promise<AgentInstallation[]>;
   getInstalledMcps(): Promise<McpCatalogScan>;
   scanInstalledMcps(): Promise<McpCatalogScan>;

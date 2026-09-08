@@ -13,6 +13,7 @@ import { TokkeyPage } from './pages/TokkeyPage';
 import { ChatPage } from './pages/ChatPage';
 import { UnbuiltPage } from './pages/UnbuiltPage';
 import { SignInPage } from './pages/SignInPage';
+import { SettingsPage } from './pages/SettingsPage';
 import { AccountProvider, useAccount } from './components/AccountProvider';
 
 /**
@@ -27,7 +28,8 @@ const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
   chat: ChatPage,
   'add-model': AddModelPage,
   'discover-skills': DiscoverSkillsPage,
-  'sign-in': SignInPage
+  'sign-in': SignInPage,
+  settings: SettingsPage
 };
 
 function focusChatComposer(): void {

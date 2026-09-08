@@ -51,6 +51,9 @@ class PreloadBridge {
         ipcRenderer.on('pet:open-settings', handler);
         return () => ipcRenderer.removeListener('pet:open-settings', handler);
       },
+      getSystemSettings: () => ipcRenderer.invoke('settings:get-state'),
+      updateSystemPreferences: (patch) => ipcRenderer.invoke('settings:update-preferences', patch),
+      sendFeedback: () => ipcRenderer.invoke('settings:send-feedback'),
       detectAgents: () => ipcRenderer.invoke('agents:detect'),
       getInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),
       scanInstalledMcps: () => ipcRenderer.invoke('mcps:list-installed'),

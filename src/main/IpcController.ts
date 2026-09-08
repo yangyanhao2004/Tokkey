@@ -3,6 +3,7 @@ import path from 'node:path';
 import type {
   AgentInstallation,
   AppInfo,
+  AppearancePreference,
   ApplyMcpConfigurationRequest,
   CachedRepository,
   CachedRepositorySkill,
@@ -37,7 +38,9 @@ import type {
   SkillDetailsRequest,
   SkillInstallResult,
   SkillUploadConflictChoice,
-  SkillUploadResult
+  SkillUploadResult,
+  SystemPreferencesPatch,
+  SystemSettingsState
 } from '../shared/types';
 import type { McpCatalogScan } from '../shared/types';
 import type { InstalledLocalModel, LocalModelCatalogRequest } from '../shared/types';
@@ -77,6 +80,7 @@ import type { PetRuntimeCoordinating } from './pet/PetRuntimeCoordinator';
 import type { PetCompanionSignal } from './pet/PetCompanionStatus';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 import AccountRuntime from './account/AccountRuntime';
+import SystemPreferencesService from './settings/SystemPreferencesService';
 import AccountService from './account/AccountService';
 
 type IpcHandler = (...args: unknown[]) => unknown;
@@ -97,6 +101,8 @@ export interface IpcControllerOptions {
   localChatTurnExecutor?: LocalChatTurnExecutor;
   chatSessionStore?: ChatSessionStore;
   hostSnapshotService?: HostSnapshotService;
+  /** Owns the Settings page's preferences and what each one does to the app. */
+  systemPreferencesService?: SystemPreferencesService;
   agentManager?: AgentManager;
   /** Owns the gateway subprocess, so only the app that supervises it can supply this. */
   cloudModelConnector?: CloudModelConnector;
@@ -140,6 +146,7 @@ export default class IpcController {
   private readonly localChatTurnExecutor: LocalChatTurnExecutor;
   private readonly chatSessionStore: ChatSessionStore;
   private readonly hostSnapshotService: HostSnapshotService;
+  private readonly systemPreferencesService: SystemPreferencesService;
   private readonly agentManager: AgentManager;
   private readonly accountService: AccountService;
   private readonly cloudModelConnector: CloudModelConnector | null;
@@ -189,6 +196,8 @@ export default class IpcController {
     );
     this.chatSessionStore = options.chatSessionStore ?? new ChatSessionStore();
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
+    this.systemPreferencesService =
+      options.systemPreferencesService ?? new SystemPreferencesService();
     this.cloudModelConnector = options.cloudModelConnector ?? null;
     this.codexGatewayIntegration = options.codexGatewayIntegration ?? null;
     this.claudeGatewayIntegration = options.claudeGatewayIntegration ?? null;
@@ -225,6 +234,10 @@ export default class IpcController {
         this.updatePetSettings(this.requirePetSettingsPatch(patch)),
       'pet:get-runtime-state': () => this.getPetRuntimeState(),
       'pet:set-paused': (isPaused: unknown) => this.setPetPaused(this.requireBoolean(isPaused, 'Pet paused state')),
+      'settings:get-state': () => this.getSystemSettings(),
+      'settings:update-preferences': (patch: unknown) =>
+        this.updateSystemPreferences(this.requireSystemPreferencesPatch(patch)),
+      'settings:send-feedback': () => this.sendFeedback(),
       'agents:detect': () => this.detectAgents(),
       'mcps:list-installed': () => this.scanInstalledMcps(),
       'mcps:apply-configuration': (request: unknown) =>
@@ -446,6 +459,24 @@ export default class IpcController {
    */
   getHostSnapshot(): Promise<HostSnapshot> {
     return this.hostSnapshotService.snapshot();
+  }
+
+  /** Everything the Settings page renders: the three preferences and this build's version. */
+  getSystemSettings(): SystemSettingsState {
+    return this.systemPreferencesService.getState();
+  }
+
+  /**
+   * Applies one or more changed preferences and reports the settled state, so
+   * the page renders what actually took effect rather than what was clicked.
+   */
+  updateSystemPreferences(patch: SystemPreferencesPatch): SystemSettingsState {
+    return this.systemPreferencesService.update(patch);
+  }
+
+  /** Opens the user's mail client on the feedback address. */
+  sendFeedback(): Promise<void> {
+    return this.systemPreferencesService.sendFeedback();
   }
 
   /**
@@ -1044,6 +1075,37 @@ export default class IpcController {
       enabledAgents: this.requireSkillAgents(request.enabledAgents),
       conflictStrategy
     };
+  }
+
+  /**
+   * Narrows a renderer-sent preferences patch. Each key is optional, but an
+   * unknown appearance or a non-boolean switch is rejected rather than coerced:
+   * these values are written to disk and pushed into macOS.
+   */
+  private requireSystemPreferencesPatch(value: unknown): SystemPreferencesPatch {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new TypeError('System preferences patch must be an object');
+    }
+    const patch = value as Record<string, unknown>;
+    const narrowed: SystemPreferencesPatch = {};
+
+    if (patch.launchAtLogin !== undefined) {
+      narrowed.launchAtLogin = this.requireBoolean(patch.launchAtLogin, 'Launch at login');
+    }
+    if (patch.appearance !== undefined) {
+      narrowed.appearance = this.requireAppearance(patch.appearance);
+    }
+    if (patch.preventSystemSleep !== undefined) {
+      narrowed.preventSystemSleep = this.requireBoolean(patch.preventSystemSleep, 'Prevent system sleep');
+    }
+    return narrowed;
+  }
+
+  private requireAppearance(value: unknown): AppearancePreference {
+    if (value !== 'system' && value !== 'light' && value !== 'dark') {
+      throw new TypeError('Appearance must be one of system, light, or dark');
+    }
+    return value;
   }
 
   private requireString(value: unknown, label: string): string {

@@ -19,6 +19,7 @@ import TokenHubRuntimeLocator from './models/tokenhub/TokenHubRuntimeLocator';
 import PetRuntimeCoordinator from './pet/PetRuntimeCoordinator';
 import { PetPositionStore } from './pet/PetPositionStore';
 import type { PetCompanionSignal } from './pet/PetCompanionStatus';
+import SystemPreferencesService from './settings/SystemPreferencesService';
 
 interface TokkeyAppOptions {
   width?: number;
@@ -48,6 +49,7 @@ export class TokkeyApp {
   private readonly routerProcessManager: RouterProcessManager;
   private readonly petRuntimeCoordinator: PetRuntimeCoordinator;
   private readonly routerAgentIntegration: RouterAgentIntegration;
+  private readonly systemPreferencesService: SystemPreferencesService;
   private readonly isDev: boolean;
   private readonly evidenceMode: boolean;
   private readonly evidenceCapture: RendererEvidenceCapture | null;
@@ -136,6 +138,10 @@ export class TokkeyApp {
     this.tokenHubRuntime.subscribe((state) => {
       this.signalPetCompanion({ source: 'model', phase: state.phase });
     });
+    // Built here rather than left to the IPC controller because its two
+    // session-scoped effects — the appearance override and the power blocker —
+    // are owned by the app lifecycle below: applied on ready, released on quit.
+    this.systemPreferencesService = new SystemPreferencesService();
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
       cloudModelConnector: this.cloudModelConnector,
@@ -145,7 +151,8 @@ export class TokkeyApp {
       localChatTurnExecutor: this.localChatTurnExecutor,
       tokenHubRuntime: this.tokenHubRuntime,
       routerAgentIntegration: this.routerAgentIntegration,
-      petRuntimeCoordinator: this.petRuntimeCoordinator
+      petRuntimeCoordinator: this.petRuntimeCoordinator,
+      systemPreferencesService: this.systemPreferencesService
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
     this.isDev = TokkeyApp.shouldOpenDevTools(this.evidenceMode, process.argv);
@@ -227,6 +234,10 @@ export class TokkeyApp {
   /** Creates the first window once Electron has finished initialising. */
   onReady(): void {
     this.ipcController.attachModelDownloadSession();
+    // Appearance and the sleep blocker are process state, so the stored
+    // preferences have to be re-applied to every session. Only now: both
+    // Electron modules behind them need the app to be ready.
+    this.systemPreferencesService.restore();
     this.tokenHubRuntime.startMonitoring();
     this.createTray();
     this.createMainWindow();
@@ -274,6 +285,8 @@ export class TokkeyApp {
     this.tray = null;
     // The router goes down before the gateway it forwards to, so it never spends
     // its last moments proxying to an address that has already stopped answering.
+    // Releases the power blocker, so quitting always hands sleep back to macOS.
+    this.systemPreferencesService.dispose();
     this.routerProcessManager.stop('application quit');
     this.gatewayProcessManager.stop('application quit');
   }
