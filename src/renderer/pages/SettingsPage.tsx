@@ -1,8 +1,5 @@
 import { useState, type ReactNode } from 'react';
 import {
-  APPEARANCE_DESCRIPTION,
-  APPEARANCE_OPTIONS,
-  APPEARANCE_TITLE,
   CHEVRON_ICON_FILE,
   CLIENT_ROW_TITLE,
   FEEDBACK_FAILED_MESSAGE,
@@ -21,17 +18,14 @@ import {
   SETTINGS_TITLE,
   SUPPORT_SECTION_TITLE,
   UPDATES_SECTION_TITLE,
-  appearanceLabel,
   clientVersionText
 } from './settingsContent';
 import { useSystemSettings } from '../hooks/useSystemSettings';
 import { IconTile } from '../components/IconTile';
 import { PageShell, PagePlaceholder } from '../components/PageShell';
-import { PopUpButton } from '../components/PopUpButton';
 import { PushButton } from '../components/PushButton';
 import { Switch } from '../components/Switch';
 import { TitleBlock } from '../components/TitleBlock';
-import type { AppearancePreference } from '../../shared/types';
 import AppUpdatePresentation from '../../shared/AppUpdatePresentation';
 
 interface SettingsSectionProps {
@@ -176,23 +170,6 @@ export function SettingsPage() {
               label={LAUNCH_AT_LOGIN_TITLE}
               disabled={isSaving}
               testId="settings-launch-toggle"
-            />
-          }
-        />
-        <SettingsRow
-          iconFile={ROW_ICON_FILES.appearance}
-          title={APPEARANCE_TITLE}
-          description={APPEARANCE_DESCRIPTION}
-          testId="settings-appearance-row"
-          trailing={
-            <PopUpButton
-              label={appearanceLabel(preferences.appearance)}
-              options={APPEARANCE_OPTIONS}
-              value={preferences.appearance}
-              onChange={(appearance) =>
-                void updatePreferences({ appearance: appearance as AppearancePreference })
-              }
-              testId="settings-appearance-menu"
             />
           }
         />

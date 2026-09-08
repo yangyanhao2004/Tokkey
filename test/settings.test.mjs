@@ -17,7 +17,6 @@ class StubPlatform {
   constructor({ openAtLogin = false, loginItemThrows = false } = {}) {
     this.openAtLogin = openAtLogin;
     this.loginItemThrows = loginItemThrows;
-    this.themeSource = null;
     this.startedBlockers = 0;
     this.stoppedBlockers = [];
     this.openedUrls = [];
@@ -31,10 +30,6 @@ class StubPlatform {
 
   setOpenAtLogin(openAtLogin) {
     this.openAtLogin = openAtLogin;
-  }
-
-  setThemeSource(appearance) {
-    this.themeSource = appearance;
   }
 
   startSleepBlocker() {
@@ -76,31 +71,29 @@ test('a corrupt settings file reads as the defaults rather than throwing', () =>
   assert.deepEqual(store.read(), DEFAULT_SYSTEM_PREFERENCES);
 });
 
-test('an unknown appearance falls back to system, keeping the valid neighbours', () => {
+test('a malformed value falls back to its default, keeping the valid neighbours', () => {
   const homeDirectory = temporaryHome();
   mkdirSync(path.join(homeDirectory, '.tokkey'), { recursive: true });
   writeFileSync(
     path.join(homeDirectory, '.tokkey', 'settings.json'),
-    JSON.stringify({ appearance: 'sepia', preventSystemSleep: true, launchAtLogin: 'yes' })
+    JSON.stringify({ preventSystemSleep: true, launchAtLogin: 'yes' })
   );
 
   const stored = new SystemPreferencesStore({ homeDirectory }).read();
-  assert.equal(stored.appearance, 'system');
   assert.equal(stored.preventSystemSleep, true);
   assert.equal(stored.launchAtLogin, false);
 });
 
-test('restoring re-applies the stored appearance and sleep blocker to the session', () => {
+test('restoring re-applies the stored sleep blocker to the session', () => {
   const homeDirectory = temporaryHome();
   const platform = new StubPlatform();
-  serviceWith(platform, homeDirectory).update({ appearance: 'dark', preventSystemSleep: true });
+  serviceWith(platform, homeDirectory).update({ preventSystemSleep: true });
 
   // A second service is the next launch: the file is all it has to go on.
   const nextLaunch = new StubPlatform();
   const restored = serviceWith(nextLaunch, homeDirectory).restore();
 
-  assert.equal(restored.appearance, 'dark');
-  assert.equal(nextLaunch.themeSource, 'dark');
+  assert.equal(restored.preventSystemSleep, true);
   assert.equal(nextLaunch.startedBlockers, 1);
 });
 
@@ -109,7 +102,7 @@ test('the sleep blocker is started once and released once', () => {
   const service = serviceWith(platform, temporaryHome());
 
   service.update({ preventSystemSleep: true });
-  service.update({ appearance: 'light' });
+  service.update({ launchAtLogin: true });
   assert.equal(platform.startedBlockers, 1, 'an unrelated change must not start a second blocker');
 
   service.update({ preventSystemSleep: false });
@@ -156,12 +149,11 @@ test('a patch changes only the preference it names', () => {
   const homeDirectory = temporaryHome();
   const service = serviceWith(new StubPlatform(), homeDirectory);
 
-  service.update({ appearance: 'light' });
+  service.update({ launchAtLogin: true });
   const state = service.update({ preventSystemSleep: true });
 
   assert.deepEqual(state.preferences, {
-    launchAtLogin: false,
-    appearance: 'light',
+    launchAtLogin: true,
     preventSystemSleep: true
   });
   const written = JSON.parse(

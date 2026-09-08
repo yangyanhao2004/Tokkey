@@ -3,7 +3,6 @@ import path from 'node:path';
 import type {
   AgentInstallation,
   AppInfo,
-  AppearancePreference,
   ApplyMcpConfigurationRequest,
   CachedRepository,
   CachedRepositorySkill,
@@ -1085,8 +1084,8 @@ export default class IpcController {
 
   /**
    * Narrows a renderer-sent preferences patch. Each key is optional, but an
-   * unknown appearance or a non-boolean switch is rejected rather than coerced:
-   * these values are written to disk and pushed into macOS.
+   * a non-boolean switch is rejected rather than coerced: these values are
+   * written to disk and pushed into macOS.
    */
   private requireSystemPreferencesPatch(value: unknown): SystemPreferencesPatch {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -1098,20 +1097,10 @@ export default class IpcController {
     if (patch.launchAtLogin !== undefined) {
       narrowed.launchAtLogin = this.requireBoolean(patch.launchAtLogin, 'Launch at login');
     }
-    if (patch.appearance !== undefined) {
-      narrowed.appearance = this.requireAppearance(patch.appearance);
-    }
     if (patch.preventSystemSleep !== undefined) {
       narrowed.preventSystemSleep = this.requireBoolean(patch.preventSystemSleep, 'Prevent system sleep');
     }
     return narrowed;
-  }
-
-  private requireAppearance(value: unknown): AppearancePreference {
-    if (value !== 'system' && value !== 'light' && value !== 'dark') {
-      throw new TypeError('Appearance must be one of system, light, or dark');
-    }
-    return value;
   }
 
   private requireString(value: unknown, label: string): string {

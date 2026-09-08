@@ -13,7 +13,7 @@ export default class AppUpdateRuntime {
       updater: configured ? autoUpdater : null,
       unavailableReason: app.isPackaged
         ? 'Updates are not configured for this build.'
-        : 'Updates are available in the installed release of Tokkey.'
+        : 'Updates are only available in the installed release of Tokkey.'
     });
   }
 }

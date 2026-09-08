@@ -1,4 +1,4 @@
-import { app, nativeTheme, powerSaveBlocker, shell } from 'electron';
+import { app, powerSaveBlocker, shell } from 'electron';
 import type {
   ClientVersionInfo,
   SystemPreferences,
@@ -19,7 +19,6 @@ export interface SystemPreferencesPlatform {
   /** True when macOS currently launches the app at sign-in. */
   isOpenAtLogin(): boolean;
   setOpenAtLogin(openAtLogin: boolean): void;
-  setThemeSource(appearance: SystemPreferences['appearance']): void;
   /** Starts the "app suspension" blocker and returns its id. */
   startSleepBlocker(): number;
   stopSleepBlocker(blockerId: number): void;
@@ -31,9 +30,6 @@ export interface SystemPreferencesPlatform {
 const ELECTRON_PLATFORM: SystemPreferencesPlatform = {
   isOpenAtLogin: () => app.getLoginItemSettings().openAtLogin,
   setOpenAtLogin: (openAtLogin) => app.setLoginItemSettings({ openAtLogin }),
-  setThemeSource: (appearance) => {
-    nativeTheme.themeSource = appearance;
-  },
   // "prevent-app-suspension" is the blocker that matches the row's promise:
   // the Mac stays awake and networked while the display is still free to sleep.
   startSleepBlocker: () => powerSaveBlocker.start('prevent-app-suspension'),
@@ -52,8 +48,8 @@ export interface SystemPreferencesServiceOptions {
  * Owns the Settings page's preferences: what is stored, and what each one does
  * to the running app.
  *
- * The stored file is the source of truth for appearance and sleep, and macOS is
- * the source of truth for the login item — the user can remove Tokkey from
+ * The stored file is the source of truth for sleep, and macOS is the source of
+ * truth for the login item — the user can remove Tokkey from
  * Login Items in System Settings without the app running, so that one is read
  * back from the OS rather than trusted from disk.
  */
@@ -74,13 +70,11 @@ export class SystemPreferencesService {
 
   /**
    * Re-applies the stored preferences to this session. Called once at startup,
-   * because appearance and the sleep blocker are process state that dies with
-   * the previous run.
+   * because the sleep blocker is process state that dies with the previous run.
    */
   restore(): SystemPreferences {
     const stored = this.store.read();
     this.preferences = { ...stored, launchAtLogin: this.readLoginItem(stored.launchAtLogin) };
-    this.applyAppearance(this.preferences.appearance);
     this.applySleepBlocker(this.preferences.preventSystemSleep);
     return this.getPreferences();
   }
@@ -102,9 +96,6 @@ export class SystemPreferencesService {
 
     if (updated.launchAtLogin !== this.preferences.launchAtLogin) {
       this.platform.setOpenAtLogin(updated.launchAtLogin);
-    }
-    if (updated.appearance !== this.preferences.appearance) {
-      this.applyAppearance(updated.appearance);
     }
     if (updated.preventSystemSleep !== this.preferences.preventSystemSleep) {
       this.applySleepBlocker(updated.preventSystemSleep);
@@ -137,10 +128,6 @@ export class SystemPreferencesService {
       console.warn(`[SystemPreferences] Could not read the login item: ${String(error)}`);
       return fallback;
     }
-  }
-
-  private applyAppearance(appearance: SystemPreferences['appearance']): void {
-    this.platform.setThemeSource(appearance);
   }
 
   /** Holds at most one blocker, so repeated calls cannot leak them. */

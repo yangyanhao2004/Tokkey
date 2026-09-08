@@ -1,16 +1,13 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { AppearancePreference, SystemPreferences } from '../../shared/types';
+import type { SystemPreferences } from '../../shared/types';
 import TokkeyHome from '../storage/TokkeyHome';
 
 /** What a fresh install starts on: follow macOS, stay out of the way. */
 export const DEFAULT_SYSTEM_PREFERENCES: SystemPreferences = {
   launchAtLogin: false,
-  appearance: 'system',
   preventSystemSleep: false
 };
-
-const APPEARANCE_VALUES: readonly AppearancePreference[] = ['system', 'light', 'dark'];
 
 export interface SystemPreferencesStoreOptions {
   /** Overridden by tests so a run never touches the real home directory. */
@@ -21,11 +18,11 @@ export interface SystemPreferencesStoreOptions {
  * Reads and writes the Settings page's preferences in
  * `~/.tokkey/settings.json`.
  *
- * A plain JSON file rather than a table in `tokkey.db`: these are three
+ * A plain JSON file rather than a table in `tokkey.db`: these are two
  * scalars read once at boot and rewritten on a click, with nothing to query,
  * order, or join, so the database's schema and connection handling would buy
- * nothing. The file is also the only copy of "appearance" and "prevent sleep" —
- * macOS remembers the login item itself, but neither of those survives a quit.
+ * nothing. The file is also the only copy of "prevent sleep" — macOS remembers
+ * the login item itself, but the sleep blocker does not survive a quit.
  */
 export class SystemPreferencesStore {
   private readonly filePath: string;
@@ -44,7 +41,6 @@ export class SystemPreferencesStore {
       const stored = JSON.parse(readFileSync(this.filePath, 'utf8')) as Record<string, unknown>;
       return {
         launchAtLogin: this.booleanValue(stored.launchAtLogin, DEFAULT_SYSTEM_PREFERENCES.launchAtLogin),
-        appearance: this.appearanceValue(stored.appearance),
         preventSystemSleep: this.booleanValue(
           stored.preventSystemSleep,
           DEFAULT_SYSTEM_PREFERENCES.preventSystemSleep
@@ -63,12 +59,6 @@ export class SystemPreferencesStore {
 
   private booleanValue(value: unknown, fallback: boolean): boolean {
     return typeof value === 'boolean' ? value : fallback;
-  }
-
-  private appearanceValue(value: unknown): AppearancePreference {
-    return APPEARANCE_VALUES.includes(value as AppearancePreference)
-      ? (value as AppearancePreference)
-      : DEFAULT_SYSTEM_PREFERENCES.appearance;
   }
 }
 

@@ -139,9 +139,9 @@ export class TokkeyApp {
     this.tokenHubRuntime.subscribe((state) => {
       this.signalPetCompanion({ source: 'model', phase: state.phase });
     });
-    // Built here rather than left to the IPC controller because its two
-    // session-scoped effects — the appearance override and the power blocker —
-    // are owned by the app lifecycle below: applied on ready, released on quit.
+    // Built here rather than left to the IPC controller because its
+    // session-scoped effect — the power blocker — is owned by the app
+    // lifecycle below: applied on ready, released on quit.
     const appUpdateService = AppUpdateRuntime.create();
     this.systemPreferencesService = new SystemPreferencesService({
       clientVersion: () => appUpdateService.getState()
@@ -239,9 +239,9 @@ export class TokkeyApp {
   /** Creates the first window once Electron has finished initialising. */
   onReady(): void {
     this.ipcController.attachModelDownloadSession();
-    // Appearance and the sleep blocker are process state, so the stored
-    // preferences have to be re-applied to every session. Only now: both
-    // Electron modules behind them need the app to be ready.
+    // The sleep blocker is process state, so the stored preferences have to be
+    // re-applied to every session. Only now: the Electron module behind it
+    // needs the app to be ready.
     this.systemPreferencesService.restore();
     this.tokenHubRuntime.startMonitoring();
     this.createTray();

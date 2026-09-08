@@ -248,14 +248,10 @@ export interface PetRuntimeState {
   isPaused: boolean;
 }
 
-/** How the window follows (or overrides) the macOS appearance setting. */
-export type AppearancePreference = 'system' | 'light' | 'dark';
-
-/** The three system-level switches the Settings page owns. */
+/** The system-level switches the Settings page owns. */
 export interface SystemPreferences {
   /** True when macOS launches Tokkey at sign-in. */
   launchAtLogin: boolean;
-  appearance: AppearancePreference;
   /** True while Tokkey holds the Mac awake, display sleep still allowed. */
   preventSystemSleep: boolean;
 }

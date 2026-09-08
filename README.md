@@ -283,6 +283,18 @@ and creates the DMG, ZIP, blockmaps, and `latest-mac.yml` under `out/`. It requi
 signing and notarization configuration and does **not** publish the files.
 
 Note: build is fast, but Apples'notarization can take hours, so be patient!
+Once it succeeds, you will see messaging like this:
+```
+• signing         file=out/mac-arm64/Tokkey.app platform=darwin type=distribution identityName=Developer ID Application: Wange Zhiyuan (Beijing) Intelligent Technology Co., Ltd. (NXPRFQRFXA) identityHash=037C67D74DECB4AB4ADC5312B7A38A84AA3A3904 provisioningProfile=none
+
+  • notarization successful
+  • building        target=macOS zip arch=arm64 file=out/Tokkey-0.1.0-arm64.zip
+  • building        target=DMG arch=arm64 file=out/Tokkey-0.1.0-arm64.dmg
+  • downloading     label=dmgbuild-bundle-arm64-75c8a6c.tar.gz
+    [==================================================================================] 100% | dmgbuild-bundle-arm64-75c8a6c.tar.gz
+  • building block map  blockMapFile=out/Tokkey-0.1.0-arm64.zip.blockmap
+  • building block map  blockMapFile=out/Tokkey-0.1.0-arm64.dmg.blockmap
+```
 
 Verify the resulting app before distribution:
 
