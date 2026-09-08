@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useEffect, useRef, type Ref } from 'react';
 import { ICON_BASE_PATH, summarizeSession, type ChatSession } from '../../pages/chatContent';
 import { ChatHistoryPopover } from './ChatHistoryPopover';
 
@@ -18,18 +18,21 @@ function ChatTab({
   session,
   isActive,
   isFirst,
+  tabRef,
   onSelect,
   onClose
 }: {
   session: ChatSession;
   isActive: boolean;
   isFirst: boolean;
+  tabRef?: Ref<HTMLDivElement>;
   onSelect: () => void;
   onClose: () => void;
 }) {
   return (
     <div
-      className={`app-no-drag relative flex h-9 min-w-0 flex-1 basis-0 items-stretch ${isActive ? 'z-20' : 'z-10'} ${!isFirst ? '-ml-4' : ''}`}
+      ref={tabRef}
+      className={`app-no-drag relative flex h-9 w-[200.091px] shrink-0 items-stretch ${isActive ? 'z-20' : 'z-10'} ${isActive && !isFirst ? '-ml-4' : ''}`}
       data-testid={`chat-tab-${session.id}`}
     >
       {isActive && (
@@ -41,23 +44,21 @@ function ChatTab({
       )}
       <button
         type="button"
-        className="relative z-10 flex h-9 min-w-0 flex-1 items-center gap-1 bg-transparent py-0 pl-3 pr-9 text-left focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-white"
+        className={`relative z-10 flex h-9 w-[185px] min-w-0 shrink-0 items-center gap-1 bg-transparent py-0 pr-9 text-left focus-visible:z-20 focus-visible:outline-2 focus-visible:outline-white ${isActive ? 'pl-5' : 'pl-3'}`}
         onClick={onSelect}
         aria-current={isActive ? 'page' : undefined}
         aria-label={`Open ${session.title}`}
       >
-        <span className="box-border flex size-4 shrink-0 items-center justify-center pb-[1.333px] pl-[1.333px] pr-[0.667px] pt-[1.667px]" aria-hidden="true">
-          <img className="block h-[13px] w-[14px] max-w-none opacity-75" src={`${ICON_BASE_PATH}/chat-tab-sparkles.svg`} alt="" />
-        </span>
+        <img className="block size-4 shrink-0 max-w-none" src={`${ICON_BASE_PATH}/chat-tab-sparkles.svg`} alt="" aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate text-[12px] leading-4 text-white">{session.title}</span>
       </button>
       <button
         type="button"
-        className="absolute right-1 top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center rounded text-white/85 focus-visible:outline-2 focus-visible:outline-white"
+        className="absolute left-[148.5px] top-1/2 z-20 flex size-6 -translate-y-1/2 items-center justify-center rounded text-white/85 focus-visible:outline-2 focus-visible:outline-white"
         onClick={onClose}
         aria-label={`Close ${session.title}`}
       >
-        <img className="block h-[14px] w-[11px] max-w-none opacity-[.85]" src={`${ICON_BASE_PATH}/chat-tab-close.svg`} alt="" />
+        <img className="block size-4 max-w-none" src={`${ICON_BASE_PATH}/chat-tab-close.svg`} alt="" />
       </button>
     </div>
   );
@@ -75,16 +76,22 @@ export function ChatTabBar({
   onCloseHistory
 }: ChatTabBarProps) {
   const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const activeTabRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [activeSessionId]);
 
   return (
     <header className="app-drag relative flex h-[42px] shrink-0 items-end gap-4 overflow-visible bg-chat-tab-bar pr-3 pt-[6px]" data-testid="chat-tab-bar">
-      <div className="flex h-9 min-w-0 flex-1 items-end overflow-hidden">
+      <div className="flex h-9 min-w-0 flex-1 items-end overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {sessions.map((session, index) => (
           <ChatTab
             key={session.id}
             session={session}
             isActive={session.id === activeSessionId}
             isFirst={index === 0}
+            tabRef={session.id === activeSessionId ? activeTabRef : undefined}
             onSelect={() => onSelectSession(session.id)}
             onClose={() => onCloseSession(session.id)}
           />
