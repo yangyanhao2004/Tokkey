@@ -20,6 +20,7 @@ import PetRuntimeCoordinator from './pet/PetRuntimeCoordinator';
 import { PetPositionStore } from './pet/PetPositionStore';
 import type { PetCompanionSignal } from './pet/PetCompanionStatus';
 import SystemPreferencesService from './settings/SystemPreferencesService';
+import AppUpdateRuntime from './updates/AppUpdateRuntime';
 
 interface TokkeyAppOptions {
   width?: number;
@@ -141,7 +142,10 @@ export class TokkeyApp {
     // Built here rather than left to the IPC controller because its two
     // session-scoped effects — the appearance override and the power blocker —
     // are owned by the app lifecycle below: applied on ready, released on quit.
-    this.systemPreferencesService = new SystemPreferencesService();
+    const appUpdateService = AppUpdateRuntime.create();
+    this.systemPreferencesService = new SystemPreferencesService({
+      clientVersion: () => appUpdateService.getState()
+    });
     // Renderer-facing IPC handlers are registered once, before any window exists.
     this.ipcController = new IpcController({
       cloudModelConnector: this.cloudModelConnector,
@@ -152,7 +156,8 @@ export class TokkeyApp {
       tokenHubRuntime: this.tokenHubRuntime,
       routerAgentIntegration: this.routerAgentIntegration,
       petRuntimeCoordinator: this.petRuntimeCoordinator,
-      systemPreferencesService: this.systemPreferencesService
+      systemPreferencesService: this.systemPreferencesService,
+      appUpdateService
     });
     // `--dev` (npm run dev) opens DevTools and enables development-only behaviour.
     this.isDev = TokkeyApp.shouldOpenDevTools(this.evidenceMode, process.argv);

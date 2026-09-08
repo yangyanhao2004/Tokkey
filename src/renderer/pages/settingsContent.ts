@@ -5,6 +5,7 @@
  */
 
 import type { AppearancePreference, ClientVersionInfo } from '../../shared/types';
+import AppUpdatePresentation from '../../shared/AppUpdatePresentation';
 import { NAV_ICON_BASE_PATH } from '../navigation';
 
 export const ICON_BASE_PATH = NAV_ICON_BASE_PATH;
@@ -19,7 +20,6 @@ export const POWER_SECTION_TITLE = 'Power';
 export const SUPPORT_SECTION_TITLE = 'Support';
 
 export const CLIENT_ROW_TITLE = 'Tokkey Client';
-export const UPDATE_BUTTON_LABEL = 'Update';
 
 export const LAUNCH_AT_LOGIN_TITLE = 'Launch at login';
 export const LAUNCH_AT_LOGIN_DESCRIPTION = 'Start Tokkey when you sign in to macOS.';
@@ -60,14 +60,7 @@ export function appearanceLabel(appearance: AppearancePreference): string {
   return APPEARANCE_OPTIONS.find((option) => option.value === appearance)?.label ?? appearance;
 }
 
-/**
- * The "Tokkey Client" subtitle. The design shows both halves of an available
- * update ("Version 0.9.4 · Version 0.9.5 is available."); with no update feed
- * to read, the row says so rather than implying a download that cannot happen.
- */
+/** The installed version and the updater's actual state. */
 export function clientVersionText(client: ClientVersionInfo): string {
-  const installed = `Version ${client.installedVersion}`;
-  return client.availableVersion
-    ? `${installed} · Version ${client.availableVersion} is available.`
-    : `${installed} · Tokkey is up to date.`;
+  return new AppUpdatePresentation(client).description;
 }

@@ -6,6 +6,7 @@ import type {
   SystemSettingsState
 } from '../../shared/types';
 import SystemPreferencesStore, { DEFAULT_SYSTEM_PREFERENCES } from './SystemPreferencesStore';
+import AppUpdateService from '../updates/AppUpdateService';
 
 /** Where the "Send Feedback" row points. */
 export const FEEDBACK_MAILTO_URL = 'mailto:feedback@tokkey.app?subject=Tokkey%20feedback';
@@ -44,6 +45,7 @@ const ELECTRON_PLATFORM: SystemPreferencesPlatform = {
 export interface SystemPreferencesServiceOptions {
   store?: SystemPreferencesStore;
   platform?: SystemPreferencesPlatform;
+  clientVersion?: () => ClientVersionInfo;
 }
 
 /**
@@ -58,6 +60,7 @@ export interface SystemPreferencesServiceOptions {
 export class SystemPreferencesService {
   private readonly store: SystemPreferencesStore;
   private readonly platform: SystemPreferencesPlatform;
+  private readonly clientVersion: () => ClientVersionInfo;
   private preferences: SystemPreferences;
   /** The live power blocker's id, or null whenever sleep is not being held off. */
   private sleepBlockerId: number | null = null;
@@ -65,6 +68,7 @@ export class SystemPreferencesService {
   constructor(options: SystemPreferencesServiceOptions = {}) {
     this.store = options.store ?? new SystemPreferencesStore();
     this.platform = options.platform ?? ELECTRON_PLATFORM;
+    this.clientVersion = options.clientVersion ?? (() => AppUpdateService.unavailableState(this.platform.appVersion()));
     this.preferences = { ...DEFAULT_SYSTEM_PREFERENCES };
   }
 
@@ -85,7 +89,7 @@ export class SystemPreferencesService {
   getState(): SystemSettingsState {
     return {
       preferences: this.getPreferences(),
-      client: this.getClientVersion()
+      client: this.clientVersion()
     };
   }
 
@@ -123,18 +127,6 @@ export class SystemPreferencesService {
 
   private getPreferences(): SystemPreferences {
     return { ...this.preferences, launchAtLogin: this.readLoginItem(this.preferences.launchAtLogin) };
-  }
-
-  /**
-   * The installed version and whatever newer one is known.
-   *
-   * `availableVersion` is always null today: Tokkey ships no update feed, so
-   * claiming an update exists would be a lie the row cannot act on. It stays in
-   * the shape because the design's "Version 0.9.5 is available." row is what
-   * this field will fill in once there is a feed to read.
-   */
-  private getClientVersion(): ClientVersionInfo {
-    return { installedVersion: this.platform.appVersion(), availableVersion: null };
   }
 
   /** The OS's answer, falling back to the stored one if it cannot be read. */

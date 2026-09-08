@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type {
+  ClientVersionInfo,
   LocalChatEvent,
   LocalModelRuntimeState,
   PetInteraction,
@@ -52,6 +53,14 @@ class PreloadBridge {
         return () => ipcRenderer.removeListener('pet:open-settings', handler);
       },
       getSystemSettings: () => ipcRenderer.invoke('settings:get-state'),
+      checkForAppUpdates: () => ipcRenderer.invoke('updates:check'),
+      downloadAppUpdate: () => ipcRenderer.invoke('updates:download'),
+      installAppUpdate: () => ipcRenderer.invoke('updates:install'),
+      onAppUpdateStateChanged: (listener) => {
+        const handler = (_event: IpcRendererEvent, state: ClientVersionInfo) => listener(state);
+        ipcRenderer.on('updates:state-changed', handler);
+        return () => ipcRenderer.removeListener('updates:state-changed', handler);
+      },
       updateSystemPreferences: (patch) => ipcRenderer.invoke('settings:update-preferences', patch),
       sendFeedback: () => ipcRenderer.invoke('settings:send-feedback'),
       detectAgents: () => ipcRenderer.invoke('agents:detect'),

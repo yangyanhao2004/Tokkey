@@ -266,8 +266,11 @@ export type SystemPreferencesPatch = Partial<SystemPreferences>;
 /** What the "Tokkey Client" row reports about this build. */
 export interface ClientVersionInfo {
   installedVersion: string;
-  /** The newer version on offer, or null when this build is the newest known. */
+  /** Null until a successful check finds a newer release. */
   availableVersion: string | null;
+  status: 'unavailable' | 'idle' | 'checking' | 'upToDate' | 'available' | 'downloading' | 'downloaded' | 'installing' | 'error';
+  downloadPercent: number | null;
+  message: string | null;
 }
 
 /** Everything the Settings page renders in one reading. */
@@ -295,6 +298,10 @@ export interface TokkeyApi {
   onPetOpenChat(listener: () => void): () => void;
   onPetOpenSettings(listener: () => void): () => void;
   getSystemSettings(): Promise<SystemSettingsState>;
+  checkForAppUpdates(): Promise<ClientVersionInfo>;
+  downloadAppUpdate(): Promise<ClientVersionInfo>;
+  installAppUpdate(): Promise<ClientVersionInfo>;
+  onAppUpdateStateChanged(listener: (state: ClientVersionInfo) => void): () => void;
   updateSystemPreferences(patch: SystemPreferencesPatch): Promise<SystemSettingsState>;
   sendFeedback(): Promise<void>;
   detectAgents(): Promise<AgentInstallation[]>;

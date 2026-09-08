@@ -172,7 +172,9 @@ test('a patch changes only the preference it names', () => {
 
 test('the client row reports the installed version and no phantom update', () => {
   const state = serviceWith(new StubPlatform(), temporaryHome()).getState();
-  assert.deepEqual(state.client, { installedVersion: '0.9.4', availableVersion: null });
+  assert.equal(state.client.installedVersion, '0.9.4');
+  assert.equal(state.client.availableVersion, null);
+  assert.equal(state.client.status, 'unavailable');
 });
 
 test('send feedback opens the mail client once', async () => {

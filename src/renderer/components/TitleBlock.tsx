@@ -29,6 +29,8 @@ interface TitleBlockProps {
    */
   as?: 'h1' | 'h2' | 'h3' | 'span';
   testId?: string;
+  /** Keeps actionable status and error text readable in narrow settings rows. */
+  wrapSubtitle?: boolean;
 }
 
 /**
@@ -43,7 +45,8 @@ export function TitleBlock({
   subtitle,
   size = 'card',
   as: TitleTag = 'span',
-  testId
+  testId,
+  wrapSubtitle = false
 }: TitleBlockProps) {
   const classes = SIZE_CLASSES[size];
 
@@ -52,7 +55,7 @@ export function TitleBlock({
       <TitleTag className={`truncate font-bold text-text-primary ${classes.title}`}>
         {title}
       </TitleTag>
-      <span className={`truncate text-text-secondary ${classes.subtitle}`}>{subtitle}</span>
+      <span className={`${wrapSubtitle ? 'whitespace-normal break-words' : 'truncate'} text-text-secondary ${classes.subtitle}`}>{subtitle}</span>
     </div>
   );
 }

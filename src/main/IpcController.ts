@@ -81,6 +81,7 @@ import type { PetCompanionSignal } from './pet/PetCompanionStatus';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 import AccountRuntime from './account/AccountRuntime';
 import SystemPreferencesService from './settings/SystemPreferencesService';
+import AppUpdateService from './updates/AppUpdateService';
 import AccountService from './account/AccountService';
 
 type IpcHandler = (...args: unknown[]) => unknown;
@@ -103,6 +104,7 @@ export interface IpcControllerOptions {
   hostSnapshotService?: HostSnapshotService;
   /** Owns the Settings page's preferences and what each one does to the app. */
   systemPreferencesService?: SystemPreferencesService;
+  appUpdateService?: AppUpdateService;
   agentManager?: AgentManager;
   /** Owns the gateway subprocess, so only the app that supervises it can supply this. */
   cloudModelConnector?: CloudModelConnector;
@@ -214,6 +216,7 @@ export default class IpcController {
     this.petRuntimeCoordinator?.subscribe((state) =>
       this.broadcast('pet:runtime-state-changed', state)
     );
+    options.appUpdateService?.subscribe((state) => this.broadcast('updates:state-changed', state));
     // Channel name -> handler function. Add new renderer-callable APIs here.
     this.handlers = {
       'app:get-info': () => this.getAppInfo(),
@@ -235,6 +238,9 @@ export default class IpcController {
       'pet:get-runtime-state': () => this.getPetRuntimeState(),
       'pet:set-paused': (isPaused: unknown) => this.setPetPaused(this.requireBoolean(isPaused, 'Pet paused state')),
       'settings:get-state': () => this.getSystemSettings(),
+      'updates:check': () => options.appUpdateService?.checkForUpdates() ?? this.getSystemSettings().client,
+      'updates:download': () => options.appUpdateService?.downloadUpdate() ?? this.getSystemSettings().client,
+      'updates:install': () => options.appUpdateService?.installUpdate() ?? this.getSystemSettings().client,
       'settings:update-preferences': (patch: unknown) =>
         this.updateSystemPreferences(this.requireSystemPreferencesPatch(patch)),
       'settings:send-feedback': () => this.sendFeedback(),

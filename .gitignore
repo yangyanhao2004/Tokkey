@@ -4,7 +4,10 @@ node_modules/
 # Build output
 dist/
 out/
-build/
+# Ignore build output but keep the macOS entitlements, which are signing inputs.
+build/*
+!build/entitlements.mac.plist
+!build/entitlements.mac.inherit.plist
 
 # Logs
 *.log

@@ -21,7 +21,6 @@ import {
   SETTINGS_TITLE,
   SUPPORT_SECTION_TITLE,
   UPDATES_SECTION_TITLE,
-  UPDATE_BUTTON_LABEL,
   appearanceLabel,
   clientVersionText
 } from './settingsContent';
@@ -33,6 +32,7 @@ import { PushButton } from '../components/PushButton';
 import { Switch } from '../components/Switch';
 import { TitleBlock } from '../components/TitleBlock';
 import type { AppearancePreference } from '../../shared/types';
+import AppUpdatePresentation from '../../shared/AppUpdatePresentation';
 
 interface SettingsSectionProps {
   /** The small-caps strip at the top of the card, e.g. "General". */
@@ -84,7 +84,7 @@ function SettingsRow({ iconFile, title, description, trailing, onClick, testId }
     <>
       <span className="flex min-w-0 items-center gap-2">
         <IconTile src={`${ICON_BASE_PATH}/${iconFile}`} />
-        <TitleBlock title={title} subtitle={description} />
+        <TitleBlock title={title} subtitle={description} wrapSubtitle />
       </span>
       {trailing}
     </>
@@ -118,7 +118,7 @@ function SettingsRow({ iconFile, title, description, trailing, onClick, testId }
  * one that was clicked, so a preference the OS refused never shows as applied.
  */
 export function SettingsPage() {
-  const { state, isSaving, updatePreferences } = useSystemSettings();
+  const { state, isSaving, updatePreferences, isUpdating, updateError, performUpdateAction } = useSystemSettings();
   // Set only when opening the mail client fails, which is otherwise silent.
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
 
@@ -141,6 +141,7 @@ export function SettingsPage() {
   }
 
   const { preferences, client } = state;
+  const updatePresentation = new AppUpdatePresentation(client);
 
   return (
     <PageShell title={SETTINGS_TITLE} subtitle={SETTINGS_SUBTITLE} testId="settings">
@@ -148,14 +149,16 @@ export function SettingsPage() {
         <SettingsRow
           iconFile={ROW_ICON_FILES.client}
           title={CLIENT_ROW_TITLE}
-          description={clientVersionText(client)}
+          description={updateError ?? clientVersionText(client)}
           testId="settings-client-row"
           trailing={
-            // Only shown when there is a version to move to: a button that
-            // cannot download anything would be a promise the app cannot keep.
-            client.availableVersion ? (
-              <PushButton testId="settings-update">{UPDATE_BUTTON_LABEL}</PushButton>
-            ) : null
+            <PushButton
+              testId="settings-update"
+              disabled={isUpdating || updatePresentation.disabled}
+              onClick={() => void performUpdateAction()}
+            >
+              {updatePresentation.buttonLabel}
+            </PushButton>
           }
         />
       </SettingsSection>
