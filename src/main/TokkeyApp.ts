@@ -22,6 +22,10 @@ import type { PetCompanionSignal } from './pet/PetCompanionStatus';
 import SystemPreferencesService from './settings/SystemPreferencesService';
 import AppUpdateRuntime from './updates/AppUpdateRuntime';
 
+// The controls sit 22px inside the Figma sidebar, which itself starts after
+// the renderer's 11px outer inset.
+const MAIN_WINDOW_TRAFFIC_LIGHT_POSITION = { x: 33, y: 33 };
+
 interface TokkeyAppOptions {
   width?: number;
   height?: number;
@@ -466,6 +470,9 @@ export class TokkeyApp {
       show: false,
       backgroundColor: '#f5f6f8',
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+      trafficLightPosition: process.platform === 'darwin'
+        ? MAIN_WINDOW_TRAFFIC_LIGHT_POSITION
+        : undefined,
       webPreferences: {
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
