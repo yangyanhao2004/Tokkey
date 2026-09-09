@@ -1,6 +1,7 @@
 import { app, powerSaveBlocker } from 'electron';
 import type {
   ClientVersionInfo,
+  FeedbackResult,
   SystemPreferences,
   SystemPreferencesPatch,
   SystemSettingsState
@@ -8,6 +9,7 @@ import type {
 import SystemPreferencesStore, { DEFAULT_SYSTEM_PREFERENCES } from './SystemPreferencesStore';
 import AppUpdateService from '../updates/AppUpdateService';
 import FeedbackApiClient, { type FeedbackSubmitter } from './FeedbackApiClient';
+import FeedbackError from './FeedbackErrors';
 
 /**
  * The Electron surfaces the settings actually act on, named so tests can stand
@@ -109,8 +111,13 @@ export class SystemPreferencesService {
    * Posts one message to the feedback endpoint. Rejecting is meaningful: the
    * dialog holds the typed message open rather than claiming it was sent.
    */
-  async sendFeedback(message: string, email?: string): Promise<void> {
-    await this.feedbackSubmitter.submit(message, email);
+  async sendFeedback(feedback: string, email: string): Promise<FeedbackResult> {
+    try {
+      await this.feedbackSubmitter.submit(feedback, email);
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: FeedbackError.publicError(error) };
+    }
   }
 
   /** Releases the power blocker; call when the app is shutting down. */

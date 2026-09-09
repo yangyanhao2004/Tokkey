@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import AccountModules from '../dist/main/account/index.js';
+import BackendEnvironmentModule from '../dist/main/config/BackendEnvironment.js';
 import CountdownTimerModule from '../dist/shared/CountdownTimer.js';
 
 const {
@@ -15,6 +16,7 @@ const {
   GoogleOAuthAuthorizer
 } = AccountModules;
 const { default: CountdownTimer } = CountdownTimerModule;
+const { default: BackendEnvironment } = BackendEnvironmentModule;
 
 const TEST_PROFILE = {
   id: 42,
@@ -186,10 +188,15 @@ class CancellableBrowserProbe {
   }
 }
 
-test('account configuration uses production defaults and permits loopback development overrides', () => {
-  const production = new AccountConfiguration({ environment: {} });
-  assert.equal(production.origin, 'https://api.amis-wifi.com');
-  assert.match(production.googleClientId, /\.apps\.googleusercontent\.com$/);
+test('account configuration uses the environment default and permits loopback development overrides', () => {
+  // Outside a packaged Electron build this run counts as development, so the
+  // resolved default is staging rather than the production host.
+  const resolved = new AccountConfiguration({ environment: {} });
+  assert.equal(resolved.origin, BackendEnvironment.stagingOrigin);
+  assert.match(resolved.googleClientId, /\.apps\.googleusercontent\.com$/);
+
+  assert.equal(BackendEnvironment.resolveOrigin(true), BackendEnvironment.stagingOrigin);
+  assert.equal(BackendEnvironment.resolveOrigin(false), BackendEnvironment.productionOrigin);
 
   const development = new AccountConfiguration({
     environment: {

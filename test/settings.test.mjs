@@ -6,6 +6,13 @@ import test from 'node:test';
 
 import { SystemPreferencesStore, DEFAULT_SYSTEM_PREFERENCES } from '../dist/main/settings/SystemPreferencesStore.js';
 import { SystemPreferencesService } from '../dist/main/settings/SystemPreferencesService.js';
+import FeedbackApiClientModule from '../dist/main/settings/FeedbackApiClient.js';
+import BackendEnvironmentModule from '../dist/main/config/BackendEnvironment.js';
+import FeedbackErrorsModule from '../dist/main/settings/FeedbackErrors.js';
+
+const { default: FeedbackApiClient, FEEDBACK_ENDPOINT_PATH } = FeedbackApiClientModule;
+const { default: BackendEnvironment } = BackendEnvironmentModule;
+const { default: FeedbackError } = FeedbackErrorsModule;
 
 /** A home directory of its own per test, so no run reads the real ~/.tokkey. */
 function temporaryHome() {
@@ -52,9 +59,9 @@ class StubFeedbackSubmitter {
     this.fails = fails;
   }
 
-  async submit(message, email) {
+  async submit(feedback, email) {
     if (this.fails) throw new Error('Failed to send feedback');
-    this.submitted.push({ message, email });
+    this.submitted.push({ feedback, email });
   }
 }
 
@@ -182,19 +189,85 @@ test('send feedback posts the typed message and reply address once', async () =>
   const submitter = new StubFeedbackSubmitter();
   const service = serviceWith(new StubPlatform(), temporaryHome(), submitter);
 
-  await service.sendFeedback('Line one\nR&D idea', 'user@example.com');
+  const result = await service.sendFeedback('Line one\nR&D idea', 'user@example.com');
 
+  assert.deepEqual(result, { ok: true });
   assert.deepEqual(submitter.submitted, [
-    { message: 'Line one\nR&D idea', email: 'user@example.com' }
+    { feedback: 'Line one\nR&D idea', email: 'user@example.com' }
   ]);
 });
 
-test('a failed send rejects, so the dialog can keep the message', async () => {
+test('a failed send answers with a reason, so the dialog can show it', async () => {
   const service = serviceWith(
     new StubPlatform(),
     temporaryHome(),
     new StubFeedbackSubmitter({ fails: true })
   );
 
-  await assert.rejects(() => service.sendFeedback('Never delivered'), /Failed to send feedback/);
+  const result = await service.sendFeedback('Never delivered', 'user@example.com');
+
+  assert.equal(result.ok, false);
+  // An unrecognised throw is reported as the generic reason, never as its text.
+  assert.equal(result.error.code, 'unavailable');
+  assert.match(result.error.message, /Could not reach Tokkey/);
+});
+
+test('the feedback client posts the endpoint contract to the environment origin', async () => {
+  const requests = [];
+  const client = new FeedbackApiClient(undefined, async (url, init) => {
+    requests.push({ url, body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({ code: 'OK', message: 'success', data: null }), {
+      status: 202,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  });
+
+  await client.submit('Line one\nR&D idea', 'user@example.com');
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, `${BackendEnvironment.stagingOrigin}${FEEDBACK_ENDPOINT_PATH}`);
+  assert.deepEqual(requests[0].body, { email: 'user@example.com', feedback: 'Line one\nR&D idea' });
+});
+
+test('each feedback failure status becomes the reason the user is shown', async () => {
+  // The backend reports every failure as a non-2xx status, so the status alone
+  // decides which message the dialog puts on screen.
+  const cases = [
+    { status: 400, backendCode: 'VALIDATION_FAILED', code: 'invalidInput' },
+    { status: 429, backendCode: 'FEEDBACK_RATE_LIMITED', code: 'rateLimited' },
+    { status: 503, backendCode: 'FEEDBACK_DELIVERY_FAILED', code: 'undeliverable' },
+    { status: 500, backendCode: 'INTERNAL_ERROR', code: 'unavailable' }
+  ];
+
+  for (const { status, backendCode, code } of cases) {
+    const client = new FeedbackApiClient(undefined, async () =>
+      new Response(JSON.stringify({ code: backendCode, message: 'backend detail' }), {
+        status,
+        headers: { 'Content-Type': 'application/json' }
+      })
+    );
+
+    const failure = await client.submit('Never delivered', 'user@example.com').then(
+      () => null,
+      (error) => error
+    );
+
+    assert.ok(failure, `HTTP ${status} should have failed`);
+    assert.equal(failure.code, code);
+    // The backend's own wording is logged, never handed to the user.
+    assert.doesNotMatch(FeedbackError.publicError(failure).message, /backend detail/);
+  }
+});
+
+test('a network failure reads as unreachable rather than as a rejected message', async () => {
+  const client = new FeedbackApiClient(undefined, async () => {
+    throw new TypeError('fetch failed');
+  });
+
+  const failure = await client.submit('Never sent', 'user@example.com').then(
+    () => null,
+    (error) => error
+  );
+
+  assert.equal(failure.code, 'unavailable');
 });

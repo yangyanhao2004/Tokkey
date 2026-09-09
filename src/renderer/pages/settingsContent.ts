@@ -36,9 +36,16 @@ export const SETTINGS_LOADING_MESSAGE = 'Reading your preferences…';
 /** The "Send Feedback" dialog (Figma 531:5666). */
 export const FEEDBACK_FIELD_LABEL = 'Feedback';
 export const FEEDBACK_PLACEHOLDER = 'Share a suggestion or report an issue...';
+export const FEEDBACK_EMAIL_LABEL = 'Email';
+export const FEEDBACK_EMAIL_PLACEHOLDER = 'you@example.com';
 export const FEEDBACK_SEND_LABEL = 'Send';
 export const FEEDBACK_SENDING_LABEL = 'Sending…';
-export const FEEDBACK_FAILED_MESSAGE = 'Could not open your mail client.';
+/** Shown when the send failed without the backend naming a reason. */
+export const FEEDBACK_FAILED_MESSAGE = 'Could not send your feedback. Please try again.';
+export const FEEDBACK_SENT_TITLE = 'Thanks for the feedback';
+export const FEEDBACK_SENT_MESSAGE =
+  "We're glad to hear from you. If we need more detail, we'll reply to the address you gave us.";
+export const FEEDBACK_DONE_LABEL = 'Done';
 
 /** The icon fronting each row, keyed the way the row is named. */
 export const ROW_ICON_FILES = {

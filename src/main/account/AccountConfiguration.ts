@@ -1,14 +1,15 @@
+import BackendEnvironment from '../config/BackendEnvironment';
 import AccountError from './AccountErrors';
 
 export interface AccountConfigurationOptions {
   environment?: NodeJS.ProcessEnv;
-  productionOrigin?: string;
-  productionGoogleClientId?: string;
+  /** Overrides the origin this run would otherwise pick for its environment. */
+  defaultOrigin?: string;
+  defaultGoogleClientId?: string;
 }
 
 /** Validates the public Account backend and Google desktop-client configuration. */
 export default class AccountConfiguration {
-  static readonly defaultOrigin = 'https://api.amis-wifi.com';
   static readonly defaultGoogleClientId =
     '947027167514-vo8h45360bfev2e79av8k78erbq38rs4.apps.googleusercontent.com';
 
@@ -19,12 +20,12 @@ export default class AccountConfiguration {
     const environment = options.environment ?? process.env;
     this.origin = this.requireOrigin(
       environment.AMIS_ACCOUNT_BACKEND_ORIGIN ??
-        options.productionOrigin ??
-        AccountConfiguration.defaultOrigin
+        options.defaultOrigin ??
+        BackendEnvironment.resolveOrigin()
     );
     this.googleClientId = this.requireGoogleClientId(
       environment.AMIS_GOOGLE_OAUTH_CLIENT_ID ??
-        options.productionGoogleClientId ??
+        options.defaultGoogleClientId ??
         AccountConfiguration.defaultGoogleClientId
     );
   }

@@ -39,6 +39,21 @@ export type AccountOperationResult<T> =
   | { ok: true; value: T }
   | { ok: false; error: AccountOperationError };
 
+/** Why one feedback submission did not reach the product inbox. */
+export type FeedbackErrorCode = 'invalidInput' | 'rateLimited' | 'undeliverable' | 'unavailable';
+
+export interface FeedbackOperationError {
+  code: FeedbackErrorCode;
+  message: string;
+}
+
+/**
+ * The backend answers 202 on success and a non-2xx status on every failure, so
+ * the dialog is told which of the two happened rather than left to read a
+ * thrown Error's text.
+ */
+export type FeedbackResult = { ok: true } | { ok: false; error: FeedbackOperationError };
+
 /** The coding agents Tokkey detects, each named after its executable. */
 export type CodingAgent = 'codex' | 'claude';
 
@@ -299,7 +314,7 @@ export interface TokkeyApi {
   installAppUpdate(): Promise<ClientVersionInfo>;
   onAppUpdateStateChanged(listener: (state: ClientVersionInfo) => void): () => void;
   updateSystemPreferences(patch: SystemPreferencesPatch): Promise<SystemSettingsState>;
-  sendFeedback(message: string, email?: string): Promise<void>;
+  sendFeedback(feedback: string, email: string): Promise<FeedbackResult>;
   detectAgents(): Promise<AgentInstallation[]>;
   getInstalledMcps(): Promise<McpCatalogScan>;
   scanInstalledMcps(): Promise<McpCatalogScan>;

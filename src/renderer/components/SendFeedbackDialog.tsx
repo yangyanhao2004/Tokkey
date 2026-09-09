@@ -1,37 +1,46 @@
 import { useCallback, useEffect, useState } from 'react';
+import type { FeedbackResult } from '../../shared/types';
 import { CANCEL_LABEL } from '../pages/agentHubContent';
 import {
+  FEEDBACK_DONE_LABEL,
+  FEEDBACK_EMAIL_LABEL,
+  FEEDBACK_EMAIL_PLACEHOLDER,
   FEEDBACK_FAILED_MESSAGE,
   FEEDBACK_FIELD_LABEL,
   FEEDBACK_PLACEHOLDER,
-  FEEDBACK_SEND_LABEL,
   FEEDBACK_SENDING_LABEL,
+  FEEDBACK_SEND_LABEL,
+  FEEDBACK_SENT_MESSAGE,
+  FEEDBACK_SENT_TITLE,
   SEND_FEEDBACK_TITLE
 } from '../pages/settingsContent';
 import { PushButton } from './PushButton';
 
 export interface SendFeedbackDialogProps {
   /**
-   * Hands the typed message on for delivery; rejecting holds the dialog open
-   * with the reason, so nothing the user wrote is lost to a failed send.
+   * Hands the typed message on for delivery. A failed result holds the dialog
+   * open on its reason, so nothing the user wrote is lost to a failed send.
    */
-  onSend: (message: string, email?: string) => Promise<void>;
+  onSend: (feedback: string, email: string) => Promise<FeedbackResult>;
   onClose: () => void;
 }
 
 /**
  * The sheet behind the Settings page's "Send Feedback" row (Figma 531:5666):
- * one message, then Cancel or Send.
+ * a message and a reply address, then Cancel or Send.
  *
  * The row used to open the mail client straight away, which gave the user an
  * empty draft and no idea what Tokkey wanted. Asking here means the message is
- * composed in the app and the mail client only has to carry it.
+ * composed in the app and posted straight to the backend, which is also what
+ * lets the dialog confirm the send rather than leave the user guessing.
  */
 export function SendFeedbackDialog({ onSend, onClose }: SendFeedbackDialogProps) {
   const [message, setMessage] = useState('');
   const [email, setEmail] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [hasFailed, setHasFailed] = useState(false);
+  const [hasSent, setHasSent] = useState(false);
+  /** The reason the last attempt failed, or null while none has. */
+  const [failureMessage, setFailureMessage] = useState<string | null>(null);
 
   // Escape closes, as every dialog on this platform does.
   useEffect(() => {
@@ -44,24 +53,33 @@ export function SendFeedbackDialog({ onSend, onClose }: SendFeedbackDialogProps)
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  // An empty note is worth nothing to read, so Send waits for something to say.
-  const canSubmit = message.trim().length > 0 && !isSending;
+  // An empty note is worth nothing to read, and the backend rejects feedback
+  // without a reply address, so Send waits for both.
+  const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const canSubmit = message.trim().length > 0 && isEmailValid && !isSending;
 
   const submit = useCallback(async () => {
     if (!canSubmit) {
       return;
     }
     setIsSending(true);
-    setHasFailed(false);
+    setFailureMessage(null);
     try {
-      await onSend(message.trim(), email.trim() || undefined);
-      onClose();
+      const result = await onSend(message.trim(), email.trim());
+      if (result.ok) {
+        setHasSent(true);
+      } else {
+        setFailureMessage(result.error.message);
+      }
     } catch (cause) {
+      // A rejected call means the request never reached the backend's answer,
+      // which the user reads the same way as any other failed send.
       console.error('Sending feedback failed:', cause);
-      setHasFailed(true);
+      setFailureMessage(FEEDBACK_FAILED_MESSAGE);
+    } finally {
       setIsSending(false);
     }
-  }, [canSubmit, email, message, onClose, onSend]);
+  }, [canSubmit, email, message, onSend]);
 
   return (
     // A full-window scrim: the dialog belongs to the app, not to the page under it.
@@ -91,52 +109,73 @@ export function SendFeedbackDialog({ onSend, onClose }: SendFeedbackDialogProps)
 
         <span className="h-[0.415px] w-full shrink-0 bg-dialog-divider" />
 
-        <div className="flex w-full flex-col gap-1.5 p-4">
-          <label className="flex w-full flex-col items-start gap-1.5">
-            <span className="text-[10px] leading-[12px] font-bold text-text-primary">
-              {FEEDBACK_FIELD_LABEL}
-            </span>
-            <textarea
-              // `select-text` opts back in: the body disables selection app-wide.
-              className="h-[90px] w-full select-text resize-none rounded-[8px] bg-field-bg p-2 text-[10px] leading-[12px] text-text-primary outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary disabled:opacity-40 placeholder:text-field-placeholder"
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              placeholder={FEEDBACK_PLACEHOLDER}
-              disabled={isSending}
-              autoFocus
-              data-testid="send-feedback-message"
-            />
-          </label>
-          <label className="flex w-full flex-col items-start gap-1.5">
-            <span className="text-[10px] leading-[12px] font-bold text-text-primary">Email (optional)</span>
-            <input
-              className="h-[30px] w-full select-text rounded-[8px] bg-field-bg px-2 text-[10px] leading-[12px] text-text-primary outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary disabled:opacity-40"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
-              disabled={isSending}
-              data-testid="send-feedback-email"
-            />
-          </label>
-
-          {hasFailed && (
-            <p
-              className="w-full text-[10px] leading-[12px] text-text-secondary"
-              data-testid="send-feedback-error"
-            >
-              {FEEDBACK_FAILED_MESSAGE}
+        {hasSent ? (
+          <div className="flex w-full flex-col gap-1.5 p-4" data-testid="send-feedback-sent">
+            <p className="text-[12px] leading-[15px] font-bold text-text-primary">
+              {FEEDBACK_SENT_TITLE}
             </p>
-          )}
-        </div>
+            <p className="text-[10px] leading-[14px] text-text-secondary">{FEEDBACK_SENT_MESSAGE}</p>
+          </div>
+        ) : (
+          <div className="flex w-full flex-col gap-1.5 p-4">
+            <label className="flex w-full flex-col items-start gap-1.5">
+              <span className="text-[10px] leading-[12px] font-bold text-text-primary">
+                {FEEDBACK_FIELD_LABEL}
+              </span>
+              <textarea
+                // `select-text` opts back in: the body disables selection app-wide.
+                className="h-[90px] w-full select-text resize-none rounded-[8px] bg-field-bg p-2 text-[10px] leading-[12px] text-text-primary outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary disabled:opacity-40 placeholder:text-field-placeholder"
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                placeholder={FEEDBACK_PLACEHOLDER}
+                disabled={isSending}
+                autoFocus
+                data-testid="send-feedback-message"
+              />
+            </label>
+            <label className="flex w-full flex-col items-start gap-1.5">
+              <span className="text-[10px] leading-[12px] font-bold text-text-primary">
+                {FEEDBACK_EMAIL_LABEL}
+              </span>
+              <input
+                className="h-[30px] w-full select-text rounded-[8px] bg-field-bg px-2 text-[10px] leading-[12px] text-text-primary outline-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-text-primary disabled:opacity-40"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder={FEEDBACK_EMAIL_PLACEHOLDER}
+                disabled={isSending}
+                data-testid="send-feedback-email"
+              />
+            </label>
+
+            {failureMessage && (
+              <p
+                className="w-full text-[10px] leading-[14px] text-text-secondary"
+                data-testid="send-feedback-error"
+              >
+                {failureMessage}
+              </p>
+            )}
+          </div>
+        )}
 
         <div className="flex w-full items-center justify-end gap-2 border-t-[0.415px] border-separator-hairline bg-white p-4">
-          <PushButton variant="tinted" disabled={isSending} onClick={onClose} testId="send-feedback-cancel">
-            {CANCEL_LABEL}
-          </PushButton>
-          <PushButton disabled={!canSubmit} onClick={() => void submit()} testId="send-feedback-confirm">
-            {isSending ? FEEDBACK_SENDING_LABEL : FEEDBACK_SEND_LABEL}
-          </PushButton>
+          {hasSent ? (
+            // Nothing is left to cancel once the message is out, so the
+            // confirmation offers the one action that still means anything.
+            <PushButton onClick={onClose} testId="send-feedback-done">
+              {FEEDBACK_DONE_LABEL}
+            </PushButton>
+          ) : (
+            <>
+              <PushButton variant="tinted" disabled={isSending} onClick={onClose} testId="send-feedback-cancel">
+                {CANCEL_LABEL}
+              </PushButton>
+              <PushButton disabled={!canSubmit} onClick={() => void submit()} testId="send-feedback-confirm">
+                {isSending ? FEEDBACK_SENDING_LABEL : FEEDBACK_SEND_LABEL}
+              </PushButton>
+            </>
+          )}
         </div>
       </form>
     </div>

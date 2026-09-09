@@ -8,6 +8,7 @@ import type {
   CachedRepositorySkill,
   CloudModelCard,
   CloudModelConnection,
+  FeedbackResult,
   HostSnapshot,
   LocalChatEvent,
   McpConfigurationDraft,
@@ -242,10 +243,10 @@ export default class IpcController {
       'updates:install': () => options.appUpdateService?.installUpdate() ?? this.getSystemSettings().client,
       'settings:update-preferences': (patch: unknown) =>
         this.updateSystemPreferences(this.requireSystemPreferencesPatch(patch)),
-      'settings:send-feedback': (message: unknown, email: unknown) =>
+      'settings:send-feedback': (feedback: unknown, email: unknown) =>
         this.sendFeedback(
-          this.requireString(message, 'Feedback message'),
-          this.requireOptionalEmail(email)
+          this.requireString(feedback, 'Feedback message'),
+          this.requireEmail(email)
         ),
       'agents:detect': () => this.detectAgents(),
       'mcps:list-installed': () => this.scanInstalledMcps(),
@@ -483,9 +484,9 @@ export default class IpcController {
     return this.systemPreferencesService.update(patch);
   }
 
-  /** Opens the user's mail client on a draft carrying the typed message. */
-  sendFeedback(message: string, email?: string): Promise<void> {
-    return this.systemPreferencesService.sendFeedback(message, email);
+  /** Posts the typed message and its reply address to the feedback endpoint. */
+  sendFeedback(feedback: string, email: string): Promise<FeedbackResult> {
+    return this.systemPreferencesService.sendFeedback(feedback, email);
   }
 
   /**
@@ -1114,11 +1115,8 @@ export default class IpcController {
     return value;
   }
 
-  /** An email is optional on feedback, so only a typed-in one has to be valid. */
-  private requireOptionalEmail(value: unknown): string | undefined {
-    if (value === undefined || value === null || value === '') {
-      return undefined;
-    }
+  /** The feedback endpoint rejects a blank email, so a valid one is required. */
+  private requireEmail(value: unknown): string {
     if (typeof value !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) {
       throw new TypeError('Reply email must be a valid email address');
     }
