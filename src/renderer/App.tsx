@@ -11,6 +11,7 @@ import { RouterPage } from './pages/RouterPage';
 import { PetPage } from './pages/PetPage';
 import { TokkeyPage } from './pages/TokkeyPage';
 import { ChatPage } from './pages/ChatPage';
+import { DashboardPage } from './pages/DashboardPage';
 import { UnbuiltPage } from './pages/UnbuiltPage';
 import { SignInPage } from './pages/SignInPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -26,6 +27,7 @@ const PAGE_BY_ROUTE: Partial<Record<RouteId, ComponentType>> = {
   pet: PetPage,
   'agent-hub': AgentHubPage,
   chat: ChatPage,
+  dashboard: DashboardPage,
   'add-model': AddModelPage,
   'discover-skills': DiscoverSkillsPage,
   'sign-in': SignInPage,

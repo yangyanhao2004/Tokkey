@@ -75,8 +75,8 @@ function PageHeader() {
 interface PageShellProps {
   /** Page heading, e.g. "Tokkey". */
   title: string;
-  /** Sentence under the heading. */
-  subtitle: string;
+  /** Sentence under the heading, where the design gives the page one. */
+  subtitle?: string;
   /** Identifies the page in tests, e.g. `tokkey` renders `page-tokkey`. */
   testId: string;
   children: ReactNode;

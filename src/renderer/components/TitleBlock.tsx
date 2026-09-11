@@ -20,8 +20,11 @@ const SIZE_CLASSES = {
 interface TitleBlockProps {
   /** The headline, e.g. "Local Models". */
   title: ReactNode;
-  /** The line under it, e.g. "Download, start, and manage models on this Mac." */
-  subtitle: ReactNode;
+  /**
+   * The line under it, e.g. "Download, start, and manage models on this Mac."
+   * Omitted where the design gives a heading no subheadline.
+   */
+  subtitle?: ReactNode;
   size?: keyof typeof SIZE_CLASSES;
   /**
    * Heading level for the title. Pages use `h1` and cards `h2`; rows that
@@ -55,7 +58,9 @@ export function TitleBlock({
       <TitleTag className={`truncate font-bold text-text-primary ${classes.title}`}>
         {title}
       </TitleTag>
-      <span className={`${wrapSubtitle ? 'whitespace-normal break-words' : 'truncate'} text-text-secondary ${classes.subtitle}`}>{subtitle}</span>
+      {subtitle !== undefined && (
+        <span className={`${wrapSubtitle ? 'whitespace-normal break-words' : 'truncate'} text-text-secondary ${classes.subtitle}`}>{subtitle}</span>
+      )}
     </div>
   );
 }
