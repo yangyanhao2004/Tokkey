@@ -1,22 +1,28 @@
 import { useState, type ReactNode } from 'react';
+import type { UsageQueryRecord, UsageQueryStep } from '../../shared/types';
 import {
+  formatQueryTime,
   ICON_BASE_PATH,
-  LOCAL_USAGE_STATS,
-  LOCAL_USAGE_TITLE,
+  LOAD_MORE_LABEL,
+  LOADING_MORE_LABEL,
+  localUsageStats,
   metricColumns,
+  NO_QUERIES_TEXT,
   PAGE_TITLE,
+  QUERIES_LOADING_TEXT,
   QUERY_BREAKDOWN_TITLE,
-  RECENT_QUERIES,
+  queryTitle,
   RECENT_QUERIES_TITLE,
   ROUTER_STATS,
   ROUTER_TITLE,
+  LOCAL_USAGE_TITLE,
   stepCountLabel,
   type QueryMetrics,
-  type QueryStep,
-  type RecentQuery,
   type UsageStat
 } from './dashboardContent';
 import { PageShell } from '../components/PageShell';
+import { PushButton } from '../components/PushButton';
+import { useUsageDashboard } from '../hooks/useUsageDashboard';
 
 interface SectionCardProps {
   /** The small-caps heading in the card's own strip, e.g. "Router". */
@@ -101,22 +107,16 @@ interface MetricColumnsProps {
   size: 'query' | 'step';
 }
 
-/** The Tokens/Spend/Saved trio that ends every query and step row. */
+/** The token trio that ends every query and step row. */
 function MetricColumns({ metrics, size }: MetricColumnsProps) {
   const valueClasses = size === 'query' ? 'text-[9px] leading-[11px]' : 'text-[8px] leading-[10px]';
 
   return (
     <div className="flex shrink-0 items-center gap-4">
       {metricColumns(metrics).map((column) => (
-        <div className="flex flex-col items-center gap-1" key={column.label}>
+        <div className="flex w-[34px] flex-col items-center gap-1" key={column.label}>
           <span className="text-[8px] leading-[10px] text-text-secondary">{column.label}</span>
-          <span
-            className={`font-bold ${valueClasses} ${
-              column.isSaving ? 'text-status-ok-text' : 'text-text-primary'
-            }`}
-          >
-            {column.value}
-          </span>
+          <span className={`font-bold text-text-primary ${valueClasses}`}>{column.value}</span>
         </div>
       ))}
     </div>
@@ -148,20 +148,30 @@ function StepBadge({ position }: { position: number }) {
 }
 
 /** One model a query was routed through, inside an expanded query row. */
-function QueryStepRow({ step, position }: { step: QueryStep; position: number }) {
+function QueryStepRow({ step, position }: { step: UsageQueryStep; position: number }) {
   return (
     <div className="flex w-full items-center justify-between gap-4 rounded-[8px] border border-vibrant-tertiary bg-white px-3 py-1">
       <span className="flex min-w-0 items-center gap-1 text-[9px] leading-[11px] font-semibold text-text-secondary">
         <StepBadge position={position} />
         <span className="truncate">{step.modelName}</span>
+        {/* A call the router could not finish still spent tokens, so the row
+            stays and says why its figures look the way they do. */}
+        {!step.isComplete && <span className="shrink-0 text-status-error-text">· incomplete</span>}
       </span>
-      <MetricColumns metrics={step.metrics} size="step" />
+      <MetricColumns
+        metrics={{
+          tokens: step.totalTokens,
+          inputTokens: step.inputTokens,
+          outputTokens: step.outputTokens
+        }}
+        size="step"
+      />
     </div>
   );
 }
 
 interface RecentQueryRowProps {
-  query: RecentQuery;
+  query: UsageQueryRecord;
   isExpanded: boolean;
   onToggle: () => void;
 }
@@ -173,6 +183,7 @@ interface RecentQueryRowProps {
  */
 function RecentQueryRow({ query, isExpanded, onToggle }: RecentQueryRowProps) {
   const breakdownId = `query-breakdown-${query.id}`;
+  const startedAt = formatQueryTime(query.startedAtEpochMs);
 
   return (
     <article
@@ -189,15 +200,22 @@ function RecentQueryRow({ query, isExpanded, onToggle }: RecentQueryRowProps) {
       >
         <span className="flex min-w-0 flex-col gap-1">
           <span className="truncate text-[10px] leading-[12px] font-bold text-text-primary">
-            {query.title}
+            {queryTitle(query)}
           </span>
           <span className="text-[9px] leading-[11px] text-text-secondary">
-            {stepCountLabel(query.steps.length)}
+            {startedAt ? `${stepCountLabel(query.steps.length)} · ${startedAt}` : stepCountLabel(query.steps.length)}
           </span>
         </span>
 
         <span className="flex shrink-0 items-center gap-8">
-          <MetricColumns metrics={query.metrics} size="query" />
+          <MetricColumns
+            metrics={{
+              tokens: query.totalTokens,
+              inputTokens: query.inputTokens,
+              outputTokens: query.outputTokens
+            }}
+            size="query"
+          />
           <img
             // One asset for both states: expanding flips the chevron over.
             className={`block size-[14px] max-w-none ${isExpanded ? 'rotate-180' : ''}`}
@@ -207,14 +225,16 @@ function RecentQueryRow({ query, isExpanded, onToggle }: RecentQueryRowProps) {
         </span>
       </button>
 
-      {isExpanded && (
+      {isExpanded && query.steps.length > 0 && (
         <div className="flex w-full flex-col gap-3" id={breakdownId}>
           <h3 className="text-[9px] leading-[11px] font-semibold text-text-secondary">
             {QUERY_BREAKDOWN_TITLE}
           </h3>
           <div className="flex w-full flex-col gap-1">
             {query.steps.map((step, index) => (
-              <QueryStepRow key={step.modelName} step={step} position={index + 1} />
+              // The router can call one model more than once in a query, so the
+              // position - not the model - is what makes a step row unique.
+              <QueryStepRow key={`${step.stepIndex}-${index}`} step={step} position={index + 1} />
             ))}
           </div>
         </div>
@@ -223,20 +243,37 @@ function RecentQueryRow({ query, isExpanded, onToggle }: RecentQueryRowProps) {
   );
 }
 
+/** The one line the list shows instead of rows, while empty or while failing. */
+function QueryListMessage({ children }: { children: ReactNode }) {
+  return (
+    <p
+      className="flex w-full items-center justify-center p-6 text-center text-[10px] leading-[14px] text-text-secondary"
+      data-testid="recent-queries-message"
+    >
+      {children}
+    </p>
+  );
+}
+
 /**
  * The page behind the "Dashboard" nav row: what this Mac has run locally, what
  * Router has spent and saved, and the queries it most recently routed.
+ *
+ * The query history grows for as long as the router runs, so it is read in
+ * batches and extended on demand rather than drawn whole.
  */
 export function DashboardPage() {
   // At most one query is open at a time, so the list stays readable however
   // many models a query was routed through.
   const [expandedQueryId, setExpandedQueryId] = useState<string | null>(null);
+  const { queries, totals, isLoading, isLoadingMore, hasMore, error, loadMore } =
+    useUsageDashboard();
 
   return (
     <PageShell title={PAGE_TITLE} testId="dashboard">
       <SectionCard title={LOCAL_USAGE_TITLE} testId="local-usage-card">
         <StatRow>
-          {LOCAL_USAGE_STATS.map((stat, index) => (
+          {localUsageStats(totals).map((stat, index) => (
             <StatCell
               key={stat.id}
               stat={stat}
@@ -254,8 +291,8 @@ export function DashboardPage() {
           ))}
         </StatRow>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3 border-t border-dialog-divider p-4">
-          <h3 className="shrink-0 text-[10px] leading-[12px] font-semibold text-label-eyebrow">
+        <div className="flex min-h-0 flex-1 flex-col border-t border-dialog-divider p-4">
+          <h3 className="mb-3 shrink-0 text-[10px] leading-[12px] font-semibold text-label-eyebrow">
             {RECENT_QUERIES_TITLE}
           </h3>
 
@@ -263,7 +300,12 @@ export function DashboardPage() {
             className="flex min-h-0 w-full flex-col divide-y divide-vibrant-tertiary overflow-y-auto rounded-[8px] border border-vibrant-tertiary"
             data-testid="recent-queries"
           >
-            {RECENT_QUERIES.map((query) => (
+            {error && <QueryListMessage>{error}</QueryListMessage>}
+            {!error && isLoading && <QueryListMessage>{QUERIES_LOADING_TEXT}</QueryListMessage>}
+            {!error && !isLoading && queries.length === 0 && (
+              <QueryListMessage>{NO_QUERIES_TEXT}</QueryListMessage>
+            )}
+            {queries.map((query) => (
               <RecentQueryRow
                 key={query.id}
                 query={query}
@@ -273,6 +315,23 @@ export function DashboardPage() {
                 }
               />
             ))}
+
+            {/* Inside the scroll area and after the last row, because that is
+                where the reader who wants more history already is. The list's
+                own `divide-y` rules it off from the row above. */}
+            {!error && hasMore && (
+              <div className="flex w-full shrink-0 items-center justify-center p-2">
+                <PushButton
+                  variant="tinted"
+                  // A batch already on its way is not one to ask for again.
+                  disabled={isLoadingMore}
+                  onClick={loadMore}
+                  testId="load-more-queries"
+                >
+                  {isLoadingMore ? LOADING_MORE_LABEL : LOAD_MORE_LABEL}
+                </PushButton>
+              </div>
+            )}
           </div>
         </div>
       </SectionCard>

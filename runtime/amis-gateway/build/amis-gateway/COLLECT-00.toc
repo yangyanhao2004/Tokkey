@@ -3188,7 +3188,7 @@
    '/Users/qiliu/Documents/workspaces/Tokie/runtime/amis-gateway/.venv/lib/python3.12/site-packages/rpds/rpds.cpython-312-darwin.so',
    'EXTENSION'),
   ('setuptools/_vendor/jaraco/text/Lorem ipsum.txt',
-   '/Users/qiliu/.cache/uv/archive-v0/jMz4LWOPVzmZlFrknxaGY/lib/python3.12/site-packages/setuptools/_vendor/jaraco/text/Lorem '
+   '/Users/qiliu/.cache/uv/archive-v0/nWwccB0SQwGbtnzd8ipTb/lib/python3.12/site-packages/setuptools/_vendor/jaraco/text/Lorem '
    'ipsum.txt',
    'DATA'),
   ('tiktoken/_tiktoken.cpython-312-darwin.so',

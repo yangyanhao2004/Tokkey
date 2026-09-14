@@ -40,7 +40,9 @@ import type {
   SkillUploadConflictChoice,
   SkillUploadResult,
   SystemPreferencesPatch,
-  SystemSettingsState
+  SystemSettingsState,
+  UsageQueryWindow,
+  UsageTokenTotals
 } from '../shared/types';
 import type { McpCatalogScan } from '../shared/types';
 import type { InstalledLocalModel, LocalModelCatalogRequest } from '../shared/types';
@@ -64,6 +66,7 @@ import AgentManager, { type AgentState } from './agents/AgentManager';
 import InstalledAgentGate from './agents/InstalledAgentGate';
 import LocalChatTurnExecutor from './chat/LocalChatTurnExecutor';
 import ChatSessionStore from './chat/ChatSessionStore';
+import UsageStatsStore from './usage/UsageStatsStore';
 import {
   validateLocalChatSessionId,
   validateLocalChatTurnId,
@@ -101,6 +104,7 @@ export interface IpcControllerOptions {
   tokenHubRuntime?: TokenHubRuntime;
   localChatTurnExecutor?: LocalChatTurnExecutor;
   chatSessionStore?: ChatSessionStore;
+  usageStatsStore?: UsageStatsStore;
   hostSnapshotService?: HostSnapshotService;
   /** Owns the Settings page's preferences and what each one does to the app. */
   systemPreferencesService?: SystemPreferencesService;
@@ -147,6 +151,7 @@ export default class IpcController {
   private readonly tokenHubRuntime: TokenHubRuntime;
   private readonly localChatTurnExecutor: LocalChatTurnExecutor;
   private readonly chatSessionStore: ChatSessionStore;
+  private readonly usageStatsStore: UsageStatsStore;
   private readonly hostSnapshotService: HostSnapshotService;
   private readonly systemPreferencesService: SystemPreferencesService;
   private readonly agentManager: AgentManager;
@@ -197,6 +202,7 @@ export default class IpcController {
       this.broadcast('models:runtime-state-changed', state)
     );
     this.chatSessionStore = options.chatSessionStore ?? new ChatSessionStore();
+    this.usageStatsStore = options.usageStatsStore ?? new UsageStatsStore();
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
     this.systemPreferencesService =
       options.systemPreferencesService ?? new SystemPreferencesService();
@@ -325,8 +331,25 @@ export default class IpcController {
         this.connectCloudModel(this.requireString(cardId, 'Cloud model card ID')),
       'router:get-state': () => this.getRouterRuntimeState(),
       'router:start': () => this.startRouterRuntime(),
-      'router:stop': () => this.stopRouterRuntime()
+      'router:stop': () => this.stopRouterRuntime(),
+      'usage:query-window': (cursor: unknown) => this.readUsageQueryWindow(cursor),
+      'usage:totals': () => this.readUsageTokenTotals()
     };
+  }
+
+  /**
+   * One batch of the Dashboard's recent queries. Anything that is not a cursor
+   * this store issued reads as the newest batch rather than being rejected: the
+   * list has to draw something, and there is no position a caller could ask for
+   * that has no honest answer.
+   */
+  private readUsageQueryWindow(cursor: unknown): UsageQueryWindow {
+    return this.usageStatsStore.readQueryWindow(typeof cursor === 'string' ? cursor : null);
+  }
+
+  /** The token figures on the Dashboard's "Local AI usage" card. */
+  private readUsageTokenTotals(): UsageTokenTotals {
+    return this.usageStatsStore.readTokenTotals();
   }
 
   /** Sends one payload to every live window, for main-process-driven state. */

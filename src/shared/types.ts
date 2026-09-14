@@ -368,6 +368,8 @@ export interface TokkeyApi {
   startLocalChatTurn(request: LocalChatTurnRequest): Promise<LocalChatTurnStarted>;
   cancelLocalChatTurn(turnId: string): Promise<void>;
   onLocalChatEvent(listener: LocalChatEventListener): () => void;
+  readUsageQueryWindow(cursor: string | null): Promise<UsageQueryWindow>;
+  readUsageTokenTotals(): Promise<UsageTokenTotals>;
 }
 
 /** The only message roles the local text-chat runtime accepts in phase one. */
@@ -933,4 +935,66 @@ export interface SkillsShInstallRequest {
 export interface SkillsShInstallResult extends SkillInstallResult {
   listing: SkillsShSkill;
   resolvedPath: string | null;
+}
+
+/** How many recent queries one read returns, and so how many "Load more" adds. */
+export const USAGE_QUERY_BATCH_SIZE = 20;
+
+/**
+ * One model call the router made answering a query - a subtask, in the
+ * dashboard's terms. `stepIndex` is the router's own ordering: 0 is the
+ * planning call, and anything above it is a step the plan asked for.
+ */
+export interface UsageQueryStep {
+  readonly modelName: string;
+  /** What the call was for, as the router records it: planner, local, proxy. */
+  readonly role: string;
+  readonly stepIndex: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  /** Input and output plus the cache tokens, which belong to neither. */
+  readonly totalTokens: number;
+  /** False for a call the router could not finish, whose tokens still counted. */
+  readonly isComplete: boolean;
+}
+
+/** One question put to the router, and every model call it was routed through. */
+export interface UsageQueryRecord {
+  /** Session and turn together, which is what identifies a query. */
+  readonly id: string;
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly queryText: string;
+  /** The router's own local timestamp, kept for display. */
+  readonly startedAt: string;
+  readonly startedAtEpochMs: number;
+  readonly steps: readonly UsageQueryStep[];
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly totalTokens: number;
+}
+
+/**
+ * One batch of the recent-queries listing, newest first.
+ *
+ * The listing is read forward from a cursor rather than by page number: history
+ * only grows, and a query recorded while the list is open would otherwise push
+ * every later row down a page and show one of them twice.
+ */
+export interface UsageQueryWindow {
+  readonly queries: readonly UsageQueryRecord[];
+  /**
+   * Where to resume for the batch after this one, or null at the end of the
+   * history. Opaque - only the store that issued it reads what is inside.
+   */
+  readonly nextCursor: string | null;
+}
+
+/** Every token this machine has put through the router. */
+export interface UsageTokenTotals {
+  readonly totalTokens: number;
+  /** Tokens fed to the models. */
+  readonly prefillTokens: number;
+  /** Tokens the models generated. */
+  readonly decodeTokens: number;
 }

@@ -1,12 +1,16 @@
 /**
  * Content model for the Dashboard page, taken from the Figma node "Main"
- * (756:781). Kept apart from the components so copy and rows can change
+ * (756:781). Kept apart from the components so copy and formatting can change
  * without touching markup.
  *
- * Nothing here is wired to a data source yet: the app records no aggregate
- * token count, router spend, or query history, so the values are the design's
- * own reference figures and stay in one place for whoever connects them.
+ * The figures come from what the router recorded in Tokkey's own database:
+ * `usage_queries` for the questions asked and `usage_calls` for the model calls
+ * made answering them. Cost is the exception - nothing prices a call yet, so
+ * the Router card's two money figures are still the design's own reference
+ * values and are marked as such below.
  */
+
+import type { UsageQueryRecord, UsageTokenTotals } from '../../shared/types';
 
 /** Shared with the sidebar so every page resolves assets from one place. */
 export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
@@ -26,14 +30,41 @@ export interface UsageStat {
 
 export const LOCAL_USAGE_TITLE = 'Local AI usage';
 
-export const LOCAL_USAGE_STATS: readonly UsageStat[] = [
-  { id: 'total-tokens', label: 'Total tokens processed', value: 'xx.x M' },
-  { id: 'prefill-tokens', label: 'Total prefill token', value: 'xx.x' },
-  { id: 'decode-tokens', label: 'Total decode token', value: 'xx.x' }
-];
+/** What each figure reads before the first reading arrives. */
+const PENDING_VALUE = '—';
+
+/**
+ * The "Local AI usage" strip. Prefill is everything fed to the models, cache
+ * reads and writes included, and decode is what they generated, so the two add
+ * up to the total.
+ */
+export function localUsageStats(totals: UsageTokenTotals | null): readonly UsageStat[] {
+  return [
+    {
+      id: 'total-tokens',
+      label: 'Total tokens processed',
+      value: totals ? formatTokenCount(totals.totalTokens) : PENDING_VALUE
+    },
+    {
+      id: 'prefill-tokens',
+      label: 'Total prefill token',
+      value: totals ? formatTokenCount(totals.prefillTokens) : PENDING_VALUE
+    },
+    {
+      id: 'decode-tokens',
+      label: 'Total decode token',
+      value: totals ? formatTokenCount(totals.decodeTokens) : PENDING_VALUE
+    }
+  ];
+}
 
 export const ROUTER_TITLE = 'Router';
 
+/**
+ * Still the design's reference figures: no call is priced yet, so there is
+ * nothing to add up. Replace both values once a price list exists - the rest of
+ * the card already draws real traffic.
+ */
 export const ROUTER_STATS: readonly UsageStat[] = [
   {
     id: 'router-spend',
@@ -52,45 +83,38 @@ export const ROUTER_STATS: readonly UsageStat[] = [
 
 export const RECENT_QUERIES_TITLE = 'Recent queries';
 export const QUERY_BREAKDOWN_TITLE = 'Query breakdown';
+export const LOAD_MORE_LABEL = 'Load more';
+/** The same button, while the batch it asked for is still on its way. */
+export const LOADING_MORE_LABEL = 'Loading…';
 
-/** What a query, and each model it passed through, cost and saved. */
+export const QUERIES_LOADING_TEXT = 'Reading usage history…';
+export const NO_QUERIES_TEXT = 'No queries yet. Anything you route through Tokkey is listed here.';
+/** What a query with no recorded calls is titled, rather than an empty row. */
+const UNTITLED_QUERY_TEXT = 'Untitled query';
+
+/** Tokens counted on one query or one of its steps. */
 export interface QueryMetrics {
-  readonly tokens: string;
-  readonly spend: string;
-  readonly saved: string;
-}
-
-/** One model the router called while answering a query. */
-export interface QueryStep {
-  readonly modelName: string;
-  readonly metrics: QueryMetrics;
-}
-
-/** A row in "Recent queries", expandable to the models it was routed through. */
-export interface RecentQuery {
-  readonly id: string;
-  readonly title: string;
-  readonly metrics: QueryMetrics;
-  readonly steps: readonly QueryStep[];
+  readonly tokens: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
 }
 
 /** One of the three figures a query or step row reports. */
 export interface MetricColumn {
   readonly label: string;
   readonly value: string;
-  /** Printed in green, the way the saved cost is on the Router card. */
-  readonly isSaving: boolean;
 }
 
 /**
  * The three columns in the order the design prints them. Query rows and step
- * rows both read from here so the two never drift apart.
+ * rows both read from here so the two never drift apart. Spend and saved belong
+ * beside these once calls are priced.
  */
 export function metricColumns(metrics: QueryMetrics): readonly MetricColumn[] {
   return [
-    { label: 'Tokens', value: metrics.tokens, isSaving: false },
-    { label: 'Spend', value: metrics.spend, isSaving: false },
-    { label: 'Saved', value: metrics.saved, isSaving: true }
+    { label: 'Tokens', value: formatTokenCount(metrics.tokens) },
+    { label: 'Input', value: formatTokenCount(metrics.inputTokens) },
+    { label: 'Output', value: formatTokenCount(metrics.outputTokens) }
   ];
 }
 
@@ -99,34 +123,42 @@ export function stepCountLabel(stepCount: number): string {
   return stepCount === 1 ? '1 step' : `${stepCount} steps`;
 }
 
-export const RECENT_QUERIES: readonly RecentQuery[] = [
-  {
-    id: 'compare-qwen-gpt5',
-    title: 'Compare Qwen and GPT-5 for this task',
-    metrics: { tokens: '45.1k', spend: '$0.30', saved: '$0.27' },
-    steps: [
-      { modelName: 'Qwen 3.5 35B', metrics: { tokens: '12.4k', spend: '$0.00', saved: '$0.08' } },
-      { modelName: 'GPT-5', metrics: { tokens: '8.2k', spend: '$0.30', saved: '$0.00' } },
-      { modelName: 'Qwen 3.5 9B', metrics: { tokens: '11.4k', spend: '$0.00', saved: '$0.09' } },
-      { modelName: 'Qwen 3.5 8B', metrics: { tokens: '13.1k', spend: '$0.00', saved: '$0.10' } }
-    ]
-  },
-  {
-    id: 'draft-launch-announcement',
-    title: 'Draft a concise launch announcement',
-    metrics: { tokens: '33.6k', spend: '$0.62', saved: '$0.09' },
-    steps: [
-      { modelName: 'GPT-5', metrics: { tokens: '20.2k', spend: '$0.62', saved: '$0.00' } },
-      { modelName: 'Qwen 3.5 9B', metrics: { tokens: '13.4k', spend: '$0.00', saved: '$0.09' } }
-    ]
-  },
-  {
-    id: 'summarize-meeting-notes',
-    title: 'Summarize the latest meeting notes',
-    metrics: { tokens: '21.1k', spend: '$0.00', saved: '$0.16' },
-    steps: [
-      { modelName: 'Qwen 3.5 9B', metrics: { tokens: '12.7k', spend: '$0.00', saved: '$0.10' } },
-      { modelName: 'Qwen 3.5 8B', metrics: { tokens: '8.4k', spend: '$0.00', saved: '$0.06' } }
-    ]
-  }
-];
+/** The title a query row prints, which is the question as it was asked. */
+export function queryTitle(query: UsageQueryRecord): string {
+  return query.queryText.trim() || UNTITLED_QUERY_TEXT;
+}
+
+/**
+ * When a query ran, in this machine's own timezone. The list is ordered by
+ * time, so each row says which point in it this one is.
+ */
+export function formatQueryTime(epochMilliseconds: number): string {
+  if (!Number.isFinite(epochMilliseconds) || epochMilliseconds <= 0) return '';
+  return new Date(epochMilliseconds).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+const THOUSAND = 1_000;
+const MILLION = 1_000_000;
+const BILLION = 1_000_000_000;
+
+/**
+ * A token count at the width the cards allow. Always one decimal of the unit:
+ * dropping it above ten rounded 19,924 to "20k", which reads as a round number
+ * the router never recorded. "19.9k" is the same width and stays honest.
+ */
+export function formatTokenCount(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return '0';
+  if (tokens < THOUSAND) return `${Math.round(tokens)}`;
+  if (tokens < MILLION) return `${scaled(tokens, THOUSAND)}k`;
+  if (tokens < BILLION) return `${scaled(tokens, MILLION)}M`;
+  return `${scaled(tokens, BILLION)}B`;
+}
+
+function scaled(tokens: number, unit: number): string {
+  return (tokens / unit).toFixed(1);
+}

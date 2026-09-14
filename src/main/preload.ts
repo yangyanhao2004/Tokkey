@@ -132,7 +132,9 @@ class PreloadBridge {
         };
         ipcRenderer.on('chat:event', forwardEvent);
         return () => ipcRenderer.removeListener('chat:event', forwardEvent);
-      }
+      },
+      readUsageQueryWindow: (cursor) => ipcRenderer.invoke('usage:query-window', cursor),
+      readUsageTokenTotals: () => ipcRenderer.invoke('usage:totals')
     };
     contextBridge.exposeInMainWorld('tokkey', api);
   }
