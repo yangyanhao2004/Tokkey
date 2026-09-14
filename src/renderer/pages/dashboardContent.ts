@@ -5,9 +5,8 @@
  *
  * The figures come from what the router recorded in Tokkey's own database:
  * `usage_queries` for the questions asked and `usage_calls` for the model calls
- * made answering them. Cost is the exception - nothing prices a call yet, so
- * the Router card's two money figures are still the design's own reference
- * values and are marked as such below.
+ * made answering them. Spend and savings are computed from recorded tokens
+ * and the model price catalog, and refresh as the router commits new usage.
  */
 
 import type { UsageCostTotals, UsageQueryRecord } from '../../shared/types';

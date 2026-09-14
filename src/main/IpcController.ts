@@ -333,7 +333,8 @@ export default class IpcController {
       'router:start': () => this.startRouterRuntime(),
       'router:stop': () => this.stopRouterRuntime(),
       'usage:query-window': (cursor: unknown) => this.readUsageQueryWindow(cursor),
-      'usage:cost-totals': () => this.readUsageCostTotals()
+      'usage:cost-totals': () => this.readUsageCostTotals(),
+      'usage:data-version': () => this.usageStatsStore.readDataVersion()
     };
   }
 

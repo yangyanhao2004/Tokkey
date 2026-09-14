@@ -370,6 +370,8 @@ export interface TokkeyApi {
   onLocalChatEvent(listener: LocalChatEventListener): () => void;
   readUsageQueryWindow(cursor: string | null): Promise<UsageQueryWindow>;
   readUsageCostTotals(): Promise<UsageCostTotals>;
+  /** Lightweight change check for router writes from another SQLite connection. */
+  readUsageDataVersion(): Promise<number | null>;
 }
 
 /** The only message roles the local text-chat runtime accepts in phase one. */

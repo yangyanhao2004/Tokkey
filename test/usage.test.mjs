@@ -380,6 +380,45 @@ test('reports no usage when the router has never recorded any', { skip: skipWith
   assert.deepEqual(await store.readCostTotals(), { spendUsd: 0, savedUsd: 0 });
 });
 
+test('detects committed WAL inserts, updates, and deletes from the router connection', { skip: skipWithoutSqlite }, async (t) => {
+  const { database, store } = await usageFixture(t);
+  database.exec('PRAGMA journal_mode = WAL');
+  const initialVersion = store.readDataVersion();
+  assert.equal(store.readDataVersion(), initialVersion);
+
+  database.exec('BEGIN');
+  seedTwoQueries(database);
+  // Uncommitted writes must not trigger a display of data another reader cannot see.
+  assert.equal(store.readDataVersion(), initialVersion);
+  assert.equal((await store.readQueryWindow(null)).queries.length, 0);
+  database.exec('COMMIT');
+  const insertedVersion = store.readDataVersion();
+  assert.notEqual(insertedVersion, initialVersion);
+  assert.equal((await store.readQueryWindow(null)).queries.length, 2);
+
+  database.exec('UPDATE usage_calls SET output_tokens = output_tokens + 100');
+  const updatedVersion = store.readDataVersion();
+  assert.notEqual(updatedVersion, insertedVersion);
+  const [query] = (await store.readQueryWindow(null)).queries;
+  assert.ok(query.steps.every((step) => step.outputTokens >= 100));
+
+  database.exec('DELETE FROM usage_calls');
+  assert.notEqual(store.readDataVersion(), updatedVersion);
+  assert.equal((await store.readQueryWindow(null)).queries[0].totalTokens, 0);
+});
+
+test('discovers usage tables created after the dashboard has opened', { skip: skipWithoutSqlite }, async (t) => {
+  const { database, store } = await usageFixture(t, { withSchema: false });
+  assert.equal(store.readDataVersion(), null);
+  assert.deepEqual((await store.readQueryWindow(null)).queries, []);
+
+  database.exec(ROUTER_USAGE_SCHEMA);
+  seedTwoQueries(database);
+
+  assert.equal(typeof store.readDataVersion(), 'number');
+  assert.equal((await store.readQueryWindow(null)).queries.length, 2);
+});
+
 test('reports no usage when the database file does not exist yet', { skip: skipWithoutSqlite }, async (t) => {
   const { UsageStatsStore } = await import('../dist/main/usage/UsageStatsStore.js');
   const directory = mkdtempSync(path.join(tmpdir(), 'tokkey-usage-missing-'));

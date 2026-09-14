@@ -124,6 +124,17 @@ export class UsageStatsStore {
   }
 
   /**
+   * Detects committed writes from the router's separate connection, including WAL
+   * commits. Compare values only on this persistent connection, never across stores.
+   */
+  readDataVersion(): number | null {
+    const database = this.connect();
+    if (!database) return null;
+    const row = database.prepare('PRAGMA data_version').get();
+    return UsageStatsStore.numberValue(row, 'data_version');
+  }
+
+  /**
    * One batch of queries, newest first, each carrying the calls it was routed
    * through. Pass null for the newest batch, then the previous result's
    * `nextCursor` for each batch after it.
@@ -418,15 +429,15 @@ export class UsageStatsStore {
 
   /**
    * Opens the database, or reports that there is nothing to read. The tables
-   * arrive with the router's first recorded call, so their absence is checked
-   * once per connection rather than assumed either way.
+   * arrive with the router's first recorded call, so a missing schema is retried
+   * on later reads even when the app already opened the database.
    */
   private connect(): DatabaseSync | null {
-    if (this.database) return this.hasUsageTables ? this.database : null;
+    if (this.database && this.hasUsageTables) return this.database;
     if (!existsSync(this.databasePath)) return null;
 
     try {
-      const database = this.openDatabase(this.databasePath);
+      const database = this.database ?? this.openDatabase(this.databasePath);
       this.database = database;
       this.hasUsageTables = REQUIRED_TABLES.every((table) =>
         UsageStatsStore.tableExists(database, table)
@@ -434,7 +445,7 @@ export class UsageStatsStore {
       return this.hasUsageTables ? database : null;
     } catch (error) {
       console.error('[Usage] Could not open the usage database:', error);
-      return null;
+      throw error;
     }
   }
 
