@@ -369,7 +369,7 @@ export interface TokkeyApi {
   cancelLocalChatTurn(turnId: string): Promise<void>;
   onLocalChatEvent(listener: LocalChatEventListener): () => void;
   readUsageQueryWindow(cursor: string | null): Promise<UsageQueryWindow>;
-  readUsageTokenTotals(): Promise<UsageTokenTotals>;
+  readUsageCostTotals(): Promise<UsageCostTotals>;
 }
 
 /** The only message roles the local text-chat runtime accepts in phase one. */
@@ -954,6 +954,10 @@ export interface UsageQueryStep {
   readonly outputTokens: number;
   /** Input and output plus the cache tokens, which belong to neither. */
   readonly totalTokens: number;
+  /** Money spent upstream. Zero for a call a local model served. */
+  readonly spendUsd: number;
+  /** What a cloud model would have charged for the same tokens. Zero for a cloud call. */
+  readonly savedUsd: number;
   /** False for a call the router could not finish, whose tokens still counted. */
   readonly isComplete: boolean;
 }
@@ -972,6 +976,9 @@ export interface UsageQueryRecord {
   readonly inputTokens: number;
   readonly outputTokens: number;
   readonly totalTokens: number;
+  /** Every step's spend, and every step's saving, added up. */
+  readonly spendUsd: number;
+  readonly savedUsd: number;
 }
 
 /**
@@ -990,11 +997,17 @@ export interface UsageQueryWindow {
   readonly nextCursor: string | null;
 }
 
-/** Every token this machine has put through the router. */
-export interface UsageTokenTotals {
-  readonly totalTokens: number;
-  /** Tokens fed to the models. */
-  readonly prefillTokens: number;
-  /** Tokens the models generated. */
-  readonly decodeTokens: number;
+/**
+ * What every call the router has made came to, over all history.
+ *
+ * Money only. The token figures on the "Local AI usage" card describe what this
+ * machine's own models ran, which is not what the router records: its tables count
+ * cloud calls too, so totalling them there would have answered a different question
+ * than the card asks.
+ */
+export interface UsageCostTotals {
+  /** What the Router card reports as spent, over all history. */
+  readonly spendUsd: number;
+  /** What the Router card reports as saved by serving calls locally. */
+  readonly savedUsd: number;
 }

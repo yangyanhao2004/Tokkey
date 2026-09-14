@@ -2,12 +2,14 @@ import { existsSync } from 'node:fs';
 import os from 'node:os';
 import type { DatabaseSync } from 'node:sqlite';
 import { tokkeyDatabasePath } from '../storage/TokkeyDatabase';
+import CallCostCalculator, { type CallCost, type CallTokenCounts } from './CallCostCalculator';
+import ModelPriceCatalog from './ModelPriceCatalog';
 import {
   USAGE_QUERY_BATCH_SIZE,
   type UsageQueryRecord,
   type UsageQueryStep,
   type UsageQueryWindow,
-  type UsageTokenTotals
+  type UsageCostTotals
 } from '../../shared/types';
 
 /**
@@ -22,11 +24,10 @@ const REQUIRED_TABLES = ['usage_queries', 'usage_calls'] as const;
 /** An empty batch, which is what a machine whose router never ran reports. */
 const EMPTY_WINDOW: UsageQueryWindow = { queries: [], nextCursor: null };
 
-const EMPTY_TOTALS: UsageTokenTotals = {
-  totalTokens: 0,
-  prefillTokens: 0,
-  decodeTokens: 0
-};
+const EMPTY_TOTALS: UsageCostTotals = { spendUsd: 0, savedUsd: 0 };
+
+/** The profile table naming each gateway route, read only to price a route by model. */
+const MODEL_PROFILES_TABLE = 'model_profiles';
 
 export interface UsageStatsStoreOptions {
   homeDirectory?: string;
@@ -34,6 +35,8 @@ export interface UsageStatsStoreOptions {
   openDatabase?: (databasePath: string) => DatabaseSync;
   /** Overridden only by tests that record traffic under another account. */
   userId?: string;
+  /** Overridden by tests, which must price calls without reaching the network. */
+  priceCatalog?: ModelPriceCatalog;
 }
 
 /** One row of `usage_queries`, before its calls are attached. */
@@ -43,6 +46,11 @@ interface QueryRow {
   query_text: string;
   started_at: string;
   started_at_epoch_ms: number;
+  /** How the router served this query: `orchestrate` or `proxy`. */
+  mode: string;
+  /** The gateway routes this query treated as local, and as cloud. */
+  local_routes: string[];
+  cloud_routes: string[];
 }
 
 /** Where one batch resumes: the ordering key of the last row already drawn. */
@@ -58,6 +66,8 @@ interface CallRow {
   turn_id: string;
   step_idx: number;
   role: string;
+  /** The gateway route, which is what the query's two route lists name. */
+  route: string;
   model: string;
   input_tokens: number;
   output_tokens: number;
@@ -92,6 +102,7 @@ export class UsageStatsStore {
   private readonly databasePath: string;
   private readonly openDatabase: (databasePath: string) => DatabaseSync;
   private readonly userId: string;
+  private readonly priceCatalog: ModelPriceCatalog;
 
   private database: DatabaseSync | null = null;
   /** Null until the first connection attempt decides whether there is one. */
@@ -102,6 +113,7 @@ export class UsageStatsStore {
     this.databasePath = options.databasePath ?? tokkeyDatabasePath(homeDirectory);
     this.openDatabase = options.openDatabase ?? UsageStatsStore.openSqliteDatabase;
     this.userId = options.userId ?? DEFAULT_USAGE_USER_ID;
+    this.priceCatalog = options.priceCatalog ?? new ModelPriceCatalog({ homeDirectory });
   }
 
   /** Releases the SQLite handle for test cleanup or an explicit caller teardown. */
@@ -116,9 +128,12 @@ export class UsageStatsStore {
    * through. Pass null for the newest batch, then the previous result's
    * `nextCursor` for each batch after it.
    */
-  readQueryWindow(cursor: string | null): UsageQueryWindow {
+  async readQueryWindow(cursor: string | null): Promise<UsageQueryWindow> {
     const database = this.connect();
     if (!database) return EMPTY_WINDOW;
+
+    // Resolved once before the batch is priced; the catalog holds it thereafter.
+    await this.priceCatalog.load();
 
     // One row more than the batch answers "is there another batch?" without a
     // second query and without counting the whole table.
@@ -135,30 +150,99 @@ export class UsageStatsStore {
   }
 
   /**
-   * Every token this machine has put through the router, which is what the
-   * "Local AI usage" card counts. Prefill is everything fed to the models,
-   * cache reads and writes included, and decode is what they generated, so the
-   * two add up to the total.
+   * What every recorded call came to, which is what the Router card reports.
+   *
+   * Tokens are counted per call for the listing, but not totalled here: the card
+   * that shows token figures describes this machine's own models, and the router's
+   * tables count its cloud calls alongside them.
    */
-  readTokenTotals(): UsageTokenTotals {
+  async readCostTotals(): Promise<UsageCostTotals> {
     const database = this.connect();
     if (!database) return EMPTY_TOTALS;
 
-    const row = database
-      .prepare(
-        `SELECT COALESCE(SUM(input_tokens + cache_creation_tokens + cache_read_tokens), 0) AS prefill_tokens,
-                COALESCE(SUM(output_tokens), 0) AS decode_tokens,
-                COALESCE(SUM(total_tokens), 0)  AS total_tokens
-           FROM usage_calls
-          WHERE user_id = ?`
-      )
-      .get(this.userId) as Record<string, unknown> | undefined;
+    await this.priceCatalog.load();
 
-    return {
-      totalTokens: UsageStatsStore.numberValue(row, 'total_tokens'),
-      prefillTokens: UsageStatsStore.numberValue(row, 'prefill_tokens'),
-      decodeTokens: UsageStatsStore.numberValue(row, 'decode_tokens')
-    };
+    // Rates are per model, so money cannot be one SUM over the whole table. Tokens are
+    // folded per (route, model, route-lists) group instead - a handful of rows however
+    // long the history - and each group is priced once.
+    const groups = database
+      .prepare(
+        `SELECT c.route, c.model, q.local_routes, q.cloud_routes,
+                COALESCE(SUM(c.input_tokens), 0)          AS input_tokens,
+                COALESCE(SUM(c.output_tokens), 0)         AS output_tokens,
+                COALESCE(SUM(c.cache_creation_tokens), 0) AS cache_creation_tokens,
+                COALESCE(SUM(c.cache_read_tokens), 0)     AS cache_read_tokens
+           FROM usage_calls c
+           LEFT JOIN usage_queries q
+             ON  q.user_id    = c.user_id
+             AND q.session_id = c.session_id
+             AND q.turn_id    = c.turn_id
+          WHERE c.user_id = ?
+          GROUP BY c.route, c.model, q.local_routes, q.cloud_routes`
+      )
+      .all(this.userId)
+      .map((row) => row as Record<string, unknown>);
+
+    // The groups themselves say which model answered each route, so a stand-in can be
+    // named without the profile table - which belongs to the app, not the router, and
+    // may not be there at all. Profiles fill in a route no call has used yet.
+    const routeModels = this.readRouteModels(database);
+    for (const group of groups) {
+      const route = UsageStatsStore.textValue(group, 'route');
+      const model = UsageStatsStore.textValue(group, 'model');
+      if (route && model) routeModels.set(route, model);
+    }
+
+    const totals = { spendUsd: 0, savedUsd: 0 };
+
+    for (const group of groups) {
+      const cost = this.priceCall(UsageStatsStore.tokenCounts(group), {
+        route: UsageStatsStore.textValue(group, 'route'),
+        model: UsageStatsStore.textValue(group, 'model'),
+        localRoutes: UsageStatsStore.jsonStringArray(group, 'local_routes'),
+        cloudModel: UsageStatsStore.firstCloudModel(
+          UsageStatsStore.jsonStringArray(group, 'cloud_routes'),
+          routeModels,
+          null
+        )
+      });
+
+      totals.spendUsd += cost.spendUsd;
+      totals.savedUsd += cost.savedUsd;
+    }
+
+    return totals;
+  }
+
+  /**
+   * Prices one call, or one group of calls sharing a model and a query's route lists.
+   *
+   * A call is local when its route is one the query listed as local; everything else
+   * billed, which is what makes a `proxy` query - whose route appears in neither list -
+   * count as the upstream spend it is.
+   */
+  private priceCall(
+    tokens: CallTokenCounts,
+    context: {
+      route: string;
+      model: string;
+      localRoutes: readonly string[];
+      cloudModel: string | null;
+    }
+  ): CallCost {
+    if (context.localRoutes.includes(context.route)) {
+      // Served on this machine: nothing was spent, and what a cloud model would have
+      // charged for these same tokens is what that avoided.
+      return CallCostCalculator.localCall(
+        tokens,
+        context.cloudModel ? this.priceCatalog.ratesFor(context.cloudModel) : null
+      );
+    }
+
+    const rates = this.priceCatalog.ratesFor(context.model);
+    // An unpriced model reports nothing rather than zero dollars, which would read as
+    // a call that was free.
+    return rates ? CallCostCalculator.cloudCall(tokens, rates) : CallCostCalculator.unpriced();
   }
 
   /**
@@ -172,7 +256,8 @@ export class UsageStatsStore {
    */
   private readQueryRows(database: DatabaseSync, cursor: QueryCursor | null): QueryRow[] {
     const limit = USAGE_QUERY_BATCH_SIZE + 1;
-    const selection = `SELECT session_id, turn_id, query_text, started_at, started_at_epoch_ms
+    const selection = `SELECT session_id, turn_id, query_text, started_at, started_at_epoch_ms,
+                  mode, local_routes, cloud_routes
            FROM usage_queries
           WHERE user_id = ?`;
     const ordering = `ORDER BY started_at_epoch_ms DESC, session_id DESC, turn_id DESC
@@ -237,10 +322,14 @@ export class UsageStatsStore {
     const stepsByQuery = new Map<string, UsageQueryStep[]>();
     if (queryRows.length === 0) return stepsByQuery;
 
+    const queriesByKey = new Map(
+      queryRows.map((row) => [UsageStatsStore.queryKey(row.session_id, row.turn_id), row])
+    );
+
     const placeholders = queryRows.map(() => '?').join(', ');
     const callRows = database
       .prepare(
-        `SELECT session_id, turn_id, step_idx, role, model,
+        `SELECT session_id, turn_id, step_idx, role, route, model,
                 input_tokens, output_tokens,
                 cache_creation_tokens, cache_read_tokens,
                 total_tokens, status
@@ -252,25 +341,53 @@ export class UsageStatsStore {
       .all(this.userId, ...queryRows.map((row) => row.turn_id))
       .map((row) => UsageStatsStore.toCallRow(row as Record<string, unknown>));
 
+    // Grouped before pricing, so a query's own calls can supply the model behind its
+    // first cloud route without a second read.
+    const callsByQuery = new Map<string, CallRow[]>();
     callRows.forEach((call) => {
       // Turn ids are unique in practice, but a query is identified by session
       // and turn together, so the grouping key is too.
       const key = UsageStatsStore.queryKey(call.session_id, call.turn_id);
-      const steps = stepsByQuery.get(key) ?? [];
-      steps.push({
-        modelName: call.model,
-        role: call.role,
-        stepIndex: call.step_idx,
-        // Cache tokens were fed to the model like any other input, so they
-        // count as input here. `total_tokens` is generated as input + output +
-        // both cache columns, so this is what makes Input + Output = Tokens.
-        inputTokens:
-          call.input_tokens + call.cache_creation_tokens + call.cache_read_tokens,
-        outputTokens: call.output_tokens,
-        totalTokens: call.total_tokens,
-        isComplete: call.status === 'ok'
-      });
-      stepsByQuery.set(key, steps);
+      callsByQuery.set(key, [...(callsByQuery.get(key) ?? []), call]);
+    });
+
+    const routeModels = this.readRouteModels(database);
+
+    callsByQuery.forEach((calls, key) => {
+      const query = queriesByKey.get(key);
+      const cloudModel = UsageStatsStore.firstCloudModel(
+        query?.cloud_routes ?? [],
+        routeModels,
+        calls
+      );
+
+      stepsByQuery.set(
+        key,
+        calls.map((call) => {
+          const tokens = UsageStatsStore.callTokenCounts(call);
+          const cost = this.priceCall(tokens, {
+            route: call.route,
+            model: call.model,
+            localRoutes: query?.local_routes ?? [],
+            cloudModel
+          });
+
+          return {
+            modelName: call.model,
+            role: call.role,
+            stepIndex: call.step_idx,
+            // Cache tokens were fed to the model like any other input, so they
+            // count as input here. `total_tokens` is generated as input + output +
+            // both cache columns, so this is what makes Input + Output = Tokens.
+            inputTokens: tokens.inputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens,
+            outputTokens: tokens.outputTokens,
+            totalTokens: call.total_tokens,
+            spendUsd: cost.spendUsd,
+            savedUsd: cost.savedUsd,
+            isComplete: call.status === 'ok'
+          };
+        })
+      );
     });
 
     return stepsByQuery;
@@ -293,7 +410,9 @@ export class UsageStatsStore {
       steps,
       inputTokens: UsageStatsStore.sumOf(steps, 'inputTokens'),
       outputTokens: UsageStatsStore.sumOf(steps, 'outputTokens'),
-      totalTokens: UsageStatsStore.sumOf(steps, 'totalTokens')
+      totalTokens: UsageStatsStore.sumOf(steps, 'totalTokens'),
+      spendUsd: UsageStatsStore.sumOf(steps, 'spendUsd'),
+      savedUsd: UsageStatsStore.sumOf(steps, 'savedUsd')
     };
   }
 
@@ -333,9 +452,91 @@ export class UsageStatsStore {
 
   private static sumOf(
     steps: readonly UsageQueryStep[],
-    field: 'inputTokens' | 'outputTokens' | 'totalTokens'
+    field: 'inputTokens' | 'outputTokens' | 'totalTokens' | 'spendUsd' | 'savedUsd'
   ): number {
     return steps.reduce((running, step) => running + step[field], 0);
+  }
+
+  /**
+   * Which model stands in for a local call's cost.
+   *
+   * The query names its cloud tier by route, but a price is keyed by model, so the route
+   * has to be resolved to one. A call in the same query that used that route already
+   * says which model answered it; otherwise the profile that owns the route does.
+   */
+  private static firstCloudModel(
+    cloudRoutes: readonly string[],
+    routeModels: ReadonlyMap<string, string>,
+    calls: readonly CallRow[] | null
+  ): string | null {
+    const route = cloudRoutes[0];
+    if (!route) return null;
+    const served = calls?.find((call) => call.route === route);
+    return served?.model ?? routeModels.get(route) ?? null;
+  }
+
+  /**
+   * Every gateway route a saved profile owns, mapped to the model it fronts.
+   *
+   * `model_profiles` belongs to the app rather than the router, so its absence is an
+   * ordinary state - a route simply goes unresolved and nothing is claimed as saved.
+   */
+  private readRouteModels(database: DatabaseSync): Map<string, string> {
+    const routeModels = new Map<string, string>();
+    if (!UsageStatsStore.tableExists(database, MODEL_PROFILES_TABLE)) return routeModels;
+
+    try {
+      const rows = database
+        .prepare(`SELECT model_name, litellm_links FROM ${MODEL_PROFILES_TABLE}`)
+        .all() as Record<string, unknown>[];
+
+      for (const row of rows) {
+        const modelName = UsageStatsStore.textValue(row, 'model_name');
+        if (!modelName) continue;
+        const links = JSON.parse(UsageStatsStore.textValue(row, 'litellm_links') || '[]') as unknown;
+        if (!Array.isArray(links)) continue;
+        for (const link of links) {
+          const routeName = (link as Record<string, unknown>)?.modelName;
+          if (typeof routeName === 'string' && routeName) routeModels.set(routeName, modelName);
+        }
+      }
+    } catch (error) {
+      // Malformed profile JSON costs a stand-in model, not the whole listing.
+      console.error('[Usage] Could not read model profiles for pricing:', error);
+    }
+
+    return routeModels;
+  }
+
+  /** The four token buckets a cost is computed from, for one call. */
+  private static callTokenCounts(call: CallRow): CallTokenCounts {
+    return {
+      inputTokens: call.input_tokens,
+      outputTokens: call.output_tokens,
+      cacheCreationTokens: call.cache_creation_tokens,
+      cacheReadTokens: call.cache_read_tokens
+    };
+  }
+
+  /** The same four buckets, read from an aggregate row instead of a call. */
+  private static tokenCounts(row: Record<string, unknown>): CallTokenCounts {
+    return {
+      inputTokens: UsageStatsStore.numberValue(row, 'input_tokens'),
+      outputTokens: UsageStatsStore.numberValue(row, 'output_tokens'),
+      cacheCreationTokens: UsageStatsStore.numberValue(row, 'cache_creation_tokens'),
+      cacheReadTokens: UsageStatsStore.numberValue(row, 'cache_read_tokens')
+    };
+  }
+
+  /** A route list, which the router stores as a JSON array of route names. */
+  private static jsonStringArray(row: Record<string, unknown>, column: string): string[] {
+    try {
+      const parsed = JSON.parse(UsageStatsStore.textValue(row, column) || '[]') as unknown;
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+    } catch {
+      // A column written before the router added these lists, or written badly.
+      return [];
+    }
   }
 
   private static toQueryRow(row: Record<string, unknown>): QueryRow {
@@ -344,7 +545,10 @@ export class UsageStatsStore {
       turn_id: UsageStatsStore.textValue(row, 'turn_id'),
       query_text: UsageStatsStore.textValue(row, 'query_text'),
       started_at: UsageStatsStore.textValue(row, 'started_at'),
-      started_at_epoch_ms: UsageStatsStore.numberValue(row, 'started_at_epoch_ms')
+      started_at_epoch_ms: UsageStatsStore.numberValue(row, 'started_at_epoch_ms'),
+      mode: UsageStatsStore.textValue(row, 'mode'),
+      local_routes: UsageStatsStore.jsonStringArray(row, 'local_routes'),
+      cloud_routes: UsageStatsStore.jsonStringArray(row, 'cloud_routes')
     };
   }
 
@@ -354,6 +558,7 @@ export class UsageStatsStore {
       turn_id: UsageStatsStore.textValue(row, 'turn_id'),
       step_idx: UsageStatsStore.numberValue(row, 'step_idx'),
       role: UsageStatsStore.textValue(row, 'role'),
+      route: UsageStatsStore.textValue(row, 'route'),
       model: UsageStatsStore.textValue(row, 'model'),
       input_tokens: UsageStatsStore.numberValue(row, 'input_tokens'),
       output_tokens: UsageStatsStore.numberValue(row, 'output_tokens'),

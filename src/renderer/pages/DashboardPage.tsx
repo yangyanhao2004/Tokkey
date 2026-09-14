@@ -10,10 +10,10 @@ import {
   NO_QUERIES_TEXT,
   PAGE_TITLE,
   QUERIES_LOADING_TEXT,
+  routerStats,
   QUERY_BREAKDOWN_TITLE,
   queryTitle,
   RECENT_QUERIES_TITLE,
-  ROUTER_STATS,
   ROUTER_TITLE,
   LOCAL_USAGE_TITLE,
   stepCountLabel,
@@ -107,16 +107,22 @@ interface MetricColumnsProps {
   size: 'query' | 'step';
 }
 
-/** The token trio that ends every query and step row. */
+/** The Tokens/Spend/Saved trio that ends every query and step row. */
 function MetricColumns({ metrics, size }: MetricColumnsProps) {
   const valueClasses = size === 'query' ? 'text-[9px] leading-[11px]' : 'text-[8px] leading-[10px]';
 
   return (
     <div className="flex shrink-0 items-center gap-4">
       {metricColumns(metrics).map((column) => (
-        <div className="flex w-[34px] flex-col items-center gap-1" key={column.label}>
+        <div className="flex w-[52px] flex-col items-center gap-1" key={column.label}>
           <span className="text-[8px] leading-[10px] text-text-secondary">{column.label}</span>
-          <span className={`font-bold text-text-primary ${valueClasses}`}>{column.value}</span>
+          <span
+            className={`font-bold ${valueClasses} ${
+              column.isSaving ? 'text-status-ok-text' : 'text-text-primary'
+            }`}
+          >
+            {column.value}
+          </span>
         </div>
       ))}
     </div>
@@ -159,11 +165,7 @@ function QueryStepRow({ step, position }: { step: UsageQueryStep; position: numb
         {!step.isComplete && <span className="shrink-0 text-status-error-text">· incomplete</span>}
       </span>
       <MetricColumns
-        metrics={{
-          tokens: step.totalTokens,
-          inputTokens: step.inputTokens,
-          outputTokens: step.outputTokens
-        }}
+        metrics={{ tokens: step.totalTokens, spendUsd: step.spendUsd, savedUsd: step.savedUsd }}
         size="step"
       />
     </div>
@@ -209,11 +211,7 @@ function RecentQueryRow({ query, isExpanded, onToggle }: RecentQueryRowProps) {
 
         <span className="flex shrink-0 items-center gap-8">
           <MetricColumns
-            metrics={{
-              tokens: query.totalTokens,
-              inputTokens: query.inputTokens,
-              outputTokens: query.outputTokens
-            }}
+            metrics={{ tokens: query.totalTokens, spendUsd: query.spendUsd, savedUsd: query.savedUsd }}
             size="query"
           />
           <img
@@ -273,7 +271,7 @@ export function DashboardPage() {
     <PageShell title={PAGE_TITLE} testId="dashboard">
       <SectionCard title={LOCAL_USAGE_TITLE} testId="local-usage-card">
         <StatRow>
-          {localUsageStats(totals).map((stat, index) => (
+          {localUsageStats().map((stat, index) => (
             <StatCell
               key={stat.id}
               stat={stat}
@@ -286,7 +284,7 @@ export function DashboardPage() {
 
       <SectionCard title={ROUTER_TITLE} isFlexible testId="router-usage-card">
         <StatRow>
-          {ROUTER_STATS.map((stat) => (
+          {routerStats(totals).map((stat) => (
             <StatCell key={stat.id} stat={stat} isRecessed />
           ))}
         </StatRow>

@@ -42,7 +42,7 @@ import type {
   SystemPreferencesPatch,
   SystemSettingsState,
   UsageQueryWindow,
-  UsageTokenTotals
+  UsageCostTotals
 } from '../shared/types';
 import type { McpCatalogScan } from '../shared/types';
 import type { InstalledLocalModel, LocalModelCatalogRequest } from '../shared/types';
@@ -333,7 +333,7 @@ export default class IpcController {
       'router:start': () => this.startRouterRuntime(),
       'router:stop': () => this.stopRouterRuntime(),
       'usage:query-window': (cursor: unknown) => this.readUsageQueryWindow(cursor),
-      'usage:totals': () => this.readUsageTokenTotals()
+      'usage:cost-totals': () => this.readUsageCostTotals()
     };
   }
 
@@ -343,13 +343,13 @@ export default class IpcController {
    * list has to draw something, and there is no position a caller could ask for
    * that has no honest answer.
    */
-  private readUsageQueryWindow(cursor: unknown): UsageQueryWindow {
+  private readUsageQueryWindow(cursor: unknown): Promise<UsageQueryWindow> {
     return this.usageStatsStore.readQueryWindow(typeof cursor === 'string' ? cursor : null);
   }
 
-  /** The token figures on the Dashboard's "Local AI usage" card. */
-  private readUsageTokenTotals(): UsageTokenTotals {
-    return this.usageStatsStore.readTokenTotals();
+  /** The two money figures on the Dashboard's Router card. */
+  private readUsageCostTotals(): Promise<UsageCostTotals> {
+    return this.usageStatsStore.readCostTotals();
   }
 
   /** Sends one payload to every live window, for main-process-driven state. */

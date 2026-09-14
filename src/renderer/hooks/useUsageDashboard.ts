@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { UsageQueryRecord, UsageTokenTotals } from '../../shared/types';
+import type { UsageCostTotals, UsageQueryRecord } from '../../shared/types';
 
 /** What the Dashboard draws, and what it can do to the listing under it. */
 export interface UsageDashboard {
   /** Every query read so far, newest first. Empty before the first batch. */
   queries: readonly UsageQueryRecord[];
-  totals: UsageTokenTotals | null;
+  totals: UsageCostTotals | null;
   /** True only while no batch has arrived; loading more keeps the rows up. */
   isLoading: boolean;
   /** True while a further batch is in flight, which is what dims the button. */
@@ -30,7 +30,7 @@ const READ_FAILED_MESSAGE = 'Usage history could not be read.';
 export function useUsageDashboard(): UsageDashboard {
   const [queries, setQueries] = useState<readonly UsageQueryRecord[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [totals, setTotals] = useState<UsageTokenTotals | null>(null);
+  const [totals, setTotals] = useState<UsageCostTotals | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +69,7 @@ export function useUsageDashboard(): UsageDashboard {
     isMounted.current = true;
     void appendBatch(null);
     // Independent of the listing, so the totals do not wait on its join.
-    window.tokkey.readUsageTokenTotals().then(
+    window.tokkey.readUsageCostTotals().then(
       (tokenTotals) => {
         if (isMounted.current) setTotals(tokenTotals);
       },

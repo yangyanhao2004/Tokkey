@@ -134,7 +134,7 @@ class PreloadBridge {
         return () => ipcRenderer.removeListener('chat:event', forwardEvent);
       },
       readUsageQueryWindow: (cursor) => ipcRenderer.invoke('usage:query-window', cursor),
-      readUsageTokenTotals: () => ipcRenderer.invoke('usage:totals')
+      readUsageCostTotals: () => ipcRenderer.invoke('usage:cost-totals')
     };
     contextBridge.exposeInMainWorld('tokkey', api);
   }

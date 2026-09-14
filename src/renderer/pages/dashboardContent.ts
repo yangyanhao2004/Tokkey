@@ -10,7 +10,7 @@
  * values and are marked as such below.
  */
 
-import type { UsageQueryRecord, UsageTokenTotals } from '../../shared/types';
+import type { UsageCostTotals, UsageQueryRecord } from '../../shared/types';
 
 /** Shared with the sidebar so every page resolves assets from one place. */
 export { NAV_ICON_BASE_PATH as ICON_BASE_PATH } from '../navigation';
@@ -34,52 +34,46 @@ export const LOCAL_USAGE_TITLE = 'Local AI usage';
 const PENDING_VALUE = '—';
 
 /**
- * The "Local AI usage" strip. Prefill is everything fed to the models, cache
- * reads and writes included, and decode is what they generated, so the two add
- * up to the total.
+ * The "Local AI usage" strip: what this machine's own models have run.
+ *
+ * Awaiting a source. These were read from the router's tables, which count its
+ * cloud calls alongside anything local and so answered a different question than
+ * the card asks. The figures stay blank rather than reporting router traffic as
+ * local work.
  */
-export function localUsageStats(totals: UsageTokenTotals | null): readonly UsageStat[] {
+export function localUsageStats(): readonly UsageStat[] {
   return [
-    {
-      id: 'total-tokens',
-      label: 'Total tokens processed',
-      value: totals ? formatTokenCount(totals.totalTokens) : PENDING_VALUE
-    },
-    {
-      id: 'prefill-tokens',
-      label: 'Total prefill token',
-      value: totals ? formatTokenCount(totals.prefillTokens) : PENDING_VALUE
-    },
-    {
-      id: 'decode-tokens',
-      label: 'Total decode token',
-      value: totals ? formatTokenCount(totals.decodeTokens) : PENDING_VALUE
-    }
+    { id: 'total-tokens', label: 'Total tokens processed', value: PENDING_VALUE },
+    { id: 'prefill-tokens', label: 'Total prefill token', value: PENDING_VALUE },
+    { id: 'decode-tokens', label: 'Total decode token', value: PENDING_VALUE }
   ];
 }
 
 export const ROUTER_TITLE = 'Router';
 
 /**
- * Still the design's reference figures: no call is priced yet, so there is
- * nothing to add up. Replace both values once a price list exists - the rest of
- * the card already draws real traffic.
+ * The Router card's two money figures, added up over every call on record.
+ *
+ * Spend is what left for a cloud provider; saved is what the calls a local model
+ * answered would have cost had a cloud model answered them instead.
  */
-export const ROUTER_STATS: readonly UsageStat[] = [
-  {
-    id: 'router-spend',
-    label: 'Router Spend',
-    value: '$12.40',
-    footnote: 'Used from your initial $30 free credit'
-  },
-  {
-    id: 'router-saved',
-    label: 'Estimated saved cost',
-    value: '$18.70',
-    footnote: 'Compared with the cost of an equally capable cloud model.',
-    isSaving: true
-  }
-];
+export function routerStats(totals: UsageCostTotals | null): readonly UsageStat[] {
+  return [
+    {
+      id: 'router-spend',
+      label: 'Router Spend',
+      value: totals ? formatUsd(totals.spendUsd) : PENDING_VALUE,
+      footnote: 'Used from your initial $30 free credit'
+    },
+    {
+      id: 'router-saved',
+      label: 'Estimated saved cost',
+      value: totals ? formatUsd(totals.savedUsd) : PENDING_VALUE,
+      footnote: 'Compared with the cost of an equally capable cloud model.',
+      isSaving: true
+    }
+  ];
+}
 
 export const RECENT_QUERIES_TITLE = 'Recent queries';
 export const QUERY_BREAKDOWN_TITLE = 'Query breakdown';
@@ -92,30 +86,59 @@ export const NO_QUERIES_TEXT = 'No queries yet. Anything you route through Tokke
 /** What a query with no recorded calls is titled, rather than an empty row. */
 const UNTITLED_QUERY_TEXT = 'Untitled query';
 
-/** Tokens counted on one query or one of its steps. */
+/** What one query, or one of its steps, counted and cost. */
 export interface QueryMetrics {
   readonly tokens: number;
-  readonly inputTokens: number;
-  readonly outputTokens: number;
+  readonly spendUsd: number;
+  readonly savedUsd: number;
 }
 
 /** One of the three figures a query or step row reports. */
 export interface MetricColumn {
   readonly label: string;
   readonly value: string;
+  /** Money the router did not spend, which the design prints in green. */
+  readonly isSaving?: boolean;
 }
 
 /**
- * The three columns in the order the design prints them. Query rows and step
- * rows both read from here so the two never drift apart. Spend and saved belong
- * beside these once calls are priced.
+ * The three columns in the order the design prints them (Figma 756:815 and
+ * 768:1780). Query rows and step rows both read from here so the two never
+ * drift apart.
  */
 export function metricColumns(metrics: QueryMetrics): readonly MetricColumn[] {
   return [
     { label: 'Tokens', value: formatTokenCount(metrics.tokens) },
-    { label: 'Input', value: formatTokenCount(metrics.inputTokens) },
-    { label: 'Output', value: formatTokenCount(metrics.outputTokens) }
+    { label: 'Spend', value: formatRowUsd(metrics.spendUsd) },
+    { label: 'Saved', value: formatRowUsd(metrics.savedUsd), isSaving: true }
   ];
+}
+
+/** The Router card's headline figures, at the two decimals money is read in. */
+export function formatUsd(amountUsd: number): string {
+  return `$${spendableAmount(amountUsd).toFixed(2)}`;
+}
+
+/**
+ * One row's figure, which needs more decimals than the card does.
+ *
+ * Nearly every call costs around a cent, so two decimals round them all to the
+ * same "$0.01" and the column stops saying anything: a step of $0.0115 and one
+ * of $0.0103 are a real 12% apart. Four decimals below a dollar keep that;
+ * above a dollar they are noise, so two is enough there.
+ */
+export function formatRowUsd(amountUsd: number): string {
+  const amount = spendableAmount(amountUsd);
+  if (amount === 0) return '$0.00';
+  if (amount >= 1) return `$${amount.toFixed(2)}`;
+  // Something was spent, but less than the smallest figure this can print. A
+  // bound is honest where "$0.0000" would read as costing nothing at all.
+  return amount < 0.0001 ? '<$0.0001' : `$${amount.toFixed(4)}`;
+}
+
+/** Guards every money figure against a negative or non-finite rate upstream. */
+function spendableAmount(amountUsd: number): number {
+  return Number.isFinite(amountUsd) && amountUsd > 0 ? amountUsd : 0;
 }
 
 /** The line under a query title, which counts the models it was routed to. */
