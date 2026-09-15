@@ -55,16 +55,18 @@ export function useInstalledModels(): InstalledModels {
     const unsubscribe = window.tokkey.onLocalModelRuntimeStateChanged((next) => {
       runtimeEventVersionRef.current += 1;
       setRuntime(next);
+      setRunningModelId(next.phase === 'running' ? next.modelId : null);
     });
     void Promise.all([
       window.tokkey.listInstalledLocalModels(),
-      window.tokkey.getLocalChatRuntimeState(),
       window.tokkey.getLocalModelRuntimeState()
-    ]).then(([nextModels, chatRuntime, nextRuntime]) => {
+    ]).then(([nextModels, nextRuntime]) => {
       if (!isMountedRef.current) return;
       setModels(nextModels);
-      setRunningModelId(chatRuntime.status === 'ready' ? chatRuntime.model?.id ?? null : null);
-      if (runtimeEventVersionRef.current === initialRuntimeVersion) setRuntime(nextRuntime);
+      if (runtimeEventVersionRef.current === initialRuntimeVersion) {
+        setRuntime(nextRuntime);
+        setRunningModelId(nextRuntime.phase === 'running' ? nextRuntime.modelId : null);
+      }
       setScanError(null);
     }).catch((cause) => {
       if (isMountedRef.current) {
