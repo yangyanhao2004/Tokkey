@@ -979,6 +979,12 @@ export interface UsageQueryRecord {
   /** The router's own local timestamp, kept for display. */
   readonly startedAt: string;
   readonly startedAtEpochMs: number;
+  /**
+   * How long the query took: from when it was asked to when the last of its
+   * calls finished. Null while nothing has finished yet, which is a query still
+   * being answered rather than one that took no time.
+   */
+  readonly durationMs: number | null;
   readonly steps: readonly UsageQueryStep[];
   readonly inputTokens: number;
   readonly outputTokens: number;

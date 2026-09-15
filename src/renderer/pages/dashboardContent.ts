@@ -140,7 +140,7 @@ function spendableAmount(amountUsd: number): number {
   return Number.isFinite(amountUsd) && amountUsd > 0 ? amountUsd : 0;
 }
 
-/** The line under a query title, which counts the models it was routed to. */
+/** How many models a query was routed to, as its subtitle names it. */
 export function stepCountLabel(stepCount: number): string {
   return stepCount === 1 ? '1 step' : `${stepCount} steps`;
 }
@@ -148,6 +148,44 @@ export function stepCountLabel(stepCount: number): string {
 /** The title a query row prints, which is the question as it was asked. */
 export function queryTitle(query: UsageQueryRecord): string {
   return query.queryText.trim() || UNTITLED_QUERY_TEXT;
+}
+
+const SECOND_MS = 1_000;
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
+
+/**
+ * How long a query took, at the coarsest unit that still says something: a
+ * sub-second call is read in milliseconds, a normal one in seconds, and a long
+ * one in the minutes and hours nobody counts seconds in.
+ *
+ * Empty for a query whose calls have not finished, which has no length yet.
+ */
+export function formatQueryDuration(durationMs: number | null): string {
+  if (durationMs === null || !Number.isFinite(durationMs) || durationMs < 0) return '';
+  if (durationMs < SECOND_MS) return `${Math.round(durationMs)}ms`;
+  if (durationMs < MINUTE_MS) return `${(durationMs / SECOND_MS).toFixed(1)}s`;
+
+  // Rounded to whole seconds first, so carrying 59.7s never prints as "1m 60s".
+  const totalSeconds = Math.round(durationMs / SECOND_MS);
+  const minutes = Math.floor(totalSeconds / 60);
+  if (durationMs < HOUR_MS) return `${minutes}m ${totalSeconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+}
+
+/**
+ * The line under a query title: how many models answered it, how long it took,
+ * and when it ran. A part with nothing to say is left out rather than printed
+ * as a gap between two separators.
+ */
+export function querySubtitle(query: UsageQueryRecord): string {
+  return [
+    stepCountLabel(query.steps.length),
+    formatQueryDuration(query.durationMs),
+    formatQueryTime(query.startedAtEpochMs)
+  ]
+    .filter((part) => part.length > 0)
+    .join(' · ');
 }
 
 /**

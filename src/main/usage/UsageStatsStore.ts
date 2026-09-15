@@ -53,6 +53,19 @@ interface QueryRow {
   cloud_routes: string[];
 }
 
+/**
+ * One query's calls, with the moment the last of them finished - which is what
+ * says how long the query took, and is not derivable from the steps themselves.
+ */
+interface QueryTimeline {
+  steps: UsageQueryStep[];
+  /** The latest recorded end among the calls, or 0 while none has finished. */
+  lastEndedAtEpochMs: number;
+}
+
+/** What a query whose calls have not been recorded yet reads as. */
+const EMPTY_TIMELINE: QueryTimeline = { steps: [], lastEndedAtEpochMs: 0 };
+
 /** Where one batch resumes: the ordering key of the last row already drawn. */
 interface QueryCursor {
   startedAtEpochMs: number;
@@ -69,6 +82,8 @@ interface CallRow {
   /** The gateway route, which is what the query's two route lists name. */
   route: string;
   model: string;
+  /** When the call finished, which is what a query's duration is measured to. */
+  ended_at_epoch_ms: number;
   input_tokens: number;
   output_tokens: number;
   cache_creation_tokens: number;
@@ -151,11 +166,11 @@ export class UsageStatsStore {
     const fetched = this.readQueryRows(database, UsageStatsStore.decodeCursor(cursor));
     const hasMore = fetched.length > USAGE_QUERY_BATCH_SIZE;
     const queryRows = hasMore ? fetched.slice(0, USAGE_QUERY_BATCH_SIZE) : fetched;
-    const stepsByQuery = this.readStepsFor(database, queryRows);
+    const timelines = this.readTimelinesFor(database, queryRows);
     const lastRow = queryRows[queryRows.length - 1];
 
     return {
-      queries: queryRows.map((row) => this.toQueryRecord(row, stepsByQuery)),
+      queries: queryRows.map((row) => this.toQueryRecord(row, timelines)),
       nextCursor: hasMore && lastRow ? UsageStatsStore.encodeCursor(lastRow) : null
     };
   }
@@ -321,17 +336,18 @@ export class UsageStatsStore {
   }
 
   /**
-   * The calls behind the queries on screen, keyed by query. This is the join,
+   * The calls behind the queries on screen, and when each query's last call
+   * ended, keyed by query. This is the join,
    * and it is restricted to the page's own turns: `idx_usage_calls_by_turn`
    * leads with `turn_id`, so the twenty lookups stay indexed however much
    * history sits behind them.
    */
-  private readStepsFor(
+  private readTimelinesFor(
     database: DatabaseSync,
     queryRows: readonly QueryRow[]
-  ): Map<string, UsageQueryStep[]> {
-    const stepsByQuery = new Map<string, UsageQueryStep[]>();
-    if (queryRows.length === 0) return stepsByQuery;
+  ): Map<string, QueryTimeline> {
+    const timelines = new Map<string, QueryTimeline>();
+    if (queryRows.length === 0) return timelines;
 
     const queriesByKey = new Map(
       queryRows.map((row) => [UsageStatsStore.queryKey(row.session_id, row.turn_id), row])
@@ -340,7 +356,7 @@ export class UsageStatsStore {
     const placeholders = queryRows.map(() => '?').join(', ');
     const callRows = database
       .prepare(
-        `SELECT session_id, turn_id, step_idx, role, route, model,
+        `SELECT session_id, turn_id, step_idx, role, route, model, ended_at_epoch_ms,
                 input_tokens, output_tokens,
                 cache_creation_tokens, cache_read_tokens,
                 total_tokens, status
@@ -372,44 +388,48 @@ export class UsageStatsStore {
         calls
       );
 
-      stepsByQuery.set(
-        key,
-        calls.map((call) => {
-          const tokens = UsageStatsStore.callTokenCounts(call);
-          const cost = this.priceCall(tokens, {
-            route: call.route,
-            model: call.model,
-            localRoutes: query?.local_routes ?? [],
-            cloudModel
-          });
+      const steps = calls.map((call) => {
+        const tokens = UsageStatsStore.callTokenCounts(call);
+        const cost = this.priceCall(tokens, {
+          route: call.route,
+          model: call.model,
+          localRoutes: query?.local_routes ?? [],
+          cloudModel
+        });
 
-          return {
-            modelName: call.model,
-            role: call.role,
-            stepIndex: call.step_idx,
-            // Cache tokens were fed to the model like any other input, so they
-            // count as input here. `total_tokens` is generated as input + output +
-            // both cache columns, so this is what makes Input + Output = Tokens.
-            inputTokens: tokens.inputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens,
-            outputTokens: tokens.outputTokens,
-            totalTokens: call.total_tokens,
-            spendUsd: cost.spendUsd,
-            savedUsd: cost.savedUsd,
-            isComplete: call.status === 'ok'
-          };
-        })
-      );
+        return {
+          modelName: call.model,
+          role: call.role,
+          stepIndex: call.step_idx,
+          // Cache tokens were fed to the model like any other input, so they
+          // count as input here. `total_tokens` is generated as input + output +
+          // both cache columns, so this is what makes Input + Output = Tokens.
+          inputTokens: tokens.inputTokens + tokens.cacheCreationTokens + tokens.cacheReadTokens,
+          outputTokens: tokens.outputTokens,
+          totalTokens: call.total_tokens,
+          spendUsd: cost.spendUsd,
+          savedUsd: cost.savedUsd,
+          isComplete: call.status === 'ok'
+        };
+      });
+
+      // Calls are ordered by step, not by when they ended, and a step can
+      // outlast the one after it - so the last end is the largest, not the last.
+      timelines.set(key, {
+        steps,
+        lastEndedAtEpochMs: calls.reduce((latest, call) => Math.max(latest, call.ended_at_epoch_ms), 0)
+      });
     });
 
-    return stepsByQuery;
+    return timelines;
   }
 
   /** Folds a query and its calls into the one record the renderer draws. */
-  private toQueryRecord(row: QueryRow, stepsByQuery: Map<string, UsageQueryStep[]>): UsageQueryRecord {
+  private toQueryRecord(row: QueryRow, timelines: Map<string, QueryTimeline>): UsageQueryRecord {
     const id = UsageStatsStore.queryKey(row.session_id, row.turn_id);
     // A query recorded before its first call finished has no steps yet, which
     // reads as a query that cost nothing rather than as a missing row.
-    const steps = stepsByQuery.get(id) ?? [];
+    const { steps, lastEndedAtEpochMs } = timelines.get(id) ?? EMPTY_TIMELINE;
 
     return {
       id,
@@ -418,6 +438,7 @@ export class UsageStatsStore {
       queryText: row.query_text,
       startedAt: row.started_at,
       startedAtEpochMs: row.started_at_epoch_ms,
+      durationMs: UsageStatsStore.queryDuration(row.started_at_epoch_ms, lastEndedAtEpochMs),
       steps,
       inputTokens: UsageStatsStore.sumOf(steps, 'inputTokens'),
       outputTokens: UsageStatsStore.sumOf(steps, 'outputTokens'),
@@ -454,6 +475,20 @@ export class UsageStatsStore {
       .prepare(`SELECT COUNT(*) AS found FROM sqlite_master WHERE type = 'table' AND name = ?`)
       .get(tableName) as Record<string, unknown> | undefined;
     return UsageStatsStore.numberValue(row, 'found') > 0;
+  }
+
+  /**
+   * How long a query took: from when it was asked to when the last of its calls
+   * finished.
+   *
+   * A query whose calls are all still running has no end recorded, and a clock
+   * corrected between the two writes can put the end before the start. Neither is
+   * a length of time, so both report nothing rather than zero - which would read
+   * as a query answered instantly.
+   */
+  private static queryDuration(startedAtEpochMs: number, lastEndedAtEpochMs: number): number | null {
+    if (lastEndedAtEpochMs <= 0 || lastEndedAtEpochMs < startedAtEpochMs) return null;
+    return lastEndedAtEpochMs - startedAtEpochMs;
   }
 
   /** The one spelling of a query's identity, shared by its row and its calls. */
@@ -571,6 +606,7 @@ export class UsageStatsStore {
       role: UsageStatsStore.textValue(row, 'role'),
       route: UsageStatsStore.textValue(row, 'route'),
       model: UsageStatsStore.textValue(row, 'model'),
+      ended_at_epoch_ms: UsageStatsStore.numberValue(row, 'ended_at_epoch_ms'),
       input_tokens: UsageStatsStore.numberValue(row, 'input_tokens'),
       output_tokens: UsageStatsStore.numberValue(row, 'output_tokens'),
       cache_creation_tokens: UsageStatsStore.numberValue(row, 'cache_creation_tokens'),

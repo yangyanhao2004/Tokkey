@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import type { UsageQueryRecord, UsageQueryStep } from '../../shared/types';
 import {
-  formatQueryTime,
   ICON_BASE_PATH,
   LOAD_MORE_LABEL,
   LOADING_MORE_LABEL,
@@ -12,11 +11,11 @@ import {
   QUERIES_LOADING_TEXT,
   routerStats,
   QUERY_BREAKDOWN_TITLE,
+  querySubtitle,
   queryTitle,
   RECENT_QUERIES_TITLE,
   ROUTER_TITLE,
   LOCAL_USAGE_TITLE,
-  stepCountLabel,
   type QueryMetrics,
   type UsageStat
 } from './dashboardContent';
@@ -185,7 +184,6 @@ interface RecentQueryRowProps {
  */
 function RecentQueryRow({ query, isExpanded, onToggle }: RecentQueryRowProps) {
   const breakdownId = `query-breakdown-${query.id}`;
-  const startedAt = formatQueryTime(query.startedAtEpochMs);
 
   return (
     <article
@@ -205,7 +203,7 @@ function RecentQueryRow({ query, isExpanded, onToggle }: RecentQueryRowProps) {
             {queryTitle(query)}
           </span>
           <span className="text-[9px] leading-[11px] text-text-secondary">
-            {startedAt ? `${stepCountLabel(query.steps.length)} · ${startedAt}` : stepCountLabel(query.steps.length)}
+            {querySubtitle(query)}
           </span>
         </span>
 

@@ -144,6 +144,8 @@ function insertCall(database, call) {
     model,
     route,
     epochMs,
+    // A call that says nothing about when it ended took a tenth of a second.
+    endedEpochMs = epochMs + 100,
     inputTokens = 0,
     outputTokens = 0,
     cacheReadTokens = 0,
@@ -155,7 +157,7 @@ function insertCall(database, call) {
          (user_id, session_id, turn_id, step_idx, role, protocol, route, model,
           started_at, started_at_epoch_ms, ended_at, ended_at_epoch_ms, duration_ms,
           input_tokens, output_tokens, cache_read_tokens, status)
-       VALUES (?, ?, ?, ?, ?, 'responses', ?, ?, ?, ?, ?, ?, 100, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, 'responses', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       userId,
@@ -169,8 +171,9 @@ function insertCall(database, call) {
       model,
       new Date(epochMs).toISOString(),
       epochMs,
-      new Date(epochMs + 100).toISOString(),
-      epochMs + 100,
+      new Date(endedEpochMs).toISOString(),
+      endedEpochMs,
+      endedEpochMs - epochMs,
       inputTokens,
       outputTokens,
       cacheReadTokens,
@@ -250,6 +253,38 @@ test('reads queries newest first with the calls each was routed through', { skip
   assert.equal(newest.outputTokens, 260);
   assert.equal(newest.totalTokens, 510 + 5_250);
   assert.equal(newest.inputTokens + newest.outputTokens, newest.totalTokens);
+  // Asked at +60_000, last call ended at +61_100: the query took 1.1 seconds.
+  assert.equal(newest.durationMs, 1_100);
+});
+
+test('times a query to its last call, not to its last step', { skip: skipWithoutSqlite }, async (t) => {
+  const { database, store } = await usageFixture(t);
+  insertQuery(database, {
+    sessionId: 'session-timed',
+    turnId: 'turn-timed',
+    text: 'How long did this take',
+    epochMs: BASE_EPOCH_MS
+  });
+  // The first step outlasts the second, so the latest end is not the last row.
+  insertCall(database, {
+    sessionId: 'session-timed',
+    turnId: 'turn-timed',
+    stepIndex: 0,
+    model: 'planner-model',
+    epochMs: BASE_EPOCH_MS + 200,
+    endedEpochMs: BASE_EPOCH_MS + 9_000
+  });
+  insertCall(database, {
+    sessionId: 'session-timed',
+    turnId: 'turn-timed',
+    stepIndex: 1,
+    model: 'qwen-8b',
+    epochMs: BASE_EPOCH_MS + 1_000,
+    endedEpochMs: BASE_EPOCH_MS + 4_000
+  });
+
+  const [query] = (await store.readQueryWindow(null)).queries;
+  assert.equal(query.durationMs, 9_000);
 });
 
 test('walks the history forward one batch at a time', { skip: skipWithoutSqlite }, async (t) => {
@@ -370,6 +405,8 @@ test('a query recorded before its first call keeps its row', { skip: skipWithout
   const [query] = (await store.readQueryWindow(null)).queries;
   assert.equal(query.steps.length, 0);
   assert.equal(query.totalTokens, 0);
+  // Nothing has finished, so the row reports no length rather than none spent.
+  assert.equal(query.durationMs, null);
 });
 
 test('reports no usage when the router has never recorded any', { skip: skipWithoutSqlite }, async (t) => {
