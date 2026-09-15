@@ -269,6 +269,11 @@ export interface SystemPreferences {
   launchAtLogin: boolean;
   /** True while Tokkey holds the Mac awake, display sleep still allowed. */
   preventSystemSleep: boolean;
+  /**
+   * True once the user has opened the gate and let Tokkey share their personal
+   * information. Off on a fresh install: consent is given, never assumed.
+   */
+  privacyGate: boolean;
 }
 
 /** A change to one or more preferences; anything omitted is left alone. */

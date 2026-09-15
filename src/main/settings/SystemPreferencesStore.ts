@@ -3,10 +3,14 @@ import path from 'node:path';
 import type { SystemPreferences } from '../../shared/types';
 import TokkeyHome from '../storage/TokkeyHome';
 
-/** What a fresh install starts on: follow macOS, stay out of the way. */
+/**
+ * What a fresh install starts on: launching at login, because the router only
+ * routes while Tokkey is running, and otherwise out of the way.
+ */
 export const DEFAULT_SYSTEM_PREFERENCES: SystemPreferences = {
-  launchAtLogin: false,
-  preventSystemSleep: false
+  launchAtLogin: true,
+  preventSystemSleep: false,
+  privacyGate: false
 };
 
 export interface SystemPreferencesStoreOptions {
@@ -18,7 +22,7 @@ export interface SystemPreferencesStoreOptions {
  * Reads and writes the Settings page's preferences in
  * `~/.tokkey/settings.json`.
  *
- * A plain JSON file rather than a table in `tokkey.db`: these are two
+ * A plain JSON file rather than a table in `tokkey.db`: these are a handful of
  * scalars read once at boot and rewritten on a click, with nothing to query,
  * order, or join, so the database's schema and connection handling would buy
  * nothing. The file is also the only copy of "prevent sleep" — macOS remembers
@@ -44,7 +48,8 @@ export class SystemPreferencesStore {
         preventSystemSleep: this.booleanValue(
           stored.preventSystemSleep,
           DEFAULT_SYSTEM_PREFERENCES.preventSystemSleep
-        )
+        ),
+        privacyGate: this.booleanValue(stored.privacyGate, DEFAULT_SYSTEM_PREFERENCES.privacyGate)
       };
     } catch {
       return { ...DEFAULT_SYSTEM_PREFERENCES };

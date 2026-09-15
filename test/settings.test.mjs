@@ -21,21 +21,26 @@ function temporaryHome() {
 
 /** Records every effect the service asks of Electron, and answers for macOS. */
 class StubPlatform {
-  constructor({ openAtLogin = false, loginItemThrows = false } = {}) {
+  constructor({ openAtLogin = false, known = true, loginItemThrows = false, packaged = true } = {}) {
     this.openAtLogin = openAtLogin;
+    // Whether macOS has any record of the app, as a real install does once it
+    // has been registered. A fresh install passes known: false.
+    this.known = known;
     this.loginItemThrows = loginItemThrows;
+    this.packaged = packaged;
     this.startedBlockers = 0;
     this.stoppedBlockers = [];
     this.nextBlockerId = 1;
   }
 
-  isOpenAtLogin() {
+  loginItem() {
     if (this.loginItemThrows) throw new Error('login items unavailable');
-    return this.openAtLogin;
+    return { openAtLogin: this.openAtLogin, known: this.known };
   }
 
   setOpenAtLogin(openAtLogin) {
     this.openAtLogin = openAtLogin;
+    this.known = true;
   }
 
   startSleepBlocker() {
@@ -49,6 +54,11 @@ class StubPlatform {
 
   appVersion() {
     return '0.9.4';
+  }
+
+  // Tests stand in for a shipped build; the dev-run skip is covered separately.
+  isPackaged() {
+    return this.packaged;
   }
 }
 
@@ -97,7 +107,29 @@ test('a malformed value falls back to its default, keeping the valid neighbours'
 
   const stored = new SystemPreferencesStore({ homeDirectory }).read();
   assert.equal(stored.preventSystemSleep, true);
-  assert.equal(stored.launchAtLogin, false);
+  assert.equal(stored.launchAtLogin, DEFAULT_SYSTEM_PREFERENCES.launchAtLogin);
+});
+
+test('a first run registers the default login item with macOS', () => {
+  const homeDirectory = temporaryHome();
+  const platform = new StubPlatform({ known: false });
+
+  const restored = serviceWith(platform, homeDirectory).restore();
+
+  assert.equal(restored.launchAtLogin, true, 'a fresh install launches at login');
+  assert.equal(platform.openAtLogin, true, 'the default has to reach macOS, not just the file');
+});
+
+test('a login item the user removed is not re-registered on the next launch', () => {
+  const homeDirectory = temporaryHome();
+  serviceWith(new StubPlatform({ known: false }), homeDirectory).restore();
+
+  // The user removed Tokkey from Login Items while the app was closed.
+  const nextLaunch = new StubPlatform({ openAtLogin: false });
+  const restored = serviceWith(nextLaunch, homeDirectory).restore();
+
+  assert.equal(restored.launchAtLogin, false);
+  assert.equal(nextLaunch.openAtLogin, false);
 });
 
 test('restoring re-applies the stored sleep blocker to the session', () => {
@@ -161,6 +193,31 @@ test('an unreadable login item falls back to the stored value', () => {
   assert.equal(restored.launchAtLogin, true);
 });
 
+test('a stored login item is re-registered when macOS has no record of it', () => {
+  const homeDirectory = temporaryHome();
+  mkdirSync(path.join(homeDirectory, '.tokkey'), { recursive: true });
+  writeFileSync(
+    path.join(homeDirectory, '.tokkey', 'settings.json'),
+    JSON.stringify({ launchAtLogin: true, preventSystemSleep: false, privacyGate: false })
+  );
+
+  // The app was reinstalled or moved: the file remembers the choice, macOS does not.
+  const platform = new StubPlatform({ openAtLogin: false, known: false });
+  const restored = serviceWith(platform, homeDirectory).restore();
+
+  assert.equal(restored.launchAtLogin, true, 'the stored choice is the only answer there is');
+  assert.equal(platform.openAtLogin, true, 'and it is handed back to macOS');
+});
+
+test('a dev run does not put the Electron binary into Login Items', () => {
+  const platform = new StubPlatform({ known: false, packaged: false });
+
+  const restored = serviceWith(platform, temporaryHome()).restore();
+
+  assert.equal(platform.openAtLogin, false, 'nothing is registered from a dev run');
+  assert.equal(restored.launchAtLogin, true, 'but the stored preference still reads on');
+});
+
 test('a patch changes only the preference it names', () => {
   const homeDirectory = temporaryHome();
   const service = serviceWith(new StubPlatform(), homeDirectory);
@@ -170,12 +227,26 @@ test('a patch changes only the preference it names', () => {
 
   assert.deepEqual(state.preferences, {
     launchAtLogin: true,
-    preventSystemSleep: true
+    preventSystemSleep: true,
+    privacyGate: false
   });
   const written = JSON.parse(
     readFileSync(path.join(homeDirectory, '.tokkey', 'settings.json'), 'utf8')
   );
   assert.deepEqual(written, state.preferences);
+});
+
+test('the privacy gate starts closed and stays where the user leaves it', () => {
+  const homeDirectory = temporaryHome();
+  const service = serviceWith(new StubPlatform(), homeDirectory);
+
+  assert.equal(service.getState().preferences.privacyGate, false, 'consent is never assumed');
+
+  service.update({ privacyGate: true });
+
+  // A second service is the next launch: the file is all it has to go on.
+  const restored = serviceWith(new StubPlatform(), homeDirectory).restore();
+  assert.equal(restored.privacyGate, true);
 });
 
 test('the client row reports the installed version and no phantom update', () => {

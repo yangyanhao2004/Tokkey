@@ -1129,6 +1129,9 @@ export default class IpcController {
     if (patch.preventSystemSleep !== undefined) {
       narrowed.preventSystemSleep = this.requireBoolean(patch.preventSystemSleep, 'Prevent system sleep');
     }
+    if (patch.privacyGate !== undefined) {
+      narrowed.privacyGate = this.requireBoolean(patch.privacyGate, 'Privacy Gate');
+    }
     return narrowed;
   }
 

@@ -15,10 +15,26 @@ import FeedbackError from './FeedbackErrors';
  * The Electron surfaces the settings actually act on, named so tests can stand
  * in for them without an Electron runtime.
  */
+/** What macOS knows about the login item, including whether it knows at all. */
+export interface LoginItemState {
+  openAtLogin: boolean;
+  /**
+   * False when macOS has no record of the app: a fresh install, or one that was
+   * moved or reinstalled. Distinct from the user having switched the item off,
+   * which macOS does remember.
+   */
+  known: boolean;
+}
+
 export interface SystemPreferencesPlatform {
-  /** True when macOS currently launches the app at sign-in. */
-  isOpenAtLogin(): boolean;
+  /** What macOS currently says about launching the app at sign-in. */
+  loginItem(): LoginItemState;
   setOpenAtLogin(openAtLogin: boolean): void;
+  /**
+   * False for a dev run, where the binary macOS would register is Electron
+   * itself rather than Tokkey.
+   */
+  isPackaged(): boolean;
   /** Starts the "app suspension" blocker and returns its id. */
   startSleepBlocker(): number;
   stopSleepBlocker(blockerId: number): void;
@@ -27,8 +43,15 @@ export interface SystemPreferencesPlatform {
 
 /** The real surfaces, used everywhere outside tests. */
 const ELECTRON_PLATFORM: SystemPreferencesPlatform = {
-  isOpenAtLogin: () => app.getLoginItemSettings().openAtLogin,
+  loginItem: () => {
+    const settings = app.getLoginItemSettings();
+    return {
+      openAtLogin: settings.openAtLogin,
+      known: settings.status !== 'not-found' && settings.status !== 'not-registered'
+    };
+  },
   setOpenAtLogin: (openAtLogin) => app.setLoginItemSettings({ openAtLogin }),
+  isPackaged: () => app.isPackaged,
   // "prevent-app-suspension" is the blocker that matches the row's promise:
   // the Mac stays awake and networked while the display is still free to sleep.
   startSleepBlocker: () => powerSaveBlocker.start('prevent-app-suspension'),
@@ -75,7 +98,20 @@ export class SystemPreferencesService {
    */
   restore(): SystemPreferences {
     const stored = this.store.read();
-    this.preferences = { ...stored, launchAtLogin: this.readLoginItem(stored.launchAtLogin) };
+    const launchAtLogin = this.settledLoginItem(stored.launchAtLogin);
+
+    // When macOS has no record of the app, the stored preference is the only
+    // answer there is, so register it rather than report off: otherwise a fresh
+    // install strands the default, and a reinstall silently drops a choice the
+    // user already made. A login item macOS does remember is left alone, so
+    // removing Tokkey from Login Items still sticks.
+    // Skipped in a dev run, which would otherwise put Electron itself into the
+    // user's Login Items.
+    if (this.platform.isPackaged() && !this.readLoginItem().known && launchAtLogin) {
+      this.writeLoginItem(true);
+    }
+
+    this.preferences = { ...stored, launchAtLogin };
     this.applySleepBlocker(this.preferences.preventSystemSleep);
     return this.getPreferences();
   }
@@ -93,12 +129,16 @@ export class SystemPreferencesService {
    * than the whole set so a row only ever speaks for its own switch.
    */
   update(patch: SystemPreferencesPatch): SystemSettingsState {
-    const updated: SystemPreferences = { ...this.preferences, ...patch };
+    // Compared against the reported state rather than the in-memory copy: the
+    // login item can have been changed in System Settings since it was read,
+    // and a switch the user flips has to reach macOS even then.
+    const current = this.getPreferences();
+    const updated: SystemPreferences = { ...current, ...patch };
 
-    if (updated.launchAtLogin !== this.preferences.launchAtLogin) {
-      this.platform.setOpenAtLogin(updated.launchAtLogin);
+    if (updated.launchAtLogin !== current.launchAtLogin) {
+      this.writeLoginItem(updated.launchAtLogin);
     }
-    if (updated.preventSystemSleep !== this.preferences.preventSystemSleep) {
+    if (updated.preventSystemSleep !== current.preventSystemSleep) {
       this.applySleepBlocker(updated.preventSystemSleep);
     }
 
@@ -126,16 +166,34 @@ export class SystemPreferencesService {
   }
 
   private getPreferences(): SystemPreferences {
-    return { ...this.preferences, launchAtLogin: this.readLoginItem(this.preferences.launchAtLogin) };
+    return { ...this.preferences, launchAtLogin: this.settledLoginItem(this.preferences.launchAtLogin) };
   }
 
-  /** The OS's answer, falling back to the stored one if it cannot be read. */
-  private readLoginItem(fallback: boolean): boolean {
+  /** macOS's answer where it has one, and the stored preference where it does not. */
+  private settledLoginItem(stored: boolean): boolean {
+    const loginItem = this.readLoginItem();
+    return loginItem.known ? loginItem.openAtLogin : stored;
+  }
+
+  /** An unreadable login item reads as "macOS has no answer", not as "off". */
+  private readLoginItem(): LoginItemState {
     try {
-      return this.platform.isOpenAtLogin();
+      return this.platform.loginItem();
     } catch (error) {
       console.warn(`[SystemPreferences] Could not read the login item: ${String(error)}`);
-      return fallback;
+      return { openAtLogin: false, known: false };
+    }
+  }
+
+  /**
+   * Asks macOS for the login item, keeping a refusal off the caller's path:
+   * neither a boot nor a click on another row should fail over this one.
+   */
+  private writeLoginItem(openAtLogin: boolean): void {
+    try {
+      this.platform.setOpenAtLogin(openAtLogin);
+    } catch (error) {
+      console.warn(`[SystemPreferences] Could not write the login item: ${String(error)}`);
     }
   }
 

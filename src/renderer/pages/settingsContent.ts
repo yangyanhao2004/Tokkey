@@ -17,6 +17,7 @@ export const SETTINGS_SUBTITLE = 'System-level preferences for your local AI wor
 export const UPDATES_SECTION_TITLE = 'Updates';
 export const GENERAL_SECTION_TITLE = 'General';
 export const POWER_SECTION_TITLE = 'Power';
+export const PRIVACY_SECTION_TITLE = 'Privacy';
 export const SUPPORT_SECTION_TITLE = 'Support';
 
 export const CLIENT_ROW_TITLE = 'Tokkey Client';
@@ -27,6 +28,10 @@ export const LAUNCH_AT_LOGIN_DESCRIPTION = 'Start Tokkey when you sign in to mac
 export const PREVENT_SLEEP_TITLE = 'Prevent System Sleep';
 export const PREVENT_SLEEP_DESCRIPTION =
   'Keep your Mac awake and connected to the internet while allowing the display to sleep.';
+
+export const PRIVACY_GATE_TITLE = 'Privacy Gate';
+export const PRIVACY_GATE_DESCRIPTION =
+  'Privacy Gate helps protect your private data by giving you greater control over what information is shared.';
 
 export const SEND_FEEDBACK_TITLE = 'Send Feedback';
 export const SEND_FEEDBACK_DESCRIPTION = 'Tell us what support do you need from Tokkey.';
@@ -51,7 +56,8 @@ export const FEEDBACK_DONE_LABEL = 'Done';
 export const ROW_ICON_FILES = {
   client: 'settings-update.svg',
   launchAtLogin: 'settings-launch.svg',
-  preventSleep: 'settings-launch.svg',
+  preventSleep: 'settings-sleep.svg',
+  privacyGate: 'settings-privacy.svg',
   feedback: 'settings-feedback.svg'
 } as const;
 

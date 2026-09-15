@@ -9,6 +9,9 @@ import {
   POWER_SECTION_TITLE,
   PREVENT_SLEEP_DESCRIPTION,
   PREVENT_SLEEP_TITLE,
+  PRIVACY_GATE_DESCRIPTION,
+  PRIVACY_GATE_TITLE,
+  PRIVACY_SECTION_TITLE,
   ROW_ICON_FILES,
   SEND_FEEDBACK_DESCRIPTION,
   SEND_FEEDBACK_TITLE,
@@ -77,7 +80,7 @@ function SettingsRow({ iconFile, title, description, trailing, onClick, testId }
   const content = (
     <>
       <span className="flex min-w-0 items-center gap-2">
-        <IconTile src={`${ICON_BASE_PATH}/${iconFile}`} />
+        <IconTile src={`${ICON_BASE_PATH}/${iconFile}`} naturalGlyph />
         <TitleBlock title={title} subtitle={description} wrapSubtitle />
       </span>
       {trailing}
@@ -105,8 +108,8 @@ function SettingsRow({ iconFile, title, description, trailing, onClick, testId }
 }
 
 /**
- * System-level preferences (Figma node 531:5374): the installed version, the
- * two macOS integrations, and the feedback link.
+ * System-level preferences (Figma node 762:4917): the installed version, the
+ * two macOS integrations, the privacy gate, and the feedback link.
  *
  * Every switch reports the state the main process settled on rather than the
  * one that was clicked, so a preference the OS refused never shows as applied.
@@ -128,76 +131,98 @@ export function SettingsPage() {
 
   return (
     <PageShell title={SETTINGS_TITLE} subtitle={SETTINGS_SUBTITLE} testId="settings">
-      <SettingsSection title={UPDATES_SECTION_TITLE} testId="settings-updates">
-        <SettingsRow
-          iconFile={ROW_ICON_FILES.client}
-          title={CLIENT_ROW_TITLE}
-          description={updateError ?? clientVersionText(client)}
-          testId="settings-client-row"
-          trailing={
-            <PushButton
-              testId="settings-update"
-              disabled={isUpdating || updatePresentation.disabled}
-              onClick={() => void performUpdateAction()}
-            >
-              {updatePresentation.buttonLabel}
-            </PushButton>
-          }
-        />
-      </SettingsSection>
+      {/* The cards outgrow the window, so they scroll beneath the heading,
+          which the shell keeps in place. */}
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-4 overflow-y-auto">
+        <SettingsSection title={UPDATES_SECTION_TITLE} testId="settings-updates">
+          <SettingsRow
+            iconFile={ROW_ICON_FILES.client}
+            title={CLIENT_ROW_TITLE}
+            description={updateError ?? clientVersionText(client)}
+            testId="settings-client-row"
+            trailing={
+              <PushButton
+                testId="settings-update"
+                disabled={isUpdating || updatePresentation.disabled}
+                onClick={() => void performUpdateAction()}
+              >
+                {updatePresentation.buttonLabel}
+              </PushButton>
+            }
+          />
+        </SettingsSection>
 
-      <SettingsSection title={GENERAL_SECTION_TITLE} testId="settings-general">
-        <SettingsRow
-          iconFile={ROW_ICON_FILES.launchAtLogin}
-          title={LAUNCH_AT_LOGIN_TITLE}
-          description={LAUNCH_AT_LOGIN_DESCRIPTION}
-          testId="settings-launch-row"
-          trailing={
-            <Switch
-              checked={preferences.launchAtLogin}
-              onChange={(launchAtLogin) => void updatePreferences({ launchAtLogin })}
-              label={LAUNCH_AT_LOGIN_TITLE}
-              disabled={isSaving}
-              testId="settings-launch-toggle"
-            />
-          }
-        />
-      </SettingsSection>
+        <SettingsSection title={GENERAL_SECTION_TITLE} testId="settings-general">
+          <SettingsRow
+            iconFile={ROW_ICON_FILES.launchAtLogin}
+            title={LAUNCH_AT_LOGIN_TITLE}
+            description={LAUNCH_AT_LOGIN_DESCRIPTION}
+            testId="settings-launch-row"
+            trailing={
+              <Switch
+                checked={preferences.launchAtLogin}
+                onChange={(launchAtLogin) => void updatePreferences({ launchAtLogin })}
+                label={LAUNCH_AT_LOGIN_TITLE}
+                disabled={isSaving}
+                testId="settings-launch-toggle"
+              />
+            }
+          />
+        </SettingsSection>
 
-      <SettingsSection title={POWER_SECTION_TITLE} testId="settings-power">
-        <SettingsRow
-          iconFile={ROW_ICON_FILES.preventSleep}
-          title={PREVENT_SLEEP_TITLE}
-          description={PREVENT_SLEEP_DESCRIPTION}
-          testId="settings-sleep-row"
-          trailing={
-            <Switch
-              checked={preferences.preventSystemSleep}
-              onChange={(preventSystemSleep) => void updatePreferences({ preventSystemSleep })}
-              label={PREVENT_SLEEP_TITLE}
-              disabled={isSaving}
-              testId="settings-sleep-toggle"
-            />
-          }
-        />
-      </SettingsSection>
+        <SettingsSection title={POWER_SECTION_TITLE} testId="settings-power">
+          <SettingsRow
+            iconFile={ROW_ICON_FILES.preventSleep}
+            title={PREVENT_SLEEP_TITLE}
+            description={PREVENT_SLEEP_DESCRIPTION}
+            testId="settings-sleep-row"
+            trailing={
+              <Switch
+                checked={preferences.preventSystemSleep}
+                onChange={(preventSystemSleep) => void updatePreferences({ preventSystemSleep })}
+                label={PREVENT_SLEEP_TITLE}
+                disabled={isSaving}
+                testId="settings-sleep-toggle"
+              />
+            }
+          />
+        </SettingsSection>
 
-      <SettingsSection title={SUPPORT_SECTION_TITLE} testId="settings-support">
-        <SettingsRow
-          iconFile={ROW_ICON_FILES.feedback}
-          title={SEND_FEEDBACK_TITLE}
-          description={SEND_FEEDBACK_DESCRIPTION}
-          onClick={() => setIsFeedbackOpen(true)}
-          testId="settings-feedback-row"
-          trailing={
-            <img
-              className="block size-4 shrink-0 max-w-none"
-              src={`${ICON_BASE_PATH}/${CHEVRON_ICON_FILE}`}
-              alt=""
-            />
-          }
-        />
-      </SettingsSection>
+        <SettingsSection title={PRIVACY_SECTION_TITLE} testId="settings-privacy">
+          <SettingsRow
+            iconFile={ROW_ICON_FILES.privacyGate}
+            title={PRIVACY_GATE_TITLE}
+            description={PRIVACY_GATE_DESCRIPTION}
+            testId="settings-privacy-row"
+            trailing={
+              <Switch
+                checked={preferences.privacyGate}
+                onChange={(privacyGate) => void updatePreferences({ privacyGate })}
+                label={PRIVACY_GATE_TITLE}
+                disabled={isSaving}
+                testId="settings-privacy-toggle"
+              />
+            }
+          />
+        </SettingsSection>
+
+        <SettingsSection title={SUPPORT_SECTION_TITLE} testId="settings-support">
+          <SettingsRow
+            iconFile={ROW_ICON_FILES.feedback}
+            title={SEND_FEEDBACK_TITLE}
+            description={SEND_FEEDBACK_DESCRIPTION}
+            onClick={() => setIsFeedbackOpen(true)}
+            testId="settings-feedback-row"
+            trailing={
+              <img
+                className="block size-4 shrink-0 max-w-none"
+                src={`${ICON_BASE_PATH}/${CHEVRON_ICON_FILE}`}
+                alt=""
+              />
+            }
+          />
+        </SettingsSection>
+      </div>
 
       {isFeedbackOpen && (
         <SendFeedbackDialog
