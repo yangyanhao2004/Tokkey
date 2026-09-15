@@ -15,7 +15,10 @@ import {
   verifyTokenHubChallenge,
   wrapMldsa44PublicKey
 } from '../dist/main/models/tokenhub/TokenHubProtocol.js';
-import { TokenHubRuntime } from '../dist/main/models/tokenhub/TokenHubRuntime.js';
+import {
+  buildTokenHubServerArguments,
+  TokenHubRuntime
+} from '../dist/main/models/tokenhub/TokenHubRuntime.js';
 import {
   decodeTokenHubResponseHeader,
   encodeTokenHubRequest
@@ -24,6 +27,33 @@ import {
 const DEVICE_ID = Buffer.from('0123456789abcdef', 'hex');
 const KEY_MATERIAL = Buffer.from(Array.from({ length: 32 }, (_, index) => index));
 const KEY_ID = createHash('sha256').update(KEY_MATERIAL).digest().subarray(0, 8);
+
+test('runtime builds the Dongle server arguments from detected paths', () => {
+  assert.deepEqual(buildTokenHubServerArguments({
+    modelPath: '/models/Qwen3.5-35B-A3B-Q4_K_M.gguf',
+    templatePath: '/app/resources/TokenHubRuntime/arm64/qwen3_codex_compatible.jinja',
+    donglePort: '/dev/cu.usbmodem2110',
+    port: 8081
+  }), [
+    '-m', '/models/Qwen3.5-35B-A3B-Q4_K_M.gguf',
+    '--host', '0.0.0.0',
+    '--port', '8081',
+    '--parallel', '1',
+    '-ngl', '99',
+    '-t', '2',
+    '-rea', 'on',
+    '--no-mmap',
+    '--cache-ram', '0',
+    '-ub', '4096',
+    '-b', '4096',
+    '-c', '16384',
+    '-fa', 'on',
+    '--no-cache-prompt',
+    '--rge', '0',
+    '--chat-template-file', '/app/resources/TokenHubRuntime/arm64/qwen3_codex_compatible.jinja',
+    '--dongle-port', '/dev/cu.usbmodem2110'
+  ]);
+});
 
 function hmac(key, data) {
   return createHmac('sha256', key).update(data).digest();

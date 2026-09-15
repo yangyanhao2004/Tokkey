@@ -1,4 +1,5 @@
 import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import type { InstalledLocalModel, LocalModelDescriptor } from '../../shared/types';
 import TokkeyHome from '../storage/TokkeyHome';
@@ -7,6 +8,7 @@ import TokkeyHome from '../storage/TokkeyHome';
 const MANIFEST_FILE_NAME = 'model.json';
 const GGUF_EXTENSION = '.gguf';
 const DISCOVERED_MODEL_ID_PREFIX = 'local-file:';
+const LEGACY_DISCOVERED_MODEL_ID_PREFIX = 'legacy-local-file:';
 
 interface MeasuredArtifact {
   filePath: string;
@@ -25,8 +27,9 @@ interface LocatedManifest {
 }
 
 /**
- * Owns `~/.tokkey/models`: where a model's bytes land, whether they are all
- * there, and how to describe what is on disk without the remote catalog.
+ * Owns `~/.tokkey/models`: where new model bytes land, whether they are all
+ * there, and how to describe what is on disk without the remote catalog. The
+ * former `~/.amiswifi/models` location remains discoverable after the rename.
  *
  * The Tokkey page lists installed models on launch, long before — and often
  * without — a catalog fetch, so a completed download leaves a manifest next to
@@ -35,9 +38,12 @@ interface LocatedManifest {
  */
 export class DownloadedModelStore {
   readonly root: string;
+  private readonly legacyRoot: string;
 
   constructor(options: { homeDirectory?: string } = {}) {
-    this.root = new TokkeyHome(options).pathFor('models');
+    const homeDirectory = options.homeDirectory ?? os.homedir();
+    this.root = new TokkeyHome({ homeDirectory }).pathFor('models');
+    this.legacyRoot = path.join(homeDirectory, '.amiswifi', 'models');
   }
 
   /** The folder one model owns; every file it downloads stays inside it. */
@@ -80,26 +86,38 @@ export class DownloadedModelStore {
 
   /** Drops a downloaded folder, or just the hand-placed GGUF that was discovered. */
   async remove(modelId: string): Promise<void> {
-    if (modelId.startsWith(DISCOVERED_MODEL_ID_PREFIX)) {
+    if (
+      modelId.startsWith(DISCOVERED_MODEL_ID_PREFIX) ||
+      modelId.startsWith(LEGACY_DISCOVERED_MODEL_ID_PREFIX)
+    ) {
       const discoveredFilePath = this.filePathForDiscoveredId(modelId);
       if (discoveredFilePath) await rm(discoveredFilePath, { force: true });
       return;
     }
-    await rm(this.directoryFor(modelId), { recursive: true, force: true });
+    await Promise.all([
+      rm(this.directoryFor(modelId), { recursive: true, force: true }),
+      rm(this.legacyDirectoryFor(modelId), { recursive: true, force: true })
+    ]);
   }
 
   /**
    * Every model whose artifact is still on disk, newest download first.
    *
-   * Every non-empty GGUF under the root counts as installed, including files at
-   * the root itself and files nested more than one directory deep. A matching
-   * manifest supplies catalog metadata; otherwise the file describes itself.
+   * Every non-empty GGUF under either model root counts as installed, including
+   * files at the root itself and files nested more than one directory deep. A
+   * matching manifest supplies catalog metadata; otherwise the file describes
+   * itself.
    */
   async listInstalled(): Promise<InstalledLocalModel[]> {
-    const scan = await this.scanModelTree(this.root);
+    const scans = await Promise.all([
+      this.scanModelTree(this.root),
+      this.scanModelTree(this.legacyRoot)
+    ]);
+    const artifactPaths = scans.flatMap((scan) => scan.artifactPaths);
+    const manifestDirectories = scans.flatMap((scan) => scan.manifestDirectories);
     const [measuredArtifacts, manifests] = await Promise.all([
-      Promise.all(scan.artifactPaths.map((filePath) => this.measure(filePath))),
-      Promise.all(scan.manifestDirectories.map((directory) => this.readLocatedManifest(directory)))
+      Promise.all(artifactPaths.map((filePath) => this.measure(filePath))),
+      Promise.all(manifestDirectories.map((directory) => this.readLocatedManifest(directory)))
     ]);
     const validManifests = manifests.filter((manifest): manifest is LocatedManifest => manifest !== null);
 
@@ -209,21 +227,41 @@ export class DownloadedModelStore {
   }
 
   private discoveredIdFor(filePath: string): string {
-    const relativePath = path.relative(this.root, filePath).split(path.sep).join('/');
-    return `${DISCOVERED_MODEL_ID_PREFIX}${encodeURIComponent(relativePath)}`;
+    const legacyRelativePath = this.relativePathInside(this.legacyRoot, filePath);
+    const root = legacyRelativePath === null ? this.root : this.legacyRoot;
+    const prefix = legacyRelativePath === null
+      ? DISCOVERED_MODEL_ID_PREFIX
+      : LEGACY_DISCOVERED_MODEL_ID_PREFIX;
+    const relativePath = path.relative(root, filePath).split(path.sep).join('/');
+    return `${prefix}${encodeURIComponent(relativePath)}`;
+  }
+
+  private legacyDirectoryFor(modelId: string): string {
+    return path.join(this.legacyRoot, this.safeId(modelId));
   }
 
   private filePathForDiscoveredId(modelId: string): string | null {
     try {
-      const encodedRelativePath = modelId.slice(DISCOVERED_MODEL_ID_PREFIX.length);
+      const isLegacyModel = modelId.startsWith(LEGACY_DISCOVERED_MODEL_ID_PREFIX);
+      const prefix = isLegacyModel ? LEGACY_DISCOVERED_MODEL_ID_PREFIX : DISCOVERED_MODEL_ID_PREFIX;
+      const root = isLegacyModel ? this.legacyRoot : this.root;
+      const encodedRelativePath = modelId.slice(prefix.length);
       const relativePath = decodeURIComponent(encodedRelativePath).split('/').join(path.sep);
-      const filePath = path.resolve(this.root, relativePath);
-      const pathFromRoot = path.relative(this.root, filePath);
-      const isInsideRoot = pathFromRoot.length > 0 && !pathFromRoot.startsWith(`..${path.sep}`) && !path.isAbsolute(pathFromRoot);
+      const filePath = path.resolve(root, relativePath);
+      const isInsideRoot = this.relativePathInside(root, filePath) !== null;
       return isInsideRoot && path.extname(filePath).toLowerCase() === GGUF_EXTENSION ? filePath : null;
     } catch {
       return null;
     }
+  }
+
+  private relativePathInside(root: string, filePath: string): string | null {
+    const relativePath = path.relative(root, path.resolve(filePath));
+    const isInsideRoot =
+      relativePath.length > 0 &&
+      !relativePath.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relativePath);
+    return isInsideRoot ? relativePath : null;
   }
 }
 
