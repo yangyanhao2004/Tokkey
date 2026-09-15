@@ -114,6 +114,19 @@ test('catalog walks brands to artifacts and normalizes every unit it is given', 
   assert.equal(quantized.downloadable, true);
 });
 
+test('concurrent catalog loads share one refresh and one atomic cache write', async () => {
+  const transport = new StubCatalogFetcher();
+  const service = new LocalModelCatalogService({
+    homeDirectory: createHomeDirectory(),
+    fetcher: transport.fetcher()
+  });
+
+  const [first, second] = await Promise.all([service.load(), service.load()]);
+
+  assert.deepEqual(first, second);
+  assert.equal(transport.urls.length, Object.keys(CATALOG_RESPONSES).length);
+});
+
 test('an artifact with no resolvable source stays visible but not downloadable', async () => {
   const transport = new StubCatalogFetcher();
   const service = new LocalModelCatalogService({
@@ -348,6 +361,48 @@ test('GGUF files are discovered at the models root and in every nested directory
 
   assert.deepEqual(installed.map((model) => model.name).sort(), ['nested-model.GGUF', 'root-model.gguf']);
   assert.deepEqual(installed.map((model) => model.sizeBytes).sort((left, right) => left - right), [1024, 2048]);
+});
+
+test('GGUF files in the legacy Amis WiFi model directory remain discoverable', async () => {
+  const home = createHomeDirectory();
+  const legacyModelsRoot = path.join(home, '.amiswifi', 'models');
+  const legacyModelPath = path.join(legacyModelsRoot, 'Qwen3.5-35B-A3B-Q4_K_M.gguf');
+  mkdirSync(legacyModelsRoot, { recursive: true });
+  writeFileSync(legacyModelPath, Buffer.alloc(4096));
+  const store = new DownloadedModelStore({ homeDirectory: home });
+
+  const [installed] = await store.listInstalled();
+
+  assert.equal(installed.filePath, legacyModelPath);
+  assert.match(installed.id, /^legacy-local-file:/);
+  await store.remove(installed.id);
+  assert.deepEqual(await store.listInstalled(), []);
+});
+
+test('a legacy manifest retains its catalog identity and can be removed', async () => {
+  const home = createHomeDirectory();
+  const store = new DownloadedModelStore({ homeDirectory: home });
+  const legacyModelDirectory = path.join(
+    home,
+    '.amiswifi',
+    'models',
+    ARTIFACT.id.replaceAll(':', '_')
+  );
+  const legacyModelPath = path.join(legacyModelDirectory, ARTIFACT.fileName);
+  mkdirSync(legacyModelDirectory, { recursive: true });
+  writeFileSync(legacyModelPath, Buffer.alloc(4096));
+  writeFileSync(path.join(legacyModelDirectory, 'model.json'), JSON.stringify({
+    ...ARTIFACT,
+    downloadedAt: Date.now(),
+    filePath: legacyModelPath
+  }));
+
+  const [installed] = await store.listInstalled();
+
+  assert.equal(installed.id, ARTIFACT.id);
+  assert.equal(installed.filePath, legacyModelPath);
+  await store.remove(installed.id);
+  assert.deepEqual(await store.listInstalled(), []);
 });
 
 test('a manifest still describes a GGUF nested inside its model directory', async () => {

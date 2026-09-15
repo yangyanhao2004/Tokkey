@@ -21,6 +21,7 @@ export class LocalModelCatalogService {
   private readonly cachePath: string;
   private readonly fetcher: ModelCatalogFetch;
   private cache: CatalogCache | null = null;
+  private refreshPromise: Promise<CatalogCache> | null = null;
 
   constructor(options: { homeDirectory?: string; fetcher?: ModelCatalogFetch } = {}) {
     this.cachePath = new TokkeyHome(options).pathFor('model_catalog_cache.json');
@@ -34,15 +35,31 @@ export class LocalModelCatalogService {
       return { models: [...cached.models], providers: [...cached.providers], fromCache: true };
     }
     try {
-      const fresh = await this.fetchCatalog();
-      this.cache = fresh;
-      await this.writeCache(fresh);
+      const fresh = await this.refreshCatalog();
       return { models: [...fresh.models], providers: [...fresh.providers], fromCache: false };
     } catch (error) {
       if (cached) {
         return { models: [...cached.models], providers: [...cached.providers], fromCache: true };
       }
       throw new Error(`Unable to load model catalog: ${this.describeError(error)}`);
+    }
+  }
+
+  private async refreshCatalog(): Promise<CatalogCache> {
+    if (this.refreshPromise) return this.refreshPromise;
+
+    const refreshPromise = (async () => {
+      const fresh = await this.fetchCatalog();
+      this.cache = fresh;
+      await this.writeCache(fresh);
+      return fresh;
+    })();
+    this.refreshPromise = refreshPromise;
+
+    try {
+      return await refreshPromise;
+    } finally {
+      if (this.refreshPromise === refreshPromise) this.refreshPromise = null;
     }
   }
 

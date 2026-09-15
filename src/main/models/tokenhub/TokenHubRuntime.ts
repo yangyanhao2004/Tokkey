@@ -1,7 +1,6 @@
-import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, copyFile, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type {
@@ -16,14 +15,7 @@ import type {
   LocalModelRuntime
 } from '../LocalModelRuntime';
 import TokenHubDeviceProbe from './TokenHubDeviceProbe';
-import {
-  parseTokenHubManifest,
-  TOKEN_HUB_EXTERNAL_READ_CHUNK_SIZE,
-  TokenHubCrc32,
-  TokenHubLicenseSession,
-  TokenHubProtocolClient,
-  type TokenHubApplicationManifest
-} from './TokenHubProtocol';
+import { TokenHubProtocolClient } from './TokenHubProtocol';
 import TokenHubRuntimeLocator from './TokenHubRuntimeLocator';
 import TokenHubSerialTransport, {
   type TokenHubCommandTransport
@@ -34,6 +26,35 @@ const DEFAULT_SERVER_PORT = 8081;
 function serverEndpoint(port: number): string {
   return `http://127.0.0.1:${port}/v1`;
 }
+
+/** Builds the exact llama-server argv from resources discovered for this launch. */
+export function buildTokenHubServerArguments(options: {
+  modelPath: string;
+  templatePath: string;
+  donglePort: string;
+  port: number;
+}): string[] {
+  return [
+    '-m', options.modelPath,
+    '--host', '0.0.0.0',
+    '--port', String(options.port),
+    '--parallel', '1',
+    '-ngl', '99',
+    '-t', '2',
+    '-rea', 'on',
+    '--no-mmap',
+    '--cache-ram', '0',
+    '-ub', '4096',
+    '-b', '4096',
+    '-c', '16384',
+    '-fa', 'on',
+    '--no-cache-prompt',
+    '--rge', '0',
+    '--chat-template-file', options.templatePath,
+    '--dongle-port', options.donglePort
+  ];
+}
+
 const SERVER_CONTEXT_WINDOW_TOKENS = 16_384;
 const DEVICE_SCAN_INTERVAL_MS = 1_000;
 const SERVER_READINESS_TIMEOUT_MS = 180_000;
@@ -101,7 +122,6 @@ export class TokenHubRuntime implements LocalModelRuntime {
   private activeProcess: RunningProcess | null = null;
   private activeChatServer: {
     modelId: string;
-    apiKey: string;
     endpoint: string;
   } | null = null;
   private selectedChatModel: LocalChatRuntimeModel | null = null;
@@ -166,10 +186,10 @@ export class TokenHubRuntime implements LocalModelRuntime {
     return `${server.endpoint}/chat/completions`;
   }
 
-  /** Keeps the Hub-derived inference credential in the main process. */
+  /** Validates the active model before returning its unauthenticated local headers. */
   chatRequestHeaders(modelId: string): Record<string, string> {
-    const server = this.requireActiveChatServer(modelId);
-    return { Authorization: `Bearer ${server.apiKey}` };
+    this.requireActiveChatServer(modelId);
+    return {};
   }
 
   async startModel(model: LocalModelLaunchRequest): Promise<LocalModelRuntimeState> {
@@ -261,48 +281,35 @@ export class TokenHubRuntime implements LocalModelRuntime {
     model: LocalModelLaunchRequest
   ): Promise<void> {
     const transport = await this.transportFactory(device);
-    let license: TokenHubLicenseSession | null = null;
     try {
       this.assertCurrent(attempt);
       this.activeTransport = transport;
       const client = new TokenHubProtocolClient(transport);
       const deviceId = await client.authenticateIdentity();
       console.info('[TokenHub] Dongle identity authenticated.');
-      const credential = await client.deriveCredential();
-      if (!credential.deviceId.equals(deviceId)) {
-        throw new Error('Amis Hub B5 credential identity does not match its authenticated identity.');
-      }
-      license = new TokenHubLicenseSession(client, credential);
-      await license.authenticate();
-      const manifest = parseTokenHubManifest(await client.applicationManifest(), deviceId);
-      await this.validateProtectedFlash(client, license, manifest, attempt);
-      console.info('[TokenHub] Protected Flash verified.');
-      await license.close();
-      license = null;
       await transport.close();
       if (this.activeTransport === transport) this.activeTransport = null;
       this.assertCurrent(attempt);
 
       const resources = await this.runtimeLocator.resolve();
       const port = await this.portResolver.resolve(resources.serverPath);
-      const running = await this.launchServer(resources, device, model, credential.apiKey, port);
+      const running = await this.launchServer(resources, device, model, port);
       try {
         this.assertCurrent(attempt);
         this.activeProcess = running;
         console.info(`[TokenHub] llama-server launched with pid ${running.child.pid ?? 'unknown'}.`);
-        await this.waitUntilReady(running, credential.apiKey, port, attempt);
+        await this.waitUntilReady(running, port, attempt);
         console.info('[TokenHub] llama-server readiness check passed.');
         const runningModel: RunningHubModel = {
           deviceId: deviceId.toString('hex'),
           displayName: model.label,
           modelName: model.fileName,
           endpoint: serverEndpoint(port),
-          apiKey: credential.apiKey
+          apiKey: ''
         };
         this.assertCurrent(attempt);
         this.activeChatServer = {
           modelId: model.id,
-          apiKey: credential.apiKey,
           endpoint: serverEndpoint(port)
         };
         this.setState({
@@ -321,7 +328,6 @@ export class TokenHubRuntime implements LocalModelRuntime {
         throw error;
       }
     } finally {
-      if (license) await license.close().catch(() => undefined);
       if (this.activeTransport === transport) this.activeTransport = null;
       await transport.close().catch(() => undefined);
     }
@@ -353,75 +359,19 @@ export class TokenHubRuntime implements LocalModelRuntime {
     }
   }
 
-  private async validateProtectedFlash(
-    client: TokenHubProtocolClient,
-    license: TokenHubLicenseSession,
-    manifest: TokenHubApplicationManifest,
-    attempt: number
-  ): Promise<void> {
-    const info = await client.externalFileInfo();
-    if (info.fileSize !== manifest.fileSize || info.crc32 !== manifest.fileCrc32) {
-      throw new Error('Amis Hub Flash metadata does not match its authenticated manifest.');
-    }
-    const sha256 = createHash('sha256');
-    const crc32 = new TokenHubCrc32();
-    let offset = 0;
-    let magic = Buffer.alloc(0);
-    while (offset < manifest.fileSize) {
-      this.assertCurrent(attempt);
-      await license.refreshIfNeeded();
-      const size = Math.min(TOKEN_HUB_EXTERNAL_READ_CHUNK_SIZE, manifest.fileSize - offset);
-      const chunk = await client.externalFileChunk(offset, size);
-      if (offset === 0) magic = Buffer.from(chunk.subarray(0, 4));
-      sha256.update(chunk);
-      crc32.update(chunk);
-      offset += chunk.length;
-      await license.refreshIfNeeded();
-    }
-    if (crc32.value() !== manifest.fileCrc32) {
-      throw new Error('Amis Hub Flash download failed CRC32 verification.');
-    }
-    if (!sha256.digest().equals(manifest.fileSha256)) {
-      throw new Error('Amis Hub Flash download failed SHA256 verification.');
-    }
-    const supportedMagic = new Set([
-      'cefaedfe', 'cffaedfe', 'feedface', 'feedfacf',
-      'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca'
-    ]);
-    if (!supportedMagic.has(magic.toString('hex'))) {
-      throw new Error(`Amis Hub Flash server is not a compatible Mach-O executable: ${magic.toString('hex')}.`);
-    }
-  }
-
   private async launchServer(
     resources: { serverPath: string; templatePath: string },
     device: TokenHubDevice,
     model: LocalModelLaunchRequest,
-    apiKey: string,
     port: number
   ): Promise<RunningProcess> {
     const workingDirectory = await mkdtemp(path.join(os.tmpdir(), 'tokkey-tokenhub-'));
-    await copyFile(resources.templatePath, path.join(workingDirectory, 'qwen3_codex_compatible.jinja'));
-    const args = [
-      '-m', model.filePath,
-      '--host', '0.0.0.0',
-      '--port', String(port),
-      '--parallel', '1',
-      '-ngl', '99',
-      '-t', '2',
-      '-rea', 'on',
-      '--no-mmap',
-      '--cache-ram', '0',
-      '-ub', '4096',
-      '-b', '4096',
-      '-c', '16384',
-      '-fa', 'on',
-      '--no-cache-prompt',
-      '--rge', '0',
-      '--chat-template-file', 'qwen3_codex_compatible.jinja',
-      '--api-key', apiKey,
-      '--dongle-port', device.calloutPath
-    ];
+    const args = buildTokenHubServerArguments({
+      modelPath: model.filePath,
+      templatePath: resources.templatePath,
+      donglePort: device.calloutPath,
+      port
+    });
     const child = spawn(resources.serverPath, args, {
       cwd: workingDirectory,
       detached: true,
@@ -455,7 +405,6 @@ export class TokenHubRuntime implements LocalModelRuntime {
 
   private async waitUntilReady(
     running: RunningProcess,
-    apiKey: string,
     port: number,
     attempt: number
   ): Promise<void> {
@@ -468,7 +417,6 @@ export class TokenHubRuntime implements LocalModelRuntime {
       }
       try {
         const response = await fetch(`${serverEndpoint(port)}/models`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
           signal: AbortSignal.timeout(2_000)
         });
         if (response.ok) return;
@@ -571,7 +519,6 @@ export class TokenHubRuntime implements LocalModelRuntime {
 
   private requireActiveChatServer(modelId: string): {
     modelId: string;
-    apiKey: string;
     endpoint: string;
   } {
     const server = this.activeChatServer;

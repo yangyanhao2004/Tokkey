@@ -46,7 +46,7 @@ export class TokenHubRuntimeLocator {
         // Continue through the explicit, packaged, and development candidates.
       }
     }
-    throw new Error(`The Dongle-enabled llama-server is missing. Searched: ${this.roots.join(':')}`);
+    throw new Error(`The Dongle V3-enabled llama-server is missing. Searched: ${this.roots.join(':')}`);
   }
 
   private async validateServer(serverPath: string): Promise<void> {
@@ -59,11 +59,16 @@ export class TokenHubRuntimeLocator {
     if (!supportedMachOMagic.has(magic)) {
       throw new Error(`Hub server is not a compatible Mach-O executable: ${magic}.`);
     }
-    const missing = ['--api-key', '--dongle-port', '--chat-template-file'].filter(
-      (option) => data.indexOf(Buffer.from(option)) < 0
+    const requiredMarkers = [
+      '--dongle-port',
+      '--chat-template-file',
+      'Dongle V3 authentication passed'
+    ];
+    const missing = requiredMarkers.filter(
+      (marker) => data.indexOf(Buffer.from(marker)) < 0
     );
     if (missing.length > 0) {
-      throw new Error(`Hub server does not support required options: ${missing.join(', ')}.`);
+      throw new Error(`Hub server does not support Dongle V3: ${missing.join(', ')}.`);
     }
   }
 }
