@@ -124,15 +124,28 @@ but that only saves ~2s of the 17 — use `npm run gateway:freeze:clean` after
 changing dependencies or the spec, when a stale cache is the likelier suspect.
 
 Rebuilds are not byte-reproducible: `_internal/base_library.zip` (1.3MB) embeds
-timestamps and so differs on every run. Because the bundle is committed, every
-app launch leaves that one file modified in `git status`. Nothing else in the
-tree changes.
+timestamps and so differs on every run. The frozen bundle and the
+`runtime/amis-gateway/build/` cache are ignored by Git; only the gateway source,
+packaging inputs, and dependency lockfile are committed.
 
 PyInstaller cannot cross-compile: the bundle always matches the machine that
-built it. The committed tree is arm64 macOS, which is the only target the app
+built it. The packaged target is arm64 macOS, which is the only target the app
 supports today (`TokenHubRuntimeLocator` already refuses anything else). An
 Intel or Linux build must be produced on that host and land in its own `<arch>`
 folder — `process.arch` names the folder verbatim, so Intel macOS is `x64/`.
+
+### Other runtime resources
+
+Router executables are supplied separately and are ignored by Git. Before
+running the router or packaging the app, place the matching executable at
+`resources/RouterRuntime/<goarch>/router/router-<goos>-<goarch>` (for example,
+`resources/RouterRuntime/arm64/router/router-darwin-arm64` on Apple Silicon).
+For development, `AMIS_ROUTER_EXECUTABLE=/path/to/router` can override this path.
+The router's Go source and build tooling are not included in this repository.
+
+TokenHub obtains its server executable from the Dongle. Its Jinja chat template
+under `resources/TokenHubRuntime/` remains committed; local server binaries and
+shared libraries are ignored.
 
 ## Adding a renderer API
 

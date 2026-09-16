@@ -218,6 +218,7 @@ export class TokkeyApp {
     process.on('uncaughtException', (error: unknown) => {
       console.error('[Tokkey] Uncaught exception in the main process:', error);
       this.releaseBorrowedConfigs();
+      this.tokenHubRuntime.shutdownNow();
       // `app.exit` rather than `app.quit`: the process is in an unknown state,
       // and a graceful quit could stall on the very thing that just threw.
       app.exit(1);
