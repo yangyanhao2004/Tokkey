@@ -14,12 +14,12 @@ Types of import:
 IMPORTANT: Do NOT post this list to the issue-tracker. Use it as a basis for
             tracking down the missing module yourself. Thanks!
 
-missing module named _winapi - imported by encodings (delayed, conditional, optional), ntpath (optional), shutil (conditional), subprocess (conditional), multiprocessing.connection (optional), multiprocessing.spawn (delayed, conditional), multiprocessing.reduction (conditional), multiprocessing.shared_memory (conditional), multiprocessing.heap (conditional), multiprocessing.popen_spawn_win32 (top-level), asyncio.windows_events (top-level), asyncio.windows_utils (top-level), mimetypes (optional)
+missing module named _winapi - imported by encodings (delayed, conditional, optional), shutil (conditional), ntpath (optional), subprocess (conditional), multiprocessing.connection (optional), multiprocessing.spawn (delayed, conditional), multiprocessing.reduction (conditional), multiprocessing.shared_memory (conditional), multiprocessing.heap (conditional), multiprocessing.popen_spawn_win32 (top-level), asyncio.windows_events (top-level), asyncio.windows_utils (top-level), mimetypes (optional)
 missing module named msvcrt - imported by subprocess (optional), multiprocessing.spawn (delayed, conditional), multiprocessing.popen_spawn_win32 (top-level), asyncio.windows_events (top-level), asyncio.windows_utils (top-level), click._winconsole (top-level), click._termui_impl (conditional), getpass (optional)
 missing module named _frozen_importlib_external - imported by importlib._bootstrap (delayed), importlib (optional), importlib.abc (optional), zipimport (top-level)
 excluded module named _frozen_importlib - imported by importlib (optional), importlib.abc (optional), zipimport (top-level)
 missing module named winreg - imported by importlib._bootstrap_external (conditional), platform (delayed, optional), mimetypes (optional), urllib.request (delayed, conditional, optional), setuptools._distutils.compilers.C.msvc (top-level), requests.utils (delayed, conditional, optional), setuptools.msvc (conditional), pygments.formatters.img (optional)
-missing module named nt - imported by os (delayed, conditional, optional), ntpath (optional), shutil (conditional), importlib._bootstrap_external (conditional), ctypes (delayed, conditional)
+missing module named nt - imported by shutil (conditional), importlib._bootstrap_external (conditional), ntpath (optional), os (delayed, conditional, optional), ctypes (delayed, conditional)
 missing module named multiprocessing.BufferTooShort - imported by multiprocessing (top-level), multiprocessing.connection (top-level)
 missing module named multiprocessing.AuthenticationError - imported by multiprocessing (top-level), multiprocessing.connection (top-level)
 missing module named multiprocessing.get_context - imported by multiprocessing (top-level), multiprocessing.pool (top-level), multiprocessing.managers (top-level), multiprocessing.sharedctypes (top-level)
@@ -41,7 +41,7 @@ missing module named usercustomize - imported by site (delayed, optional)
 missing module named sitecustomize - imported by site (delayed, optional)
 missing module named trove_classifiers - imported by setuptools.config._validate_pyproject.formats (optional)
 missing module named _manylinux - imported by setuptools._vendor.packaging._manylinux (delayed, optional)
-missing module named pyimod02_importers - imported by /Users/qiliu/.cache/uv/archive-v0/nWwccB0SQwGbtnzd8ipTb/lib/python3.12/site-packages/PyInstaller/hooks/rthooks/pyi_rth_pkgutil.py (delayed)
+missing module named pyimod02_importers - imported by /Users/amis/.cache/uv/archive-v0/wIt73qW9xb2LArfAIi89a/lib/python3.12/site-packages/PyInstaller/hooks/rthooks/pyi_rth_pkgutil.py (delayed)
 missing module named trio - imported by httpx._transports.asgi (delayed, conditional), httpcore._synchronization (optional), httpcore._backends.trio (top-level), openai.resources.vector_stores.file_batches (delayed, conditional)
 missing module named 'trio.testing' - imported by anyio._backends._trio (delayed)
 missing module named exceptiongroup - imported by anyio._core._exceptions (conditional), anyio._core._sockets (conditional), starlette._utils (conditional, optional), anyio._backends._asyncio (conditional), anyio._backends._trio (conditional)

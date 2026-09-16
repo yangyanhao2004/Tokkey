@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { constants } from 'node:fs';
+import { constants, rmSync } from 'node:fs';
 import { access, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,11 +15,16 @@ import type {
   LocalModelRuntime
 } from '../LocalModelRuntime';
 import TokenHubDeviceProbe from './TokenHubDeviceProbe';
-import { TokenHubProtocolClient } from './TokenHubProtocol';
+import {
+  TokenHubPresenceSession,
+  TokenHubProtocolClient,
+  verifyTokenHubManifest
+} from './TokenHubProtocol';
 import TokenHubRuntimeLocator from './TokenHubRuntimeLocator';
 import TokenHubSerialTransport, {
   type TokenHubCommandTransport
 } from './TokenHubSerialTransport';
+import TokenHubServerStager, { type TokenHubServerStaging } from './TokenHubServerStager';
 import LocalPortResolver from '../../process/LocalPortResolver';
 
 const DEFAULT_SERVER_PORT = 8081;
@@ -66,11 +71,13 @@ interface DeviceProbing {
 }
 
 interface RuntimeLocating {
-  resolve(): Promise<{ serverPath: string; templatePath: string }>;
+  resolve(): Promise<{ templatePath: string }>;
 }
 
 interface RunningProcess {
   child: ChildProcess;
+  serverPath: string;
+  serverFileUnlinked: boolean;
   workingDirectory: string;
   output: ProcessOutput;
   exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
@@ -102,12 +109,17 @@ function delay(milliseconds: number): Promise<void> {
   });
 }
 
+function stagedTokenHubServerPath(): string {
+  return path.join(os.tmpdir(), 'tokkey-tokenhub-runtime', 'llama-server');
+}
+
 /** Owns the single authenticated Dongle/server lifecycle used by local model deployment and Chat. */
 export class TokenHubRuntime implements LocalModelRuntime {
   private readonly listeners = new Set<RuntimeStateListener>();
   private readonly deviceProbe: DeviceProbing;
   private readonly transportFactory: TransportFactory;
   private readonly runtimeLocator: RuntimeLocating;
+  private readonly serverStager: TokenHubServerStaging;
   private readonly portResolver: LocalPortResolver;
   private readonly profileConnector: HubModelConnecting | null;
   private state: LocalModelRuntimeState = {
@@ -119,18 +131,21 @@ export class TokenHubRuntime implements LocalModelRuntime {
   };
   private monitorTimer: NodeJS.Timeout | null = null;
   private activeTransport: TokenHubCommandTransport | null = null;
+  private activeStagedServerPath: string | null = null;
   private activeProcess: RunningProcess | null = null;
   private activeChatServer: {
     modelId: string;
     endpoint: string;
   } | null = null;
   private selectedChatModel: LocalChatRuntimeModel | null = null;
+  private startReserved = false;
   private generation = 0;
 
   constructor(options: {
     deviceProbe?: DeviceProbing;
     transportFactory?: TransportFactory;
     runtimeLocator?: RuntimeLocating;
+    serverStager?: TokenHubServerStaging;
     portResolver?: LocalPortResolver;
     profileConnector?: HubModelConnecting | null;
   } = {}) {
@@ -141,6 +156,7 @@ export class TokenHubRuntime implements LocalModelRuntime {
       return transport;
     });
     this.runtimeLocator = options.runtimeLocator ?? new TokenHubRuntimeLocator();
+    this.serverStager = options.serverStager ?? new TokenHubServerStager();
     this.portResolver = options.portResolver ?? new LocalPortResolver({
       preferredPort: DEFAULT_SERVER_PORT,
       logLabel: 'TokenHub'
@@ -193,54 +209,61 @@ export class TokenHubRuntime implements LocalModelRuntime {
   }
 
   async startModel(model: LocalModelLaunchRequest): Promise<LocalModelRuntimeState> {
-    if (this.state.phase === 'starting' || this.state.phase === 'running') {
+    if (this.startReserved || this.state.phase === 'starting' || this.state.phase === 'running') {
       throw new Error('Another local model is already starting or running.');
     }
-    if (path.extname(model.filePath).toLowerCase() !== '.gguf') {
-      throw new Error(`The selected local model is not a GGUF file: ${model.filePath}`);
-    }
-    await access(model.filePath, constants.R_OK).catch(() => {
-      throw new Error(`The selected local model no longer exists: ${model.filePath}`);
-    });
-    this.selectedChatModel = { id: model.id, label: model.label };
-
-    const [device] = await this.deviceProbe.connectedDevices();
-    if (!device) {
-      this.setState({
-        phase: 'failed',
-        modelId: model.id,
-        endpoint: null,
-        error: 'Insert an Amis Hub before starting a model.',
-        device: null
-      });
-      throw new Error('Insert an Amis Hub before starting a model.');
-    }
-
+    this.startReserved = true;
     const attempt = ++this.generation;
-    this.setState({
-      phase: 'starting',
-      modelId: model.id,
-      endpoint: null,
-      error: null,
-      device
-    });
-    console.info(`[TokenHub] Starting local model ${model.fileName}.`);
     try {
-      await this.runStart(attempt, device, model);
-      return this.snapshot();
-    } catch (cause) {
-      const error = cause instanceof Error ? cause : new Error(String(cause));
-      if (this.generation === attempt) {
-        await this.releaseOwnedResources();
+      if (path.extname(model.filePath).toLowerCase() !== '.gguf') {
+        throw new Error(`The selected local model is not a GGUF file: ${model.filePath}`);
+      }
+      await access(model.filePath, constants.R_OK).catch(() => {
+        throw new Error(`The selected local model no longer exists: ${model.filePath}`);
+      });
+      this.assertCurrent(attempt);
+      this.selectedChatModel = { id: model.id, label: model.label };
+
+      const [device] = await this.deviceProbe.connectedDevices();
+      this.assertCurrent(attempt);
+      if (!device) {
         this.setState({
           phase: 'failed',
           modelId: model.id,
           endpoint: null,
-          error: error.message,
-          device: this.state.device
+          error: 'Insert an Amis Hub before starting a model.',
+          device: null
         });
+        throw new Error('Insert an Amis Hub before starting a model.');
       }
-      throw error;
+
+      this.setState({
+        phase: 'starting',
+        modelId: model.id,
+        endpoint: null,
+        error: null,
+        device
+      });
+      console.info(`[TokenHub] Starting local model ${model.fileName}.`);
+      try {
+        await this.runStart(attempt, device, model);
+        return this.snapshot();
+      } catch (cause) {
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        if (this.generation === attempt) {
+          await this.releaseOwnedResources();
+          this.setState({
+            phase: 'failed',
+            modelId: model.id,
+            endpoint: null,
+            error: error.message,
+            device: this.state.device
+          });
+        }
+        throw error;
+      }
+    } finally {
+      this.startReserved = false;
     }
   }
 
@@ -265,13 +288,16 @@ export class TokenHubRuntime implements LocalModelRuntime {
     this.monitorTimer = null;
     void this.activeTransport?.close();
     this.activeTransport = null;
+    const stagedServerPath = this.activeStagedServerPath;
+    this.activeStagedServerPath = null;
+    if (stagedServerPath) this.removeStagedServerNow(stagedServerPath);
     this.activeChatServer = null;
     const running = this.activeProcess;
     this.activeProcess = null;
     if (running) {
       this.signalProcess(running.child, 'SIGTERM');
       this.signalProcess(running.child, 'SIGKILL');
-      void rm(running.workingDirectory, { recursive: true, force: true });
+      this.cleanupRunningFilesNow(running);
     }
   }
 
@@ -281,27 +307,59 @@ export class TokenHubRuntime implements LocalModelRuntime {
     model: LocalModelLaunchRequest
   ): Promise<void> {
     const transport = await this.transportFactory(device);
+    let presence: TokenHubPresenceSession | null = null;
+    let stagedServerPath: string | null = null;
     try {
       this.assertCurrent(attempt);
       this.activeTransport = transport;
       const client = new TokenHubProtocolClient(transport);
-      const deviceId = await client.authenticateIdentity();
-      console.info('[TokenHub] Dongle identity authenticated.');
+      const identity = await client.readCertifiedIdentity();
+      console.info('[TokenHub] Dongle identity and certificate authenticated.');
+
+      const resources = await this.runtimeLocator.resolve();
+      const serverPath = stagedTokenHubServerPath();
+      const port = await this.portResolver.resolve(serverPath);
+      presence = new TokenHubPresenceSession(client, identity);
+      await presence.authenticate();
+      const manifest = verifyTokenHubManifest(await client.applicationManifest(), identity.deviceId);
+      stagedServerPath = serverPath;
+      this.activeStagedServerPath = serverPath;
+      await this.serverStager.stage({
+        client,
+        lease: presence,
+        manifest,
+        serverPath,
+        assertCurrent: () => this.assertCurrent(attempt)
+      });
+      console.info('[TokenHub] Downloaded and verified llama-server from the Dongle.');
+
+      await presence.refresh();
+      await presence.close();
+      presence = null;
       await transport.close();
       if (this.activeTransport === transport) this.activeTransport = null;
       this.assertCurrent(attempt);
 
-      const resources = await this.runtimeLocator.resolve();
-      const port = await this.portResolver.resolve(resources.serverPath);
-      const running = await this.launchServer(resources, device, model, port);
+      let running = await this.launchServer(
+        { serverPath, templatePath: resources.templatePath },
+        device,
+        model,
+        port
+      );
+      stagedServerPath = null;
+      this.activeStagedServerPath = null;
       try {
         this.assertCurrent(attempt);
         this.activeProcess = running;
         console.info(`[TokenHub] llama-server launched with pid ${running.child.pid ?? 'unknown'}.`);
         await this.waitUntilReady(running, port, attempt);
+        await this.removeStagedServer(running.serverPath);
+        const readyRunning = { ...running, serverFileUnlinked: true };
+        if (this.activeProcess === running) this.activeProcess = readyRunning;
+        running = readyRunning;
         console.info('[TokenHub] llama-server readiness check passed.');
         const runningModel: RunningHubModel = {
-          deviceId: deviceId.toString('hex'),
+          deviceId: identity.deviceId.toString('hex'),
           displayName: model.label,
           modelName: model.fileName,
           endpoint: serverEndpoint(port),
@@ -328,6 +386,13 @@ export class TokenHubRuntime implements LocalModelRuntime {
         throw error;
       }
     } finally {
+      if (presence) await presence.close().catch(() => undefined);
+      if (stagedServerPath) {
+        await this.removeStagedServer(stagedServerPath).catch((error) => {
+          console.warn(`[TokenHub] Could not clean up staged llama-server: ${String(error)}`);
+        });
+        if (this.activeStagedServerPath === stagedServerPath) this.activeStagedServerPath = null;
+      }
       if (this.activeTransport === transport) this.activeTransport = null;
       await transport.close().catch(() => undefined);
     }
@@ -375,14 +440,7 @@ export class TokenHubRuntime implements LocalModelRuntime {
     const child = spawn(resources.serverPath, args, {
       cwd: workingDirectory,
       detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        DYLD_LIBRARY_PATH: [
-          path.join(path.dirname(resources.serverPath), 'lib'),
-          process.env.DYLD_LIBRARY_PATH
-        ].filter(Boolean).join(':')
-      }
+      stdio: ['ignore', 'pipe', 'pipe']
     });
     const output = new ProcessOutput();
     child.stdout?.on('data', (data: Buffer) => output.append(data));
@@ -397,10 +455,20 @@ export class TokenHubRuntime implements LocalModelRuntime {
         child.once('error', reject);
       });
     } catch (cause) {
-      await rm(workingDirectory, { recursive: true, force: true });
+      await Promise.allSettled([
+        rm(workingDirectory, { recursive: true, force: true }),
+        this.removeStagedServer(resources.serverPath)
+      ]);
       throw new Error(`The Amis Hub llama-server could not be launched: ${String(cause)}`);
     }
-    return { child, workingDirectory, output, exited };
+    return {
+      child,
+      serverPath: resources.serverPath,
+      serverFileUnlinked: false,
+      workingDirectory,
+      output,
+      exited
+    };
   }
 
   private async waitUntilReady(
@@ -435,7 +503,7 @@ export class TokenHubRuntime implements LocalModelRuntime {
     modelId: string
   ): Promise<void> {
     await running.exited;
-    await rm(running.workingDirectory, { recursive: true, force: true });
+    await this.cleanupRunningFiles(running);
     if (this.generation !== attempt || this.activeProcess !== running) return;
     this.activeProcess = null;
     this.activeChatServer = null;
@@ -457,27 +525,34 @@ export class TokenHubRuntime implements LocalModelRuntime {
   }
 
   private async refreshDevice(): Promise<void> {
-    let device: TokenHubDevice | null;
+    let connectedDevices: TokenHubDevice[];
     try {
-      [device = null] = await this.deviceProbe.connectedDevices();
+      connectedDevices = await this.deviceProbe.connectedDevices();
     } catch (error) {
       console.warn(`[TokenHub] Device scan failed: ${String(error)}`);
       return;
     }
-    if (sameDevice(device, this.state.device)) return;
     const wasActive = this.state.phase === 'starting' || this.state.phase === 'running';
+    const activeDevice = this.state.device;
+    const activeDeviceStillConnected = activeDevice !== null && connectedDevices.some(
+      (candidate) => sameDevice(candidate, activeDevice)
+    );
+    const device = wasActive && activeDeviceStillConnected
+      ? activeDevice
+      : connectedDevices[0] ?? null;
+    if (sameDevice(device, this.state.device)) return;
     const modelId = this.state.modelId;
     this.state = { ...this.state, device };
     this.publish();
-    if (!device && wasActive) {
+    if (wasActive && !activeDeviceStillConnected) {
       this.generation += 1;
       await this.releaseOwnedResources();
       this.setState({
         phase: 'failed',
         modelId,
         endpoint: null,
-        error: 'The Amis Hub authentication device was removed.',
-        device: null
+        error: 'The Amis Hub authentication device was removed or replaced.',
+        device
       });
     }
   }
@@ -486,6 +561,13 @@ export class TokenHubRuntime implements LocalModelRuntime {
     const transport = this.activeTransport;
     this.activeTransport = null;
     await transport?.close().catch(() => undefined);
+    const stagedServerPath = this.activeStagedServerPath;
+    this.activeStagedServerPath = null;
+    if (stagedServerPath) {
+      await this.removeStagedServer(stagedServerPath).catch((error) => {
+        console.warn(`[TokenHub] Could not clean up staged llama-server: ${String(error)}`);
+      });
+    }
     const running = this.activeProcess;
     this.activeProcess = null;
     this.activeChatServer = null;
@@ -501,7 +583,49 @@ export class TokenHubRuntime implements LocalModelRuntime {
         await running.exited;
       }
     }
-    await rm(running.workingDirectory, { recursive: true, force: true });
+    await this.cleanupRunningFiles(running);
+  }
+
+  private async cleanupRunningFiles(running: RunningProcess): Promise<void> {
+    const cleanup = [rm(running.workingDirectory, { recursive: true, force: true })];
+    if (!running.serverFileUnlinked) cleanup.push(this.removeStagedServer(running.serverPath));
+    const results = await Promise.allSettled(cleanup);
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        console.warn(`[TokenHub] Could not clean up temporary runtime files: ${String(result.reason)}`);
+      }
+    }
+  }
+
+  private async removeStagedServer(serverPath: string): Promise<void> {
+    try {
+      await this.serverStager.remove(serverPath);
+    } catch (error) {
+      console.warn(`[TokenHub] Direct staged llama-server removal failed; removing its private directory: ${String(error)}`);
+    }
+    await rm(path.dirname(serverPath), {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 50
+    });
+  }
+
+  private removeStagedServerNow(serverPath: string): void {
+    try {
+      rmSync(path.dirname(serverPath), { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[TokenHub] Could not synchronously remove staged llama-server: ${String(error)}`);
+    }
+  }
+
+  private cleanupRunningFilesNow(running: RunningProcess): void {
+    try {
+      rmSync(running.workingDirectory, { recursive: true, force: true });
+    } catch (error) {
+      console.warn(`[TokenHub] Could not synchronously remove temporary server files: ${String(error)}`);
+    }
+    if (!running.serverFileUnlinked) this.removeStagedServerNow(running.serverPath);
   }
 
   private signalProcess(child: ChildProcess, signal: NodeJS.Signals): void {

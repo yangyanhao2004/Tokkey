@@ -1,12 +1,9 @@
 import {
-  createHash,
-  createHmac,
   createPublicKey,
-  hkdfSync,
   randomBytes,
-  timingSafeEqual,
   verify
 } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import type {
   TokenHubCommandResponse,
   TokenHubCommandTransport
@@ -17,19 +14,37 @@ const PUBLIC_KEY_SIZE = 1_312;
 const SIGNATURE_SIZE = 2_420;
 const NONCE_SIZE = 32;
 const SESSION_ID_SIZE = 16;
-const KEY_ID_SIZE = 8;
-const API_KEY_PREFIX = 'sk_dongle_v1_';
-const API_KEY_LENGTH = 73;
+const CERTIFICATE_SIZE = 1_440;
+const CERTIFICATE_BODY_SIZE = 1_376;
+const CERTIFICATE_ISSUER_OFFSET = 1_328;
+const CERTIFICATE_VALID_FROM_OFFSET = 1_360;
+const CERTIFICATE_VALID_TO_OFFSET = 1_368;
+const CERTIFICATE_ISSUER = Buffer.from('AMIS-DEV-CA');
+const PRESENCE_VERSION = 3;
+const MAX_PENDING_TTL_MS = 3_000;
+const MAX_LEASE_TTL_MS = 90_000;
+const DEFAULT_REFRESH_INTERVAL_MS = 30_000;
 const AUTHENTICATION_CONTEXT = Buffer.alloc(14);
+const ED25519_SPKI_PREFIX = Buffer.from([
+  0x30, 0x2a,
+  0x30, 0x05,
+  0x06, 0x03, 0x2b, 0x65, 0x70,
+  0x03, 0x21, 0x00
+]);
+
+export const TOKEN_HUB_CA_PUBLIC_KEY = Buffer.from(
+  'a6536e4c3c110a41222e80c8be64996b23e9f778f9764d44bbe777882c3076e1',
+  'hex'
+);
 
 const COMMAND = {
   getPublicKey: 0xa0,
+  getCertificate: 0xa2,
   getStatus: 0xa3,
   signChallenge: 0xa5,
   externalFileInfo: 0xac,
   externalFileRead: 0xad,
   readApplicationManifest: 0xb2,
-  deriveApiKey: 0xb5,
   authBegin: 0xb6,
   authProve: 0xb7,
   authRefresh: 0xb8,
@@ -38,12 +53,9 @@ const COMMAND = {
 
 export const TOKEN_HUB_EXTERNAL_READ_CHUNK_SIZE = 0xffff - 4;
 
-export interface TokenHubCredential {
+export interface TokenHubCertifiedIdentity {
   deviceId: Buffer;
-  keyEpoch: number;
-  keyId: Buffer;
-  apiKey: string;
-  keyMaterial: Buffer;
+  publicKey: Buffer;
 }
 
 export interface TokenHubApplicationManifest {
@@ -72,14 +84,6 @@ function appendUInt32(value: number): Buffer {
   return bytes;
 }
 
-function hmac(key: Buffer, data: Buffer): Buffer {
-  return createHmac('sha256', key).update(data).digest();
-}
-
-function equalsConstantTime(left: Buffer, right: Buffer): boolean {
-  return left.length === right.length && timingSafeEqual(left, right);
-}
-
 /** Wraps the firmware's raw ML-DSA-44 public key in a standards-compliant SPKI. */
 export function wrapMldsa44PublicKey(publicKey: Buffer): Buffer {
   if (publicKey.length !== PUBLIC_KEY_SIZE) {
@@ -94,7 +98,20 @@ export function wrapMldsa44PublicKey(publicKey: Buffer): Buffer {
   return Buffer.concat([header, publicKey]);
 }
 
-/** Verifies the A5 challenge using ML-DSA-44 and the firmware's fixed context. */
+/** Verifies an ML-DSA-44 signature under the firmware's fixed context. */
+export function verifyTokenHubSignature(
+  publicKey: Buffer,
+  message: Buffer,
+  signature: Buffer
+): boolean {
+  if (signature.length !== SIGNATURE_SIZE) {
+    throw new Error(`ML-DSA-44 signature is ${signature.length}/${SIGNATURE_SIZE} bytes.`);
+  }
+  const key = createPublicKey({ key: wrapMldsa44PublicKey(publicKey), format: 'der', type: 'spki' });
+  return verify(null, message, { key, context: AUTHENTICATION_CONTEXT }, signature);
+}
+
+/** Verifies the optional A5 32-byte challenge using ML-DSA-44. */
 export function verifyTokenHubChallenge(
   publicKey: Buffer,
   challenge: Buffer,
@@ -103,14 +120,94 @@ export function verifyTokenHubChallenge(
   if (challenge.length !== NONCE_SIZE) {
     throw new Error(`ML-DSA-44 challenge is ${challenge.length}/${NONCE_SIZE} bytes.`);
   }
-  if (signature.length !== SIGNATURE_SIZE) {
-    throw new Error(`ML-DSA-44 signature is ${signature.length}/${SIGNATURE_SIZE} bytes.`);
-  }
-  const key = createPublicKey({ key: wrapMldsa44PublicKey(publicKey), format: 'der', type: 'spki' });
-  return verify(null, challenge, { key, context: AUTHENTICATION_CONTEXT }, signature);
+  return verifyTokenHubSignature(publicKey, challenge, signature);
 }
 
-/** Parses the demo-trust v2 manifest used to bind Flash contents to the chip. */
+function ed25519PublicKey(publicKey: Buffer): ReturnType<typeof createPublicKey> {
+  if (publicKey.length !== 32) {
+    throw new Error(`Amis Hub CA public key is ${publicKey.length}/32 bytes.`);
+  }
+  return createPublicKey({
+    key: Buffer.concat([ED25519_SPKI_PREFIX, publicKey]),
+    format: 'der',
+    type: 'spki'
+  });
+}
+
+function isAsciiDate(value: Buffer): boolean {
+  return value.length === 8 && value.every((byte) => byte >= 0x30 && byte <= 0x39);
+}
+
+function utcDate(): string {
+  const now = new Date();
+  return [
+    now.getUTCFullYear().toString().padStart(4, '0'),
+    (now.getUTCMonth() + 1).toString().padStart(2, '0'),
+    now.getUTCDate().toString().padStart(2, '0')
+  ].join('');
+}
+
+function monotonicMilliseconds(): number {
+  return performance.now();
+}
+
+/** Verifies the CA signature and A0 identity binding of a V3 device certificate. */
+export function verifyTokenHubCertificate(
+  certificate: Buffer,
+  expectedDeviceId: Buffer,
+  expectedPublicKey: Buffer,
+  caPublicKey = TOKEN_HUB_CA_PUBLIC_KEY,
+  currentDate = utcDate()
+): TokenHubCertifiedIdentity {
+  if (certificate.length !== CERTIFICATE_SIZE) {
+    throw new Error(`Amis Hub certificate is ${certificate.length}/${CERTIFICATE_SIZE} bytes.`);
+  }
+  if (!certificate.subarray(0, 4).equals(Buffer.from('DC01'))) {
+    throw new Error('Amis Hub certificate magic is not DC01.');
+  }
+  if (certificate.readUInt16LE(4) !== 2 || certificate.readUInt16LE(6) !== 0) {
+    throw new Error('Amis Hub certificate version or flags are unsupported.');
+  }
+  if (expectedDeviceId.length !== DEVICE_ID_SIZE || expectedPublicKey.length !== PUBLIC_KEY_SIZE) {
+    throw new Error('Amis Hub certificate was checked against an invalid A0 identity.');
+  }
+  const certificateDeviceId = certificate.subarray(8, 16);
+  const certificatePublicKey = certificate.subarray(16, 16 + PUBLIC_KEY_SIZE);
+  if (!certificateDeviceId.equals(expectedDeviceId) || !certificatePublicKey.equals(expectedPublicKey)) {
+    throw new Error('Amis Hub certificate does not match the connected Dongle identity.');
+  }
+  const issuer = certificate.subarray(CERTIFICATE_ISSUER_OFFSET, CERTIFICATE_ISSUER_OFFSET + 16);
+  if (
+    !issuer.subarray(0, CERTIFICATE_ISSUER.length).equals(CERTIFICATE_ISSUER) ||
+    issuer.subarray(CERTIFICATE_ISSUER.length).some((byte) => byte !== 0)
+  ) {
+    throw new Error('Amis Hub certificate issuer is not trusted.');
+  }
+  const validFrom = certificate.subarray(CERTIFICATE_VALID_FROM_OFFSET, CERTIFICATE_VALID_FROM_OFFSET + 8);
+  const validTo = certificate.subarray(CERTIFICATE_VALID_TO_OFFSET, CERTIFICATE_VALID_TO_OFFSET + 8);
+  if (!isAsciiDate(validFrom) || !isAsciiDate(validTo)) {
+    throw new Error('Amis Hub certificate has an invalid validity period.');
+  }
+  const validFromText = validFrom.toString('ascii');
+  const validToText = validTo.toString('ascii');
+  if (validFromText > validToText || currentDate < validFromText || currentDate > validToText) {
+    throw new Error('Amis Hub certificate is outside its validity period.');
+  }
+  if (!verify(
+    null,
+    certificate.subarray(0, CERTIFICATE_BODY_SIZE),
+    ed25519PublicKey(caPublicKey),
+    certificate.subarray(CERTIFICATE_BODY_SIZE)
+  )) {
+    throw new Error('Amis Hub certificate CA signature verification failed.');
+  }
+  return {
+    deviceId: Buffer.from(certificateDeviceId),
+    publicKey: Buffer.from(certificatePublicKey)
+  };
+}
+
+/** Parses the V3 manifest fields that bind the protected Flash payload to one Dongle. */
 export function parseTokenHubManifest(
   manifest: Buffer,
   expectedDeviceId: Buffer
@@ -141,27 +238,54 @@ export function parseTokenHubManifest(
   };
 }
 
+/** Verifies the CA signature before parsing a manifest that authorizes the Flash payload. */
+export function verifyTokenHubManifest(
+  manifest: Buffer,
+  expectedDeviceId: Buffer,
+  caPublicKey = TOKEN_HUB_CA_PUBLIC_KEY
+): TokenHubApplicationManifest {
+  if (manifest.length !== 128) throw new Error(`Amis Hub manifest has invalid length ${manifest.length}.`);
+  if (!verify(null, manifest.subarray(0, 64), ed25519PublicKey(caPublicKey), manifest.subarray(64))) {
+    throw new Error('Amis Hub manifest CA signature verification failed.');
+  }
+  return parseTokenHubManifest(manifest, expectedDeviceId);
+}
+
 /** Typed asynchronous client for the firmware commands used during startup. */
 export class TokenHubProtocolClient {
   constructor(private readonly transport: TokenHubCommandTransport) {}
 
-  async authenticateIdentity(expectedDeviceId?: Buffer): Promise<Buffer> {
+  /** Reads A0/A2 and verifies the device identity against the embedded vendor CA. */
+  async readCertifiedIdentity(expectedDeviceId?: Buffer): Promise<TokenHubCertifiedIdentity> {
     const status = await this.requireOk(COMMAND.getStatus);
     if (status.length < 4) throw new Error('Amis Hub status response is incomplete.');
-    if (status[0] !== 1 || status[1] !== 1) {
+    if ((status[0] !== 1 && status[0] !== 2) || status[1] !== 1) {
       throw new Error('Amis Hub has no generated key or provisioned certificate.');
     }
 
     const identity = await this.requireOk(COMMAND.getPublicKey);
-    if (identity.length < DEVICE_ID_SIZE + PUBLIC_KEY_SIZE) {
-      throw new Error('Amis Hub public-key response is incomplete.');
-    }
-    const deviceId = identity.subarray(0, DEVICE_ID_SIZE);
+    assertLength(COMMAND.getPublicKey, identity, DEVICE_ID_SIZE + PUBLIC_KEY_SIZE, 'a certified identity');
+    const deviceId = Buffer.from(identity.subarray(0, DEVICE_ID_SIZE));
+    const publicKey = Buffer.from(identity.subarray(DEVICE_ID_SIZE));
     if (expectedDeviceId && !deviceId.equals(expectedDeviceId)) {
       throw new Error(
         `Amis Hub device ID ${deviceId.toString('hex')} does not match ${expectedDeviceId.toString('hex')}.`
       );
     }
+
+    const certificateResponse = await this.requireOk(COMMAND.getCertificate);
+    if (certificateResponse.length < 2) throw new Error('Amis Hub A2 certificate response is incomplete.');
+    const certificateLength = certificateResponse.readUInt16LE(0);
+    const certificate = certificateResponse.subarray(2);
+    if (certificateLength !== CERTIFICATE_SIZE || certificate.length !== certificateLength) {
+      throw new Error('Amis Hub A2 certificate response has an invalid length.');
+    }
+    return verifyTokenHubCertificate(certificate, deviceId, publicKey);
+  }
+
+  /** Performs the optional A5 diagnostic challenge after certificate authentication. */
+  async authenticateIdentity(expectedDeviceId?: Buffer): Promise<Buffer> {
+    const identity = await this.readCertifiedIdentity(expectedDeviceId);
     const challenge = randomBytes(NONCE_SIZE);
     const signed = await this.requireOk(COMMAND.signChallenge, challenge);
     if (signed.length < 4) throw new Error('Amis Hub A5 response is incomplete.');
@@ -175,98 +299,107 @@ export class TokenHubProtocolClient {
       throw new Error('Amis Hub A5 response has invalid challenge or signature lengths.');
     }
     const signature = signed.subarray(4, 4 + signatureLength);
-    const publicKey = identity.subarray(DEVICE_ID_SIZE, DEVICE_ID_SIZE + PUBLIC_KEY_SIZE);
-    if (!verifyTokenHubChallenge(publicKey, challenge, signature)) {
+    if (!verifyTokenHubChallenge(identity.publicKey, challenge, signature)) {
       throw new Error('Amis Hub challenge-response signature verification failed.');
     }
-    return Buffer.from(deviceId);
+    return identity.deviceId;
   }
 
-  async deriveCredential(): Promise<TokenHubCredential> {
-    const data = await this.requireOk(COMMAND.deriveApiKey);
-    const headerSize = DEVICE_ID_SIZE + 4 + KEY_ID_SIZE + 2;
-    if (data.length < headerSize) throw new Error('Amis Hub B5 credential response is incomplete.');
-    const deviceId = Buffer.from(data.subarray(0, DEVICE_ID_SIZE));
-    const keyEpoch = data.readUInt32LE(DEVICE_ID_SIZE);
-    const keyIdOffset = DEVICE_ID_SIZE + 4;
-    const keyId = Buffer.from(data.subarray(keyIdOffset, keyIdOffset + KEY_ID_SIZE));
-    const apiKeyLength = data.readUInt16LE(keyIdOffset + KEY_ID_SIZE);
-    const apiKey = data.subarray(headerSize).toString('ascii');
-    if (apiKeyLength !== API_KEY_LENGTH || data.length !== headerSize + apiKeyLength) {
-      throw new Error('Amis Hub returned an invalid B5 API key length.');
-    }
-    const keyMaterial = this.parseApiKey(apiKey, deviceId);
-    const derivedKeyId = createHash('sha256').update(keyMaterial).digest().subarray(0, KEY_ID_SIZE);
-    if (!equalsConstantTime(keyId, derivedKeyId)) {
-      throw new Error('Amis Hub API key identifier does not match its key material.');
-    }
-    return { deviceId, keyEpoch, keyId, apiKey, keyMaterial };
-  }
-
-  async beginAuthorization(keyId: Buffer, hostNonce: Buffer): Promise<{
+  async beginPresence(hostNonce: Buffer): Promise<{
     authId: Buffer;
     deviceId: Buffer;
     deviceNonce: Buffer;
     pendingTtl: number;
   }> {
-    if (keyId.length !== KEY_ID_SIZE || hostNonce.length !== NONCE_SIZE) {
-      throw new Error('Amis Hub B6 key ID or nonce length is invalid.');
+    if (hostNonce.length !== NONCE_SIZE) {
+      throw new Error('Amis Hub B6 V3 nonce length is invalid.');
     }
-    const data = await this.requireOk(COMMAND.authBegin, Buffer.concat([Buffer.from([1]), keyId, hostNonce]));
-    assertLength(COMMAND.authBegin, data, 60, 'a 60-byte authorization challenge');
+    const data = await this.requireOk(
+      COMMAND.authBegin,
+      Buffer.concat([Buffer.from([PRESENCE_VERSION]), hostNonce])
+    );
+    assertLength(COMMAND.authBegin, data, 60, 'a 60-byte V3 presence challenge');
+    const pendingTtl = data.readUInt32LE(56);
+    if (pendingTtl === 0 || pendingTtl > MAX_PENDING_TTL_MS) {
+      throw new Error('Amis Hub B6 returned an invalid V3 pending TTL.');
+    }
     return {
       authId: Buffer.from(data.subarray(0, 16)),
       deviceId: Buffer.from(data.subarray(16, 24)),
       deviceNonce: Buffer.from(data.subarray(24, 56)),
-      pendingTtl: data.readUInt32LE(56)
+      pendingTtl
     };
   }
 
-  async proveAuthorization(authId: Buffer, hostProof: Buffer): Promise<{
+  async provePresence(authId: Buffer): Promise<{
     sessionId: Buffer;
     leaseTtl: number;
-    deviceProof: Buffer;
+    signature: Buffer;
   }> {
-    const data = await this.requireOk(COMMAND.authProve, Buffer.concat([authId, hostProof]));
-    assertLength(COMMAND.authProve, data, 52, 'a 52-byte authorized session');
+    if (authId.length !== SESSION_ID_SIZE) throw new Error('Amis Hub B7 V3 authentication ID is invalid.');
+    const data = await this.requireOk(COMMAND.authProve, authId);
+    assertLength(COMMAND.authProve, data, 22 + SIGNATURE_SIZE, 'a signed V3 presence lease');
+    const leaseTtl = data.readUInt32LE(16);
+    if (leaseTtl === 0 || leaseTtl > MAX_LEASE_TTL_MS || data.readUInt16LE(20) !== SIGNATURE_SIZE) {
+      throw new Error('Amis Hub B7 returned an invalid V3 presence lease.');
+    }
     return {
       sessionId: Buffer.from(data.subarray(0, 16)),
-      leaseTtl: data.readUInt32LE(16),
-      deviceProof: Buffer.from(data.subarray(20, 52))
+      leaseTtl,
+      signature: Buffer.from(data.subarray(22))
     };
   }
 
-  async refreshAuthorization(sessionId: Buffer, sequence: number, proof: Buffer): Promise<{
+  async refreshPresence(sessionId: Buffer, sequence: number, hostNonce: Buffer): Promise<{
     sequence: number;
-    remainingTtl: number;
-    deviceProof: Buffer;
+    leaseTtl: number;
+    signature: Buffer;
   }> {
+    if (sessionId.length !== SESSION_ID_SIZE || hostNonce.length !== NONCE_SIZE) {
+      throw new Error('Amis Hub B8 V3 session or nonce length is invalid.');
+    }
     const data = await this.requireOk(
       COMMAND.authRefresh,
-      Buffer.concat([sessionId, appendUInt32(sequence), proof])
+      Buffer.concat([sessionId, appendUInt32(sequence), hostNonce])
     );
-    assertLength(COMMAND.authRefresh, data, 40, 'a 40-byte lease refresh');
+    assertLength(COMMAND.authRefresh, data, 10 + SIGNATURE_SIZE, 'a signed V3 lease refresh');
+    const leaseTtl = data.readUInt32LE(4);
+    if (data.readUInt32LE(0) !== sequence || leaseTtl === 0 || leaseTtl > MAX_LEASE_TTL_MS) {
+      throw new Error('Amis Hub B8 returned an invalid V3 lease refresh.');
+    }
+    if (data.readUInt16LE(8) !== SIGNATURE_SIZE) {
+      throw new Error('Amis Hub B8 returned an invalid V3 lease signature length.');
+    }
     return {
-      sequence: data.readUInt32LE(0),
-      remainingTtl: data.readUInt32LE(4),
-      deviceProof: Buffer.from(data.subarray(8, 40))
+      sequence,
+      leaseTtl,
+      signature: Buffer.from(data.subarray(10))
     };
   }
 
-  async closeAuthorization(sessionId: Buffer, sequence: number, proof: Buffer): Promise<void> {
+  async closePresence(sessionId: Buffer, sequence: number, hostNonce: Buffer): Promise<void> {
+    if (sessionId.length !== SESSION_ID_SIZE || hostNonce.length !== NONCE_SIZE) {
+      throw new Error('Amis Hub B9 V3 session or nonce length is invalid.');
+    }
     const data = await this.requireOk(
       COMMAND.authClose,
-      Buffer.concat([sessionId, appendUInt32(sequence), proof])
+      Buffer.concat([sessionId, appendUInt32(sequence), hostNonce])
     );
-    if (!data.equals(Buffer.from([1]))) throw new Error('Amis Hub B9 response is invalid.');
+    if (!data.equals(Buffer.from([PRESENCE_VERSION]))) {
+      throw new Error('Amis Hub B9 V3 response is invalid.');
+    }
   }
 
   async applicationManifest(): Promise<Buffer> {
     const response = await this.transport.sendCommand(COMMAND.readApplicationManifest);
     if (response.status === 0x09) throw new Error('Amis Hub manifest authentication expired.');
-    if (response.status === 0x0b) throw new Error('Amis Hub application manifest is missing.');
+    if (response.status === 0x0b) {
+      throw new Error(
+        'Amis Hub application manifest is missing. Factory provisioning must install a CA-signed manifest for this Dongle llama-server.'
+      );
+    }
     this.requireOkResponse(COMMAND.readApplicationManifest, response);
-    if (response.data.length < 2 || response.data.readUInt16LE(0) !== 128 || response.data.length < 130) {
+    if (response.data.length !== 130 || response.data.readUInt16LE(0) !== 128) {
       throw new Error('Amis Hub application manifest response is malformed.');
     }
     return Buffer.from(response.data.subarray(2, 130));
@@ -295,7 +428,7 @@ export class TokenHubProtocolClient {
     return Buffer.from(chunk);
   }
 
-  private async requireOk(command: number, payload = Buffer.alloc(0)): Promise<Buffer> {
+  private async requireOk(command: number, payload: Buffer = Buffer.alloc(0)): Promise<Buffer> {
     const response = await this.transport.sendCommand(command, payload);
     this.requireOkResponse(command, response);
     return response.data;
@@ -316,131 +449,128 @@ export class TokenHubProtocolClient {
       (hint ? `: ${hint}` : '.')
     );
   }
-
-  private parseApiKey(apiKey: string, expectedDeviceId: Buffer): Buffer {
-    if (Buffer.byteLength(apiKey, 'ascii') !== API_KEY_LENGTH || !apiKey.startsWith(API_KEY_PREFIX)) {
-      throw new Error('Amis Hub returned an API key with an unexpected format.');
-    }
-    const deviceStart = API_KEY_PREFIX.length;
-    const separator = deviceStart + 16;
-    if (
-      apiKey[separator] !== '_' ||
-      apiKey.slice(deviceStart, separator).toLowerCase() !== expectedDeviceId.toString('hex')
-    ) {
-      throw new Error('Amis Hub API key device identifier does not match the response.');
-    }
-    const keyMaterial = Buffer.from(apiKey.slice(separator + 1), 'base64url');
-    if (keyMaterial.length !== 32) throw new Error('Amis Hub API key secret is not 32 bytes.');
-    return keyMaterial;
-  }
 }
 
-/** Owns and locally verifies the B6-B9 lease used while reading protected Flash. */
-export class TokenHubLicenseSession {
-  private sessionId: Buffer | null = null;
-  private sessionKey: Buffer | null = null;
-  private sequence = 0;
-  private lastRefreshAt = 0;
+interface TokenHubPresenceLease {
+  sessionId: Buffer;
+  sequence: number;
+  expiresAt: number;
+  refreshAt: number;
+}
+
+/** Owns the V3 signed presence lease used while reading protected Flash. */
+export class TokenHubPresenceSession {
+  private lease: TokenHubPresenceLease | null = null;
 
   constructor(
     private readonly client: TokenHubProtocolClient,
-    private readonly credential: TokenHubCredential,
-    private readonly refreshIntervalMs = 30_000
+    private readonly identity: TokenHubCertifiedIdentity,
+    private readonly refreshIntervalMs = DEFAULT_REFRESH_INTERVAL_MS
   ) {}
 
   async authenticate(): Promise<void> {
     const hostNonce = randomBytes(NONCE_SIZE);
-    const challenge = await this.client.beginAuthorization(this.credential.keyId, hostNonce);
-    if (!challenge.deviceId.equals(this.credential.deviceId)) {
-      throw new Error('Amis Hub B6 device ID does not match the authenticated identity.');
+    const beginStartedAt = monotonicMilliseconds();
+    const challenge = await this.client.beginPresence(hostNonce);
+    if (!challenge.deviceId.equals(this.identity.deviceId)) {
+      throw new Error('Amis Hub B6 device ID does not match its certified identity.');
     }
-    const hostProof = hmac(
-      this.credential.keyMaterial,
-      this.transcript('HOST', hostNonce, challenge.deviceNonce, challenge.authId)
-    );
-    const authorized = await this.client.proveAuthorization(challenge.authId, hostProof);
-    const deviceTranscript = Buffer.concat([
-      this.transcript('DONGLE', hostNonce, challenge.deviceNonce, challenge.authId),
+    const pendingExpiresAt = beginStartedAt + challenge.pendingTtl;
+    const proveStartedAt = monotonicMilliseconds();
+    const authorized = await this.client.provePresence(challenge.authId);
+    if (monotonicMilliseconds() >= pendingExpiresAt) {
+      throw new Error('Amis Hub B7 V3 presence challenge expired.');
+    }
+    const transcript = Buffer.concat([
+      Buffer.from('DONGLE-PRESENCE'),
+      Buffer.from([PRESENCE_VERSION]),
+      this.identity.deviceId,
+      hostNonce,
+      challenge.deviceNonce,
+      challenge.authId,
       authorized.sessionId,
       appendUInt32(authorized.leaseTtl)
     ]);
-    const expectedProof = hmac(this.credential.keyMaterial, deviceTranscript);
-    this.sessionId = authorized.sessionId;
-    this.sessionKey = Buffer.from(
-      hkdfSync(
-        'sha256',
-        this.credential.keyMaterial,
-        Buffer.concat([hostNonce, challenge.deviceNonce]),
-        Buffer.concat([Buffer.from('SESSION'), authorized.sessionId]),
-        32
-      )
-    );
-    this.sequence = 0;
-    this.lastRefreshAt = Date.now();
-    if (!equalsConstantTime(expectedProof, authorized.deviceProof)) {
-      throw new Error('Amis Hub Dongle proof verification failed during B7.');
+    if (!verifyTokenHubSignature(this.identity.publicKey, transcript, authorized.signature)) {
+      throw new Error('Amis Hub B7 V3 presence signature verification failed.');
     }
+    if (monotonicMilliseconds() >= proveStartedAt + authorized.leaseTtl) {
+      throw new Error('Amis Hub B7 V3 presence lease expired during verification.');
+    }
+    this.lease = {
+      sessionId: authorized.sessionId,
+      sequence: 0,
+      expiresAt: proveStartedAt + authorized.leaseTtl,
+      refreshAt: proveStartedAt + this.nextRefreshDelay(authorized.leaseTtl)
+    };
   }
 
   async refreshIfNeeded(): Promise<void> {
-    if (Date.now() - this.lastRefreshAt < this.refreshIntervalMs) return;
+    const lease = this.requireLease();
+    if (monotonicMilliseconds() >= lease.expiresAt) {
+      this.lease = null;
+      throw new Error('Amis Hub V3 presence lease expired locally.');
+    }
+    if (monotonicMilliseconds() < lease.refreshAt) return;
     await this.refresh();
   }
 
-  async close(): Promise<void> {
-    if (!this.sessionId || !this.sessionKey) return;
-    const sessionId = this.sessionId;
-    const sessionKey = this.sessionKey;
-    this.sessionId = null;
-    this.sessionKey = null;
-    const nextSequence = this.nextSequence();
-    const proof = hmac(
-      sessionKey,
-      Buffer.concat([Buffer.from('CLOSE'), sessionId, appendUInt32(nextSequence)])
-    );
-    await this.client.closeAuthorization(sessionId, nextSequence, proof);
-  }
-
-  private async refresh(): Promise<void> {
-    if (!this.sessionId || !this.sessionKey) throw new Error('Amis Hub has no active Flash lease.');
-    const nextSequence = this.nextSequence();
-    const proof = hmac(
-      this.sessionKey,
-      Buffer.concat([Buffer.from('REFRESH'), this.sessionId, appendUInt32(nextSequence)])
-    );
-    const response = await this.client.refreshAuthorization(this.sessionId, nextSequence, proof);
-    this.sequence = nextSequence;
-    if (response.sequence !== nextSequence) throw new Error('Amis Hub B8 returned an unexpected sequence.');
-    const expectedProof = hmac(
-      this.sessionKey,
-      Buffer.concat([
-        Buffer.from('REFRESH-OK'),
-        this.sessionId,
-        appendUInt32(nextSequence),
-        appendUInt32(response.remainingTtl)
-      ])
-    );
-    if (!equalsConstantTime(expectedProof, response.deviceProof)) {
-      throw new Error('Amis Hub Dongle proof verification failed during B8.');
+  /** Forces a signed B8 before releasing the serial port to the native server. */
+  async refresh(): Promise<void> {
+    const lease = this.requireLease();
+    try {
+      const startedAt = monotonicMilliseconds();
+      if (startedAt >= lease.expiresAt) {
+        throw new Error('Amis Hub V3 presence lease expired locally.');
+      }
+      if (lease.sequence >= 0xffff_ffff) throw new Error('Amis Hub V3 authorization sequence is exhausted.');
+      const sequence = lease.sequence + 1;
+      const hostNonce = randomBytes(NONCE_SIZE);
+      const response = await this.client.refreshPresence(lease.sessionId, sequence, hostNonce);
+      if (monotonicMilliseconds() >= lease.expiresAt) {
+        throw new Error('Amis Hub V3 presence lease expired before B8 completed.');
+      }
+      const transcript = Buffer.concat([
+        Buffer.from('DONGLE-PRESENCE-REFRESH'),
+        Buffer.from([PRESENCE_VERSION]),
+        this.identity.deviceId,
+        lease.sessionId,
+        appendUInt32(sequence),
+        hostNonce,
+        appendUInt32(response.leaseTtl)
+      ]);
+      if (!verifyTokenHubSignature(this.identity.publicKey, transcript, response.signature)) {
+        throw new Error('Amis Hub B8 V3 presence signature verification failed.');
+      }
+      if (monotonicMilliseconds() >= startedAt + response.leaseTtl) {
+        throw new Error('Amis Hub B8 V3 presence lease expired during verification.');
+      }
+      this.lease = {
+        sessionId: lease.sessionId,
+        sequence,
+        expiresAt: startedAt + response.leaseTtl,
+        refreshAt: startedAt + this.nextRefreshDelay(response.leaseTtl)
+      };
+    } catch (cause) {
+      this.lease = null;
+      throw cause;
     }
-    this.lastRefreshAt = Date.now();
   }
 
-  private nextSequence(): number {
-    if (this.sequence >= 0xffff_ffff) throw new Error('Amis Hub authorization sequence is exhausted.');
-    return this.sequence + 1;
+  async close(): Promise<void> {
+    const lease = this.lease;
+    this.lease = null;
+    if (!lease || monotonicMilliseconds() >= lease.expiresAt || lease.sequence >= 0xffff_ffff) return;
+    await this.client.closePresence(lease.sessionId, lease.sequence + 1, randomBytes(NONCE_SIZE));
   }
 
-  private transcript(domain: string, hostNonce: Buffer, deviceNonce: Buffer, authId: Buffer): Buffer {
-    return Buffer.concat([
-      Buffer.from(domain),
-      Buffer.from([1]),
-      this.credential.keyId,
-      this.credential.deviceId,
-      hostNonce,
-      deviceNonce,
-      authId
-    ]);
+  private requireLease(): TokenHubPresenceLease {
+    if (!this.lease) throw new Error('Amis Hub has no active V3 presence lease.');
+    return this.lease;
+  }
+
+  private nextRefreshDelay(leaseTtl: number): number {
+    return Math.min(this.refreshIntervalMs, Math.max(1, Math.floor(leaseTtl / 3)));
   }
 }
 

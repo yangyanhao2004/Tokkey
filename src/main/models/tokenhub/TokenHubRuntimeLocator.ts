@@ -1,13 +1,12 @@
 import { constants } from 'node:fs';
-import { access, readFile } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import path from 'node:path';
 
 export interface TokenHubRuntimeResources {
-  serverPath: string;
   templatePath: string;
 }
 
-/** Resolves the architecture-specific Dongle server and Qwen chat template. */
+/** Resolves the locally packaged Qwen chat template for the Dongle-provided server. */
 export class TokenHubRuntimeLocator {
   private readonly roots: string[];
 
@@ -32,44 +31,16 @@ export class TokenHubRuntimeLocator {
     }
     for (const root of this.roots) {
       const resources = {
-        serverPath: path.join(root, 'tokenhub_server', 'llama-server'),
         templatePath: path.join(root, 'qwen3_codex_compatible.jinja')
       };
       try {
-        await Promise.all([
-          access(resources.serverPath, constants.X_OK),
-          access(resources.templatePath, constants.R_OK)
-        ]);
-        await this.validateServer(resources.serverPath);
+        await access(resources.templatePath, constants.R_OK);
         return resources;
       } catch {
         // Continue through the explicit, packaged, and development candidates.
       }
     }
-    throw new Error(`The Dongle V3-enabled llama-server is missing. Searched: ${this.roots.join(':')}`);
-  }
-
-  private async validateServer(serverPath: string): Promise<void> {
-    const data = await readFile(serverPath);
-    const magic = data.subarray(0, 4).toString('hex');
-    const supportedMachOMagic = new Set([
-      'cefaedfe', 'cffaedfe', 'feedface', 'feedfacf',
-      'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca'
-    ]);
-    if (!supportedMachOMagic.has(magic)) {
-      throw new Error(`Hub server is not a compatible Mach-O executable: ${magic}.`);
-    }
-    const requiredMarkers = [
-      '--dongle-port',
-      '--chat-template-file',
-      'Dongle V3 authentication passed'
-    ];
-    const missing = requiredMarkers.filter(
-      (marker) => data.indexOf(Buffer.from(marker)) < 0
-    );
-    if (missing.length > 0) {
-      throw new Error(`Hub server does not support Dongle V3: ${missing.join(', ')}.`);
-    }
+    throw new Error(`The Amis Hub chat template is missing. Searched: ${this.roots.join(':')}`);
   }
 }
 
