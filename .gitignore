@@ -24,10 +24,8 @@ runtime/amis-gateway/build/
 runtime/amis-gateway/**/__pycache__/
 runtime/amis-gateway/.pytest_cache/
 runtime/amis-gateway/.ruff_cache/
-resources/GatewayRuntime/
 
 # Runtime executables are supplied locally; keep TokenHub's Jinja source template.
-resources/RouterRuntime/
 resources/TokenHubRuntime/**/tokenhub_server/
 resources/TokenHubRuntime/**/llama-server
 resources/TokenHubRuntime/**/*.dylib
