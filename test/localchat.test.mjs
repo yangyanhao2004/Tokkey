@@ -89,6 +89,22 @@ function chatRuntime(endpoint) {
   };
 }
 
+/** The idle phase the real runtime publishes when it serves nothing. */
+const IDLE_RUNTIME_PHASE = {
+  phase: 'idle', modelId: null, endpoint: null, error: null, device: null
+};
+
+/** The running phase the real runtime publishes once llama-server answers. */
+function runningPhase(modelId) {
+  return {
+    phase: 'running',
+    modelId,
+    endpoint: 'http://127.0.0.1:8081/v1',
+    error: null,
+    device: null
+  };
+}
+
 const sqliteAvailable = await import('node:sqlite').then(
   () => true,
   () => false
@@ -128,11 +144,13 @@ test('deploying a downloaded model starts the shared local runtime before it bec
   let runtimeStateListener = null;
   let startedModel = null;
   let chatRuntimeState = { status: 'unavailable', model: null, contextWindowTokens: null, error: null };
+  let runtimePhase = IDLE_RUNTIME_PHASE;
   const localRuntime = {
     subscribe: (listener) => {
       runtimeStateListener = listener;
       return () => {};
     },
+    getState: async () => runtimePhase,
     getLocalChatRuntimeState: () => chatRuntimeState,
     startModel: async (model) => {
       startedModel = model;
@@ -142,9 +160,12 @@ test('deploying a downloaded model starts the shared local runtime before it bec
         contextWindowTokens: 16384,
         error: null
       };
-      runtimeStateListener({ phase: 'running', modelId: model.id, endpoint: 'http://127.0.0.1:8081/v1', error: null, device: null });
+      runtimePhase = runningPhase(model.id);
+      runtimeStateListener(runtimePhase);
     },
-    stopModel: async () => {},
+    stopModel: async () => {
+      runtimePhase = IDLE_RUNTIME_PHASE;
+    },
     chatCompletionsUrl: () => 'http://127.0.0.1:8081/v1/chat/completions',
     chatRequestHeaders: () => ({ Authorization: 'Bearer hub-key' })
   };
@@ -179,15 +200,18 @@ test('starting a discovered installed model starts the shared local runtime', as
   };
   let startedModel = null;
   let chatRuntimeState = { status: 'unavailable', model: null, contextWindowTokens: null, error: null };
+  let runtimePhase = IDLE_RUNTIME_PHASE;
   const manager = new LocalModelManager({
     downloader: {
       listInstalled: async () => [installedModel],
+      markDeploymentStopping: () => {},
       markDeploymentStopped: () => {},
       markDeploymentReady: () => {},
       markDeploymentFailed: () => {}
     },
     localRuntime: {
       subscribe: () => () => {},
+      getState: async () => runtimePhase,
       getLocalChatRuntimeState: () => chatRuntimeState,
       startModel: async (model) => {
         startedModel = model;
@@ -197,11 +221,13 @@ test('starting a discovered installed model starts the shared local runtime', as
           contextWindowTokens: 16_384,
           error: null
         };
-        return {
-          phase: 'running', modelId: model.id, endpoint: 'http://127.0.0.1:8081/v1', error: null, device: null
-        };
+        runtimePhase = runningPhase(model.id);
+        return runtimePhase;
       },
-      stopModel: async () => ({ phase: 'idle', modelId: null, endpoint: null, error: null, device: null }),
+      stopModel: async () => {
+        runtimePhase = IDLE_RUNTIME_PHASE;
+        return runtimePhase;
+      },
       chatCompletionsUrl: () => 'http://127.0.0.1:8081/v1/chat/completions',
       chatRequestHeaders: () => ({ Authorization: 'Bearer hub-key' })
     }
@@ -231,20 +257,33 @@ test('switching installed models stops the active Hub runtime before starting th
     contextWindowTokens: 16_384,
     error: null
   };
+  let runtimePhase = runningPhase('first');
+  let publish = () => {};
   const manager = new LocalModelManager({
     downloader: {
       listInstalled: async () => installedModels,
-      markDeploymentStopped: (modelId) => calls.push(`marked:${modelId}`),
+      markDeploymentStopping: (modelId) => calls.push(`stopping:${modelId}`),
+      markDeploymentStopped: (modelId) => calls.push(`stopped:${modelId}`),
       markDeploymentReady: () => {},
       markDeploymentFailed: () => {}
     },
     localRuntime: {
-      subscribe: () => () => {},
+      subscribe: (listener) => {
+        publish = listener;
+        return () => {};
+      },
+      getState: async () => runtimePhase,
       getLocalChatRuntimeState: () => runtimeState,
+      // Publishes the same two phases the real runtime does on the way down,
+      // which is how the outgoing model's row learns it has been stopped.
       stopModel: async () => {
         calls.push('stop');
+        runtimePhase = { ...runtimePhase, phase: 'stopping', endpoint: null };
+        publish(runtimePhase);
         runtimeState = { status: 'unavailable', model: null, contextWindowTokens: null, error: null };
-        return { phase: 'idle', modelId: null, endpoint: null, error: null, device: null };
+        runtimePhase = IDLE_RUNTIME_PHASE;
+        publish(runtimePhase);
+        return runtimePhase;
       },
       startModel: async (model) => {
         calls.push(`start:${model.id}`);
@@ -254,7 +293,9 @@ test('switching installed models stops the active Hub runtime before starting th
           contextWindowTokens: 16_384,
           error: null
         };
-        return { phase: 'running', modelId: model.id, endpoint: 'http://127.0.0.1:8081/v1', error: null, device: null };
+        runtimePhase = runningPhase(model.id);
+        publish(runtimePhase);
+        return runtimePhase;
       },
       chatCompletionsUrl: () => 'http://127.0.0.1:8081/v1/chat/completions',
       chatRequestHeaders: () => ({ Authorization: 'Bearer hub-key' })
@@ -263,7 +304,7 @@ test('switching installed models stops the active Hub runtime before starting th
 
   const state = await manager.startInstalledModel('second');
 
-  assert.deepEqual(calls, ['stop', 'marked:first', 'start:second']);
+  assert.deepEqual(calls, ['stop', 'stopping:first', 'stopped:first', 'start:second']);
   assert.equal(state.model?.id, 'second');
 });
 
@@ -279,6 +320,7 @@ test('local model deployment actions run one at a time so row state cannot resol
   const downloader = {
     capability: async () => ({ target: 'mac', freeDiskBytes: null, totalRamBytes: null, platform: 'darwin' }),
     projectRows: async (rows) => rows.map((descriptor) => ({ ...descriptor, lifecycle: 'downloaded' })),
+    markDeploymentStopping: () => {},
     markDeploymentStopped: () => {},
     markDeploymentReady: () => {},
     markDeploymentFailed: () => {},
@@ -288,11 +330,13 @@ test('local model deployment actions run one at a time so row state cannot resol
       filePath: `/models/${descriptor.fileName}`
     })
   };
+  let runtimePhase = IDLE_RUNTIME_PHASE;
   const localRuntime = {
     subscribe: (listener) => {
       runtimeStateListener = listener;
       return () => {};
     },
+    getState: async () => runtimePhase,
     getLocalChatRuntimeState: () => runtimeState,
     startModel: async (model) => {
       startedModelIds.push(model.id);
@@ -307,9 +351,12 @@ test('local model deployment actions run one at a time so row state cannot resol
         contextWindowTokens: 16384,
         error: null
       };
-      runtimeStateListener({ phase: 'running', modelId: model.id, endpoint: 'http://127.0.0.1:8081/v1', error: null, device: null });
+      runtimePhase = runningPhase(model.id);
+      runtimeStateListener(runtimePhase);
     },
-    stopModel: async () => {},
+    stopModel: async () => {
+      runtimePhase = IDLE_RUNTIME_PHASE;
+    },
     chatCompletionsUrl: () => 'http://127.0.0.1:8081/v1/chat/completions',
     chatRequestHeaders: () => ({ Authorization: 'Bearer hub-key' })
   };

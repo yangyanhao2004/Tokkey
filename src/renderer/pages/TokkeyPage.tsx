@@ -1,26 +1,28 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   ICON_BASE_PATH,
-  INSTALLED_EMPTY_MESSAGE,
-  INSTALLED_LOADING_MESSAGE,
   LOCAL_MODELS_FOOTNOTE,
   RECOMMENDED_LOCAL_MODEL,
   describeInstalledModel,
+  describeModelRemoveButton,
+  describeModelRuntimeButton,
   describeRecommendedButtons,
   describeRecommendedNote,
   findModelActionError,
   findRecommendedInstall,
   formatModelCount,
+  orderInstalledModels,
   type InstalledModel,
   type RecommendedModelButton
 } from './tokkeyContent';
 import { useInstalledModels } from '../hooks/useInstalledModels';
-import { useRecommendedModel } from '../hooks/useRecommendedModel';
+import { useRecommendedModel, type RecommendedModel } from '../hooks/useRecommendedModel';
 import { DownloadProgressButton } from '../components/DownloadProgressButton';
 import { IconTile } from '../components/IconTile';
 import { useNavigation } from '../components/NavigationProvider';
 import { PageShell } from '../components/PageShell';
 import { PushButton } from '../components/PushButton';
+import { StatusPill } from '../components/StatusPill';
 import { TitleBlock } from '../components/TitleBlock';
 import type { InstalledModels } from '../hooks/useInstalledModels';
 
@@ -49,72 +51,31 @@ function DeviceCard({ runtime }: DeviceCardProps) {
         <TitleBlock title={name} subtitle={detail} />
       </div>
 
-      <span className={`flex min-h-[19.114px] shrink-0 items-center gap-1 rounded-full px-2 py-1 ${
-        isConnected ? 'bg-status-ok-bg' : 'bg-fill-tile'
-      }`}>
-        {isConnected && (
-          <img
-            className="block size-[13.296px] max-w-none"
-            src={`${ICON_BASE_PATH}/main-badge-connected.svg`}
-            alt=""
-          />
-        )}
-        <span className={`text-[8.31px] leading-[10px] font-bold tracking-[0.0997px] ${
-          isConnected ? 'text-status-ok-text' : 'text-text-secondary'
-        }`}>
-          {isConnected ? 'Connected' : 'Not connected'}
-        </span>
-      </span>
+      <StatusPill
+        label={isConnected ? 'Connected' : 'Not connected'}
+        tone={isConnected ? 'ok' : 'muted'}
+        iconSrc={isConnected ? `${ICON_BASE_PATH}/main-badge-connected.svg` : undefined}
+      />
     </section>
   );
 }
 
 interface RecommendedModelCardProps {
-  installed: InstalledModels;
+  recommended: RecommendedModel;
 }
 
 /**
- * The recommended model, offered above the installed list (Figma 531:613).
+ * The recommended model while it is not yet on disk (Figma 531:613).
  *
- * It carries the same lifecycle the rows below do, and through the same paths:
- * downloading is the catalog's business, while starting and removing act on the
- * copy on disk and so go through the installed list, by the id that list knows
- * the model under. The two are kept in step in both directions — this card asks
- * the list to reload after every download it takes on, and re-scans whenever the
- * list reports this model installed, removed, or running.
+ * Downloading is all this card does. The moment the bytes land, the model joins
+ * the installed list below — marked as recommended — and every lifecycle action
+ * belongs to that row, so one model is never offered in two places at once.
  */
-function RecommendedModelCard({ installed }: RecommendedModelCardProps) {
-  const recommended = useRecommendedModel(installed.refresh);
-  const install = findRecommendedInstall(installed.models, recommended.row);
-  const isRunning = install !== null && installed.runningModelId === install.id;
+function RecommendedModelCard({ recommended }: RecommendedModelCardProps) {
+  const note = describeRecommendedNote(recommended.row, recommended.error);
+  const isBusy = recommended.isBusy;
 
-  // Only the two facts the list holds that this card's own scan cannot see, so
-  // an action taken on the same model below reaches the badge without the two
-  // refreshing each other in a loop.
-  const installId = install?.id ?? null;
-
-  // Start and remove run through the installed list, so a failure of either
-  // comes back from there — under the id that list knows this model under.
-  const note = describeRecommendedNote(
-    recommended.row,
-    recommended.error,
-    findModelActionError(installed.actionError, installId)
-  );
-  const { refresh } = recommended;
-
-  useEffect(refresh, [installId, isRunning, refresh]);
-
-  const isBusy = recommended.isBusy || (installId !== null && installed.busyModelId === installId);
-
-  // Downloads are the catalog's; anything acting on the bytes already on disk
-  // belongs to the installed list, which owns their id.
-  const press = (button: RecommendedModelButton) => {
-    if (button.kind === 'start' && install) return installed.start(install.id);
-    if (button.kind === 'remove' && install) return installed.remove(install.id);
-    if (button.kind === 'download' || button.kind === 'cancel') {
-      recommended.runAction(button.kind);
-    }
-  };
+  const press = (button: RecommendedModelButton) => recommended.runAction(button.kind);
 
   const renderButton = (button: RecommendedModelButton) => {
     const isDisabled = button.disabled || isBusy;
@@ -191,7 +152,7 @@ function RecommendedModelCard({ installed }: RecommendedModelCardProps) {
       </div>
 
       <div className="flex shrink-0 items-center justify-end gap-2">
-        {describeRecommendedButtons({ install, isRunning, row: recommended.row }).map(renderButton)}
+        {describeRecommendedButtons(recommended.row).map(renderButton)}
       </div>
     </section>
   );
@@ -200,15 +161,21 @@ function RecommendedModelCard({ installed }: RecommendedModelCardProps) {
 interface ModelRowProps {
   model: InstalledModel;
   installed: InstalledModels;
-  onStart: (modelId: string) => void;
-  onRemove: (modelId: string) => void;
 }
 
-/** One installed model with its start/remove actions. */
-function ModelRow({ model, installed, onStart, onRemove }: ModelRowProps) {
-  const isBusy = installed.busyModelId === model.id;
-  const isRunning = installed.runningModelId === model.id;
+/** One installed model with its start/stop and remove actions. */
+function ModelRow({ model, installed }: ModelRowProps) {
   const actionError = findModelActionError(installed.actionError, model.id);
+  // One button for the whole server lifecycle: it names what the runtime is
+  // doing, and pressing it asks for the opposite of what the runtime reports.
+  // Remove is the step after it, so it waits until the server is down.
+  const lifecycleState = {
+    runtime: installed.runtime,
+    busyModelId: installed.busyModelId,
+    busyAction: installed.busyAction
+  };
+  const lifecycle = describeModelRuntimeButton(model.id, lifecycleState);
+  const removal = describeModelRemoveButton(model.id, lifecycleState);
 
   return (
     <div
@@ -217,25 +184,37 @@ function ModelRow({ model, installed, onStart, onRemove }: ModelRowProps) {
     >
       <div className="flex w-full items-center justify-between">
         <div className="flex min-w-0 items-center gap-2">
-          <IconTile src={`${ICON_BASE_PATH}/main-model-cube.svg`} />
+          <span className="relative flex shrink-0">
+            <IconTile src={`${ICON_BASE_PATH}/main-model-cube.svg`} />
+            {/* The badge's own mark, in the badge's own place on the tile. */}
+            {model.isRecommended && (
+              <img
+                className="absolute top-[19px] left-[20px] block size-[11px] max-w-none"
+                src={`${ICON_BASE_PATH}/main-badge-recommended.svg`}
+                alt="Recommended"
+                data-testid={`model-recommended-${model.id}`}
+              />
+            )}
+          </span>
           <TitleBlock title={model.name} subtitle={model.detail} />
         </div>
 
         <div className="flex shrink-0 items-center justify-end gap-2">
           <PushButton
-            onClick={() => onStart(model.id)}
-            disabled={isBusy || isRunning}
-            testId={`model-start-${model.id}`}
+            onClick={() => (lifecycle.kind === 'stop' ? installed.stop(model.id) : installed.start(model.id))}
+            disabled={lifecycle.disabled}
+            progress={lifecycle.progress}
+            testId={`model-${lifecycle.kind}-${model.id}`}
           >
-            {isRunning ? 'Running' : 'Start'}
+            {lifecycle.label}
           </PushButton>
           <PushButton
             variant="plain"
-            onClick={() => onRemove(model.id)}
-            disabled={isBusy}
+            onClick={() => installed.remove(model.id)}
+            disabled={removal.disabled}
             testId={`model-remove-${model.id}`}
           >
-            Remove
+            {removal.label}
           </PushButton>
         </div>
       </div>
@@ -253,32 +232,20 @@ function ModelRow({ model, installed, onStart, onRemove }: ModelRowProps) {
   );
 }
 
-interface InstalledNoticeProps {
-  message: string;
-}
-
-/** Stands in for the list while nothing is installed or the scan failed. */
-function InstalledNotice({ message }: InstalledNoticeProps) {
-  return (
-    <p
-      className="w-full border-t border-separator px-4 py-3 text-[10px] leading-[12px] text-text-secondary"
-      data-testid="installed-notice"
-    >
-      {message}
-    </p>
-  );
-}
-
 interface LocalModelsCardProps {
   /** Opens the Add Model panel. */
   onAddModel: () => void;
   installed: InstalledModels;
+  /** The row the recommended badge handed over, or `null` while it holds it. */
+  recommendedModelId: string | null;
 }
 
 /** "Local Models" card: heading, installed list, and the single-runtime note. */
-function LocalModelsCard({ onAddModel, installed }: LocalModelsCardProps) {
-  const models = installed.models ?? [];
-  const emptyMessage = installed.isLoading ? INSTALLED_LOADING_MESSAGE : INSTALLED_EMPTY_MESSAGE;
+function LocalModelsCard({ onAddModel, installed, recommendedModelId }: LocalModelsCardProps) {
+  const models = useMemo(
+    () => orderInstalledModels(installed.models, recommendedModelId),
+    [installed.models, recommendedModelId]
+  );
 
   return (
     <section
@@ -306,18 +273,11 @@ function LocalModelsCard({ onAddModel, installed }: LocalModelsCardProps) {
           </span>
         </div>
 
-        {/* A failed scan still shows whatever rows survived from the last one. */}
-        {installed.error && <InstalledNotice message={installed.error} />}
-
-        {models.length === 0 && !installed.error && <InstalledNotice message={emptyMessage} />}
-
         {models.map((model) => (
           <ModelRow
             key={model.id}
-            model={describeInstalledModel(model)}
+            model={describeInstalledModel(model, model.id === recommendedModelId)}
             installed={installed}
-            onStart={installed.start}
-            onRemove={installed.remove}
           />
         ))}
       </div>
@@ -346,12 +306,26 @@ function LocalModelsCard({ onAddModel, installed }: LocalModelsCardProps) {
 export function TokkeyPage() {
   const { navigate } = useNavigation();
   const installed = useInstalledModels();
+  const recommended = useRecommendedModel(installed.refresh);
+  // The recommended model has one home at a time: the badge until its bytes are
+  // on disk, then the row below, which is where it is started, stopped, and
+  // removed. Removing it hands it back to the badge.
+  const recommendedInstall = findRecommendedInstall(installed.models, recommended.row);
+  const { refresh } = recommended;
+
+  // The badge's own scan cannot see a model arriving in or leaving the list, so
+  // the hand-over in either direction is what re-reads the catalog row.
+  useEffect(refresh, [recommendedInstall?.id, refresh]);
 
   return (
     <PageShell title="Tokkey" subtitle="Connect Tokkey and manage your local models." testId="tokkey">
       <DeviceCard runtime={installed.runtime} />
-      <RecommendedModelCard installed={installed} />
-      <LocalModelsCard installed={installed} onAddModel={() => navigate('add-model')} />
+      {recommendedInstall === null && <RecommendedModelCard recommended={recommended} />}
+      <LocalModelsCard
+        installed={installed}
+        recommendedModelId={recommendedInstall?.id ?? null}
+        onAddModel={() => navigate('add-model')}
+      />
     </PageShell>
   );
 }

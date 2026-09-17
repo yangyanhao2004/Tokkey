@@ -13,14 +13,17 @@ const INITIAL_RUNTIME_STATE: LocalModelRuntimeState = {
 };
 
 /**
- * A start or remove that failed, kept beside the model it was asked of rather
- * than folded into the list-wide error: the page reports it under that one row,
+ * An action that failed, kept beside the model it was asked of rather than
+ * folded into the list-wide error: the page reports it under that one row,
  * where the button that caused it is.
  */
 export interface ModelActionError {
   readonly modelId: string;
   readonly message: string;
 }
+
+/** What the page last asked of one model, while the main process still runs it. */
+export type ModelActionKind = 'start' | 'stop' | 'remove';
 
 export interface InstalledModels {
   models: InstalledLocalModel[] | null;
@@ -29,11 +32,15 @@ export interface InstalledModels {
   /** The last failed per-model action, or `null` once one succeeds. */
   actionError: ModelActionError | null;
   busyModelId: string | null;
+  /** The action `busyModelId` is waiting on, so a button can name it. */
+  busyAction: ModelActionKind | null;
   runtime: LocalModelRuntimeState;
   /** The model currently loaded in the shared local inference runtime. */
   runningModelId: string | null;
   refresh: () => void;
   start: (modelId: string) => void;
+  /** Stops the running model, which is the only one this runtime can serve. */
+  stop: (modelId: string) => void;
   remove: (modelId: string) => void;
 }
 
@@ -44,6 +51,7 @@ export function useInstalledModels(): InstalledModels {
   const [actionError, setActionError] = useState<ModelActionError | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<ModelActionKind | null>(null);
   const [runtime, setRuntime] = useState<LocalModelRuntimeState>(INITIAL_RUNTIME_STATE);
   const [runningModelId, setRunningModelId] = useState<string | null>(null);
   const isMountedRef = useRef(true);
@@ -93,8 +101,13 @@ export function useInstalledModels(): InstalledModels {
   }, []);
 
   const run = useCallback(
-    async (call: () => Promise<unknown>, modelId: string | null = null) => {
+    async (
+      call: () => Promise<unknown>,
+      modelId: string | null = null,
+      action: ModelActionKind | null = null
+    ) => {
       setBusyModelId(modelId);
+      setBusyAction(action);
       // A fresh attempt drops whatever the last one left behind, so a retry
       // never reads as still failing.
       setActionError(null);
@@ -116,6 +129,7 @@ export function useInstalledModels(): InstalledModels {
         if (isMountedRef.current) {
           setIsLoading(false);
           setBusyModelId(null);
+          setBusyAction(null);
         }
       }
     },
@@ -128,14 +142,21 @@ export function useInstalledModels(): InstalledModels {
 
   const start = useCallback(
     (modelId: string) => {
-      void run(() => window.tokkey.startInstalledLocalModel(modelId), modelId);
+      void run(() => window.tokkey.startInstalledLocalModel(modelId), modelId, 'start');
+    },
+    [run]
+  );
+
+  const stop = useCallback(
+    (modelId: string) => {
+      void run(() => window.tokkey.stopLocalModelRuntime(), modelId, 'stop');
     },
     [run]
   );
 
   const remove = useCallback(
     (modelId: string) => {
-      void run(() => window.tokkey.removeInstalledLocalModel(modelId), modelId);
+      void run(() => window.tokkey.removeInstalledLocalModel(modelId), modelId, 'remove');
     },
     [run]
   );
@@ -148,10 +169,12 @@ export function useInstalledModels(): InstalledModels {
     error: scanError ?? runtime.error,
     actionError,
     busyModelId,
+    busyAction,
     runtime,
     runningModelId,
     refresh,
     start,
+    stop,
     remove
   };
 }

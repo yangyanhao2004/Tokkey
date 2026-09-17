@@ -8,8 +8,12 @@
  * so the components never see bytes or timestamps.
  */
 
-import type { InstalledLocalModel, LocalModelRow } from '../../shared/types';
-import type { ModelActionError } from '../hooks/useInstalledModels';
+import type {
+  InstalledLocalModel,
+  LocalModelRow,
+  LocalModelRuntimeState
+} from '../../shared/types';
+import type { ModelActionError, ModelActionKind } from '../hooks/useInstalledModels';
 import { formatFileSize } from '../../shared/byteFormatting';
 import { describeModelLifecycle } from './addModelContent';
 
@@ -22,23 +26,31 @@ export interface InstalledModel {
   readonly name: string;
   /** Meta line, already joined with the middot the design uses. */
   readonly detail: string;
+  /** Draws the badge's own mark on the row, once the badge has handed it over. */
+  readonly isRecommended: boolean;
 }
-
-/** Stands in for the list while it is empty, loading, or unreadable. */
-export const INSTALLED_LOADING_MESSAGE = 'Reading downloaded models…';
-export const INSTALLED_EMPTY_MESSAGE = 'No models downloaded yet. Use "Add model" to download one.';
 
 /**
  * Turns one model on disk into the card's view of it. The size is the file's
  * real length rather than the figure the catalog published for it, and prints
  * in the same decimal unit as the Add Model page's free-space line.
  */
-export function describeInstalledModel(model: InstalledLocalModel): InstalledModel {
-  const detail = [formatFileSize(model.sizeBytes), 'Downloaded', model.provider]
+export function describeInstalledModel(
+  model: InstalledLocalModel,
+  isRecommended = false
+): InstalledModel {
+  // Leads the line, as the badge's eyebrow leads its own: it is what sets this
+  // row apart from the ones under it.
+  const detail = [
+    isRecommended ? 'Recommended' : '',
+    formatFileSize(model.sizeBytes),
+    'Downloaded',
+    model.provider
+  ]
     .filter((part) => part.length > 0)
     .join(' · ');
 
-  return { id: model.id, name: model.name, detail };
+  return { id: model.id, name: model.name, detail, isRecommended };
 }
 
 /**
@@ -59,35 +71,125 @@ export const RECOMMENDED_LOCAL_MODEL = {
 } as const;
 
 /**
- * What a badge button does. Downloading is the catalog's business; starting and
- * removing are the installed list's, exactly as they are for the rows below.
+ * What a badge button does — only ever a transfer.
+ *
+ * The badge stands in for the recommended model until its bytes are on disk;
+ * from then on the installed list holds it, marked as recommended, and every
+ * lifecycle action belongs to that row.
  */
-export type RecommendedActionKind = 'download' | 'cancel' | 'start' | 'remove';
+export type RecommendedActionKind = 'download' | 'cancel';
 
-/** One button on the recommended badge, which draws either one or two. */
+/** The single button on the recommended badge. */
 export interface RecommendedModelButton {
   readonly kind: RecommendedActionKind;
   readonly label: string;
   /** `progress` draws the button as the transfer's own progress track. */
-  readonly variant: 'filled' | 'plain' | 'progress';
-  /** True for a state the badge reports but cannot act on, e.g. "Running". */
+  readonly variant: 'filled' | 'progress';
+  /** True for a row the badge reports but cannot act on, e.g. one with no source. */
   readonly disabled: boolean;
 }
 
-/** The state the badge draws from: what is on disk, and what the catalog knows. */
-export interface RecommendedModelState {
-  /** The badge's model among the installed ones, or `null` if it is not there. */
-  readonly install: InstalledLocalModel | null;
-  readonly isRunning: boolean;
-  readonly row: LocalModelRow | null;
+/** Everything the one Start/Stop button reads, however the page draws it. */
+export interface ModelRuntimeState {
+  readonly runtime: LocalModelRuntimeState;
+  readonly busyModelId: string | null;
+  readonly busyAction: ModelActionKind | null;
 }
 
-const REMOVE_BUTTON: RecommendedModelButton = {
-  kind: 'remove',
-  label: 'Remove',
-  variant: 'plain',
-  disabled: false
-};
+/** The single lifecycle button a model carries, and what pressing it does. */
+export interface ModelRuntimeButton {
+  readonly kind: 'start' | 'stop';
+  readonly label: string;
+  readonly disabled: boolean;
+  /**
+   * The share of the button drawn as a progress track, or `null` for a flat
+   * chip. See `PushButton`'s own `progress`.
+   */
+  readonly progress: number | null;
+}
+
+/**
+ * How much of the button the design fills while a start or stop is in flight
+ * (Figma 531:817: a 16px fill in a 64px button).
+ *
+ * A fixed share rather than a measurement: llama-server reports nothing to
+ * count between the request and its readiness check, so the track is an
+ * affordance for "this is under way", which is what the design draws.
+ */
+const TRANSITION_TRACK_SHARE = 0.25;
+
+/** The Remove button, the step the lifecycle ends on once the server is down. */
+export interface ModelRemoveButton {
+  readonly kind: 'remove';
+  readonly label: string;
+  readonly disabled: boolean;
+}
+
+/**
+ * The phase the lifecycle buttons read for one model.
+ *
+ * The runtime serves one model at a time and names it, so any other model is
+ * idle whatever this one is doing.
+ */
+function runtimePhaseFor(modelId: string, runtime: LocalModelRuntimeState) {
+  return runtime.modelId === modelId ? runtime.phase : 'idle';
+}
+
+/**
+ * The Start/Stop button for one model.
+ *
+ * The runtime is the authority: the main process publishes `starting` when it
+ * takes the request, `running` once llama-server answers its readiness check,
+ * and `stopping` while the server is being torn down, so the label follows the
+ * server rather than the press — a start that fails leaves the phase behind
+ * `running` and the button reads "Start" again, with the reason on the row's
+ * error line.
+ *
+ * The pending action covers only what the runtime cannot yet know: the gap
+ * between the click and the first published phase.
+ */
+export function describeModelRuntimeButton(
+  modelId: string,
+  { runtime, busyModelId, busyAction }: ModelRuntimeState
+): ModelRuntimeButton {
+  const pending = busyModelId === modelId ? busyAction : null;
+  const phase = runtimePhaseFor(modelId, runtime);
+
+  // Both in-flight states wear the design's progress track; only the settled
+  // ones are flat, pressable chips.
+  if (pending === 'stop' || phase === 'stopping') {
+    return { kind: 'stop', label: 'Stopping…', disabled: true, progress: TRANSITION_TRACK_SHARE };
+  }
+  if (pending === 'start' || phase === 'starting') {
+    return { kind: 'start', label: 'Starting…', disabled: true, progress: TRANSITION_TRACK_SHARE };
+  }
+  if (phase === 'running') {
+    return { kind: 'stop', label: 'Stop', disabled: pending !== null, progress: null };
+  }
+  return { kind: 'start', label: 'Start', disabled: pending !== null, progress: null };
+}
+
+/**
+ * The Remove button for one model.
+ *
+ * Removing comes after stopping: while the server is starting, running, or
+ * being torn down, the button beside it is the way out, so this one is inert
+ * rather than silently pulling the file out from under a live process.
+ */
+export function describeModelRemoveButton(
+  modelId: string,
+  { runtime, busyModelId, busyAction }: ModelRuntimeState
+): ModelRemoveButton {
+  const pending = busyModelId === modelId ? busyAction : null;
+  const phase = runtimePhaseFor(modelId, runtime);
+  const isServing = phase === 'starting' || phase === 'running' || phase === 'stopping';
+
+  return {
+    kind: 'remove',
+    label: pending === 'remove' ? 'Removing...' : 'Remove',
+    disabled: pending !== null || isServing
+  };
+}
 
 /**
  * The badge's model among the ones on disk.
@@ -110,9 +212,28 @@ export function findRecommendedInstall(
 }
 
 /**
- * What a failed start or remove left for one model, or `null` when the last one
- * belongs elsewhere. The badge and the installed rows can name the same model,
- * so both read the failure from here and neither can miss one the other showed.
+ * The installed rows in the order the card draws them: the recommended model
+ * first, then the rest as the main process listed them (newest download first).
+ *
+ * The store orders by download time alone, so the recommended row would sink
+ * below anything installed after it; pinning it keeps the one model the page
+ * puts forward where the badge left it.
+ */
+export function orderInstalledModels(
+  models: readonly InstalledLocalModel[] | null,
+  recommendedModelId: string | null
+): InstalledLocalModel[] {
+  if (models === null) return [];
+  if (recommendedModelId === null) return [...models];
+
+  const recommended = models.filter((model) => model.id === recommendedModelId);
+  const rest = models.filter((model) => model.id !== recommendedModelId);
+  return [...recommended, ...rest];
+}
+
+/**
+ * What a failed start, stop, or remove left for one model, or `null` when the
+ * last one belongs to a different row.
  */
 export function findModelActionError(
   actionError: ModelActionError | null,
@@ -123,27 +244,15 @@ export function findModelActionError(
 }
 
 /**
- * The buttons the badge offers for the state its model is in: a download button
- * until the bytes are on disk, then the same start/remove pair the installed
- * rows below carry, since by then the badge names one of them.
+ * The button the badge offers for the state its model is in — always a
+ * transfer, since a model already on disk has left the badge for the list.
  *
  * Only a row the catalog reports as downloadable can be pressed. A row that has
  * not arrived yet, has no source, or outgrows this Mac keeps its Download button
  * but cannot use it — there is nothing behind it that could succeed, and the
  * badge has no meta line to explain a missing button.
  */
-export function describeRecommendedButtons({
-  install,
-  isRunning,
-  row
-}: RecommendedModelState): RecommendedModelButton[] {
-  if (install) {
-    return [
-      { kind: 'start', label: isRunning ? 'Running' : 'Start', variant: 'filled', disabled: isRunning },
-      REMOVE_BUTTON
-    ];
-  }
-
+export function describeRecommendedButtons(row: LocalModelRow | null): RecommendedModelButton[] {
   switch (row?.lifecycle) {
     case 'downloading':
       // Named for the state, not the press — see the Add Model row it matches.
@@ -168,18 +277,11 @@ export interface RecommendedModelNote {
  * reports itself in the same words the Add Model row uses, so one download reads
  * the same on both pages; otherwise a failed scan reports its reason, which no
  * button state can convey.
- *
- * A start or remove the user just pressed outranks both: it is the only line
- * that answers a button which visibly did nothing.
  */
 export function describeRecommendedNote(
   row: LocalModelRow | null,
-  error: string | null,
-  actionError: string | null
+  error: string | null
 ): RecommendedModelNote | null {
-  if (actionError !== null) {
-    return { text: actionError, tone: 'error' };
-  }
   if (row?.lifecycle === 'downloading') {
     return { text: describeModelLifecycle(row), tone: 'muted' };
   }

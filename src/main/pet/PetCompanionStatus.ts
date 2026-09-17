@@ -1,9 +1,11 @@
-import type { PetRuntimePhase } from '../../shared/types';
+import type { LocalModelRuntimePhase, PetRuntimePhase } from '../../shared/types';
 
 export type PetCompanionSignal =
   | { source: 'gateway'; phase: 'stopped' | 'starting' | 'running' | 'error' }
   | { source: 'router'; phase: 'stopped' | 'starting' | 'running' | 'error' }
-  | { source: 'model'; phase: 'idle' | 'starting' | 'running' | 'failed' }
+  // The local model's own lifecycle, so a phase added to the runtime reaches
+  // the Pet rather than being silently dropped here.
+  | { source: 'model'; phase: LocalModelRuntimePhase }
   | {
       source: 'chat';
       phase: 'sending' | 'completed' | 'cancelled' | 'error';
@@ -21,7 +23,7 @@ export interface PetCompanionFeedback {
 export interface PetCompanionSnapshot {
   gateway: 'stopped' | 'starting' | 'running' | 'error';
   router: 'stopped' | 'starting' | 'running' | 'error';
-  model: 'idle' | 'starting' | 'running' | 'failed';
+  model: LocalModelRuntimePhase;
   activeChatTurnCount: number;
 }
 
@@ -40,6 +42,9 @@ export function resolvePetCompanionFeedback(
   }
   if (snapshot.model === 'starting') {
     return { phase: 'working', message: 'Starting local model...' };
+  }
+  if (snapshot.model === 'stopping') {
+    return { phase: 'working', message: 'Stopping local model...' };
   }
   if (snapshot.router === 'starting') {
     return { phase: 'working', message: 'Starting Router...' };

@@ -731,26 +731,24 @@ export default class IpcController {
     return this.localModelManager.startInstalledModel(modelId);
   }
 
-  /** Deletes one downloaded model and returns the installed list that remains. */
-  async removeInstalledLocalModel(modelId: string): Promise<InstalledLocalModel[]> {
-    const runtime = await this.tokenHubRuntime.getState();
-    if (
-      runtime.modelId === modelId &&
-      (runtime.phase === 'starting' || runtime.phase === 'running')
-    ) {
-      throw new Error('Stop the running local model before removing it.');
-    }
+  /**
+   * Deletes one downloaded model and returns the installed list that remains.
+   *
+   * The manager stops the server first if this is the model it is serving, so a
+   * remove can never leave a running process behind a deleted file.
+   */
+  removeInstalledLocalModel(modelId: string): Promise<InstalledLocalModel[]> {
     return this.localModelManager.removeInstalled(modelId);
   }
 
   /** Current USB presence and the one guarded local-server lifecycle. */
   getLocalModelRuntimeState() {
-    return this.tokenHubRuntime.getState();
+    return this.localModelManager.getRuntimeState();
   }
 
   /** Stops the single Dongle-guarded local model process. */
   stopLocalModelRuntime() {
-    return this.tokenHubRuntime.stopModel();
+    return this.localModelManager.stopModel();
   }
 
   /** Lists the hardcoded cloud model cards the renderer can connect to. */

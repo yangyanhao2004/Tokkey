@@ -671,8 +671,19 @@ export interface TokenHubDevice {
   location: string | null;
 }
 
-/** User-visible lifecycle of the single Dongle-guarded local model process. */
-export type LocalModelRuntimePhase = 'idle' | 'starting' | 'running' | 'failed';
+/**
+ * User-visible lifecycle of the single Dongle-guarded local model process.
+ *
+ * `stopping` is its own phase because a stop is not instant: the server gets a
+ * grace period before it is killed, and every window watching has to be able to
+ * tell "being stopped" from "stopped" without having pressed the button itself.
+ */
+export type LocalModelRuntimePhase =
+  | 'idle'
+  | 'starting'
+  | 'running'
+  | 'stopping'
+  | 'failed';
 
 export interface LocalModelRuntimeState {
   phase: LocalModelRuntimePhase;

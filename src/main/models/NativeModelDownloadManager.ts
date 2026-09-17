@@ -247,6 +247,19 @@ export class NativeModelDownloadManager {
     }
   }
 
+  /**
+   * Reports the tear-down between a stop request and the server's exit, so the
+   * row reads "stopping" for as long as the process is being released.
+   */
+  markDeploymentStopping(modelId: string): void {
+    const entry = this.entries.get(modelId);
+    if (!entry) return;
+    entry.state = 'deployStopping';
+    entry.endpoint = null;
+    entry.error = null;
+    this.notify();
+  }
+
   /** Moves a model back to its downloaded state when a different runtime takes over. */
   markDeploymentStopped(modelId: string): void {
     const entry = this.entries.get(modelId);

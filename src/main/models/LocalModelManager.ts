@@ -4,7 +4,8 @@ import type {
   LocalModelCatalogRequest,
   LocalModelCatalogScan,
   LocalModelDescriptor,
-  LocalModelProvider
+  LocalModelProvider,
+  LocalModelRuntimeState
 } from '../../shared/types';
 import LocalModelCatalogService from './LocalModelCatalogService';
 import NativeModelDownloadManager from './NativeModelDownloadManager';
@@ -17,6 +18,8 @@ export class LocalModelManager {
   private readonly localRuntime: LocalModelRuntime;
   private descriptors: LocalModelDescriptor[] = [];
   private providers: string[] = [];
+  /** The model the runtime last named while active, so its stop is recognizable. */
+  private servedModelId: string | null = null;
   private runtimeOperation: Promise<void> = Promise.resolve();
 
   constructor(options: {
@@ -30,17 +33,43 @@ export class LocalModelManager {
       throw new Error('LocalModelManager requires the shared Hub local model runtime.');
     }
     this.localRuntime = options.localRuntime;
-    this.localRuntime.subscribe(() => {
-      const state = this.localRuntime.getLocalChatRuntimeState();
-      if (state.status === 'ready' && state.model) {
-        const endpoint = new URL(this.localRuntime.chatCompletionsUrl(state.model.id)).origin;
-        this.downloader.markDeploymentReady(state.model.id, endpoint);
-        return;
-      }
-      if (state.status === 'error' && state.model && state.error) {
-        this.downloader.markDeploymentFailed(state.model.id, state.error);
-      }
-    });
+    this.localRuntime.subscribe((state) => this.trackRuntimeState(state));
+  }
+
+  /**
+   * Keeps the catalog row of the served model in step with the server itself.
+   *
+   * The runtime is the one place every lifecycle change passes through — a
+   * start or stop asked of this class, a server that exited, a Dongle pulled
+   * out — so the rows follow the phase it publishes rather than the calls this
+   * class happens to make.
+   */
+  private trackRuntimeState(state: LocalModelRuntimeState): void {
+    if (state.phase === 'starting' && state.modelId) {
+      this.servedModelId = state.modelId;
+      return;
+    }
+    if (state.phase === 'running' && state.modelId && state.endpoint) {
+      this.servedModelId = state.modelId;
+      this.downloader.markDeploymentReady(state.modelId, new URL(state.endpoint).origin);
+      return;
+    }
+    if (state.phase === 'stopping' && state.modelId) {
+      this.servedModelId = state.modelId;
+      this.downloader.markDeploymentStopping(state.modelId);
+      return;
+    }
+    if (state.phase === 'failed' && state.modelId && state.error) {
+      this.servedModelId = null;
+      this.downloader.markDeploymentFailed(state.modelId, state.error);
+      return;
+    }
+    // Idle: the runtime no longer names a model, so the one it last served is
+    // the one whose deployment has just ended.
+    if (state.phase === 'idle' && this.servedModelId) {
+      this.downloader.markDeploymentStopped(this.servedModelId);
+      this.servedModelId = null;
+    }
   }
 
   /** Hooks Electron's native download event; call after app readiness. */
@@ -85,21 +114,29 @@ export class LocalModelManager {
     await this.ensureCatalog(request);
     return this.queueRuntimeOperation(async () => {
       const descriptor = this.requireDescriptor(modelId);
-      const currentRuntime = this.localRuntime.getLocalChatRuntimeState();
-      const previousModelId = currentRuntime.model?.id;
-      if (currentRuntime.status === 'ready' && previousModelId === modelId) {
-        return this.scan(request);
-      }
-      if (previousModelId && previousModelId !== modelId) {
-        await this.localRuntime.stopModel();
-        this.downloader.markDeploymentStopped(previousModelId);
-      }
+      if (await this.prepareRuntimeFor(modelId)) return this.scan(request);
       await this.downloader.deployModel(descriptor, async (model) => {
         await this.localRuntime.startModel({ ...model, fileName: descriptor.fileName });
         return new URL(this.localRuntime.chatCompletionsUrl(model.id)).origin;
       });
       return this.scan(request);
     });
+  }
+
+  /** The device and server lifecycle every Start/Stop button is drawn from. */
+  getRuntimeState(): Promise<LocalModelRuntimeState> {
+    return this.localRuntime.getState();
+  }
+
+  /**
+   * Stops the one model the runtime is serving, whoever asked for it.
+   *
+   * Deliberately outside the queue: a stop has to be able to reach a start that
+   * is still in flight, which the queue would make it wait out. The catalog row
+   * follows the phases the runtime publishes while it tears the server down.
+   */
+  stopModel(): Promise<LocalModelRuntimeState> {
+    return this.localRuntime.stopModel();
   }
 
   /**
@@ -118,22 +155,14 @@ export class LocalModelManager {
       if (!installedModel) {
         throw new Error(`Installed local model not found: ${modelId}`);
       }
-
-      const currentRuntime = this.localRuntime.getLocalChatRuntimeState();
-      const previousModelId = currentRuntime.model?.id;
-      if (currentRuntime.status === 'ready' && previousModelId === installedModel.id) {
-        return currentRuntime;
+      if (!(await this.prepareRuntimeFor(installedModel.id))) {
+        await this.localRuntime.startModel({
+          id: installedModel.id,
+          label: installedModel.name,
+          fileName: installedModel.fileName,
+          filePath: installedModel.filePath
+        });
       }
-      if (previousModelId && previousModelId !== installedModel.id) {
-        await this.localRuntime.stopModel();
-        this.downloader.markDeploymentStopped(previousModelId);
-      }
-      await this.localRuntime.startModel({
-        id: installedModel.id,
-        label: installedModel.name,
-        fileName: installedModel.fileName,
-        filePath: installedModel.filePath
-      });
       return this.localRuntime.getLocalChatRuntimeState();
     });
   }
@@ -151,10 +180,26 @@ export class LocalModelManager {
     await this.list(request);
   }
 
-  private async stopRuntimeForModel(modelId: string): Promise<void> {
-    if (this.localRuntime.getLocalChatRuntimeState().model?.id !== modelId) {
-      return;
+  /**
+   * Clears the way for `modelId` to start, and reports whether it is already
+   * running — in which case there is nothing left to start.
+   *
+   * This runtime serves one model at a time, so a different one has to be
+   * stopped first. Only the phase is consulted: the catalog rows are the
+   * subscription's business, not this call's.
+   */
+  private async prepareRuntimeFor(modelId: string): Promise<boolean> {
+    const runtime = await this.localRuntime.getState();
+    if (runtime.phase === 'running' && runtime.modelId === modelId) return true;
+    if (runtime.modelId !== null && runtime.modelId !== modelId) {
+      await this.localRuntime.stopModel();
     }
+    return false;
+  }
+
+  /** Stops the server only if it is the one serving `modelId`. */
+  private async stopRuntimeForModel(modelId: string): Promise<void> {
+    if ((await this.localRuntime.getState()).modelId !== modelId) return;
     await this.localRuntime.stopModel();
   }
 

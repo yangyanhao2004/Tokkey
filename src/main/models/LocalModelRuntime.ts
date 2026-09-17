@@ -20,6 +20,8 @@ export interface LocalChatRuntimeServing {
 
 /** One device-backed local model lifecycle shared by deployment and local Chat. */
 export interface LocalModelRuntime extends LocalChatRuntimeServing {
+  /** The current phase, refreshed against the device before it is answered. */
+  getState(): Promise<LocalModelRuntimeState>;
   startModel(model: LocalModelLaunchRequest): Promise<LocalModelRuntimeState>;
   stopModel(): Promise<LocalModelRuntimeState>;
   subscribe(listener: (state: LocalModelRuntimeState) => void): () => void;

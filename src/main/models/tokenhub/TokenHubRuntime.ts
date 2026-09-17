@@ -209,6 +209,11 @@ export class TokenHubRuntime implements LocalModelRuntime {
   }
 
   async startModel(model: LocalModelLaunchRequest): Promise<LocalModelRuntimeState> {
+    if (this.state.phase === 'stopping') {
+      // The previous server is still being released; starting now would race
+      // its tear-down for the device and the port.
+      throw new Error('The running local model is still stopping.');
+    }
     if (this.startReserved || this.state.phase === 'starting' || this.state.phase === 'running') {
       throw new Error('Another local model is already starting or running.');
     }
@@ -267,8 +272,23 @@ export class TokenHubRuntime implements LocalModelRuntime {
     }
   }
 
+  /**
+   * Stops whatever is being served and reports the tear-down while it happens.
+   *
+   * `stopping` is published first because the server is given a grace period
+   * before it is killed: without it, every window watching would keep offering
+   * "Stop" until the process finally went away.
+   */
   async stopModel(): Promise<LocalModelRuntimeState> {
     this.generation += 1;
+    if (this.state.modelId) {
+      this.setState({
+        ...this.state,
+        phase: 'stopping',
+        endpoint: null,
+        error: null
+      });
+    }
     await this.releaseOwnedResources();
     this.setState({
       phase: 'idle',
@@ -662,6 +682,9 @@ export class TokenHubRuntime implements LocalModelRuntime {
     case 'idle': return 'unavailable';
     case 'starting': return 'starting';
     case 'running': return 'ready';
+    // A server being torn down can no longer take a turn, and the stop was
+    // asked for, so it is unavailable rather than an error.
+    case 'stopping': return 'unavailable';
     case 'failed': return 'error';
     }
   }
