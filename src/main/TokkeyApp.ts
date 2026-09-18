@@ -14,6 +14,8 @@ import RendererEvidenceCapture from './evidence/RendererEvidenceCapture';
 import LocalChatTurnExecutor from './chat/LocalChatTurnExecutor';
 import LocalModelManager from './models/LocalModelManager';
 import HubModelConnector from './models/HubModelConnector';
+import LocalModelAgentIntegration from './models/LocalModelAgentIntegration';
+import LocalModelBinding from './models/LocalModelBinding';
 import TokenHubRuntime from './models/tokenhub/TokenHubRuntime';
 import TokenHubRuntimeLocator from './models/tokenhub/TokenHubRuntimeLocator';
 import PetRuntimeCoordinator from './pet/PetRuntimeCoordinator';
@@ -51,6 +53,8 @@ export class TokkeyApp {
   private readonly claudeGatewayIntegration: ClaudeGatewayIntegration;
   private readonly tokenHubRuntime: TokenHubRuntime;
   private readonly routerBinding: RouterBinding;
+  private readonly localModelBinding: LocalModelBinding;
+  private readonly localModelAgentIntegration: LocalModelAgentIntegration;
   private readonly routerProcessManager: RouterProcessManager;
   private readonly petRuntimeCoordinator: PetRuntimeCoordinator;
   private readonly routerAgentIntegration: RouterAgentIntegration;
@@ -90,21 +94,38 @@ export class TokkeyApp {
     // the single answer to "is the router on", so the two can never disagree
     // about which endpoint and which model they are configuring.
     this.routerBinding = new RouterBinding();
+    // The same single-fact role the router's binding plays, for the other thing
+    // both CLIs have to be told about: whether a local model is being served.
+    this.localModelBinding = new LocalModelBinding();
     this.codexGatewayIntegration = new CodexGatewayIntegration({
       gateway: this.gatewayProcessManager,
-      routerBinding: this.routerBinding
+      routerBinding: this.routerBinding,
+      localBinding: this.localModelBinding
     });
     this.claudeGatewayIntegration = new ClaudeGatewayIntegration({
       gateway: this.gatewayProcessManager,
-      routerBinding: this.routerBinding
+      routerBinding: this.routerBinding,
+      localBinding: this.localModelBinding
+    });
+    // Wraps the connector rather than sitting beside it: the runtime already
+    // calls its profile connector at exactly the moment the route becomes real,
+    // which is the moment both pickers may be told the model exists.
+    this.localModelAgentIntegration = new LocalModelAgentIntegration({
+      connector: HubModelConnector.forGateway(this.gatewayProcessManager),
+      binding: this.localModelBinding,
+      codex: this.codexGatewayIntegration,
+      claude: this.claudeGatewayIntegration
     });
     this.tokenHubRuntime = new TokenHubRuntime({
       runtimeLocator: new TokenHubRuntimeLocator({
         resourcesPath: app.isPackaged ? process.resourcesPath : undefined,
         appPath: app.getAppPath()
       }),
-      profileConnector: HubModelConnector.forGateway(this.gatewayProcessManager)
+      profileConnector: this.localModelAgentIntegration
     });
+    // Subscribed only now, because the integration and the runtime each need the
+    // other: the wrapping goes in above, the watch for the model going away here.
+    this.localModelAgentIntegration.observe(this.tokenHubRuntime);
     this.localModelManager = new LocalModelManager({
       localRuntime: this.tokenHubRuntime
     });

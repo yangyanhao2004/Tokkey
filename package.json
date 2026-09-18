@@ -1,6 +1,6 @@
 {
   "name": "tokkey",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tokkey desktop application built with Electron",
   "main": "dist/main/main.js",
   "author": "qi liu",

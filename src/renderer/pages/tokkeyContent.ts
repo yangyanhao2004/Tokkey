@@ -109,12 +109,12 @@ export interface ModelRuntimeButton {
 }
 
 /**
- * How much of the button the design fills while a start or stop is in flight
+ * How much of the button the design fills while a stop is in flight
  * (Figma 531:817: a 16px fill in a 64px button).
  *
  * A fixed share rather than a measurement: llama-server reports nothing to
- * count between the request and its readiness check, so the track is an
- * affordance for "this is under way", which is what the design draws.
+ * count while it is being torn down, so the track is an affordance for "this is
+ * under way", which is what the design draws.
  */
 const TRANSITION_TRACK_SHARE = 0.25;
 
@@ -155,13 +155,15 @@ export function describeModelRuntimeButton(
   const pending = busyModelId === modelId ? busyAction : null;
   const phase = runtimePhaseFor(modelId, runtime);
 
-  // Both in-flight states wear the design's progress track; only the settled
-  // ones are flat, pressable chips.
+  // A stop wears the design's progress track; a start says so in words instead.
+  // The track fills by a fixed share nobody measured, which on the way up reads
+  // as a completion percentage the start has no way to honour — the label alone
+  // carries "under way" without implying how far along it is.
   if (pending === 'stop' || phase === 'stopping') {
     return { kind: 'stop', label: 'Stopping…', disabled: true, progress: TRANSITION_TRACK_SHARE };
   }
   if (pending === 'start' || phase === 'starting') {
-    return { kind: 'start', label: 'Starting…', disabled: true, progress: TRANSITION_TRACK_SHARE };
+    return { kind: 'start', label: 'Starting…', disabled: true, progress: null };
   }
   if (phase === 'running') {
     return { kind: 'stop', label: 'Stop', disabled: pending !== null, progress: null };

@@ -1,5 +1,6 @@
 import type { GatewayEndpoint } from '../gateway/GatewayModelClient';
 import ClaudeNativeModelCatalog from '../models/ClaudeNativeModelCatalog';
+import LocalModelBinding from '../models/LocalModelBinding';
 import RouterBinding from '../router/RouterBinding';
 import ClaudeConfigTakeover from './ClaudeConfigTakeover';
 import ClaudeDesktopConfigLibrary, { type DesktopInferenceModel } from './ClaudeDesktopConfigLibrary';
@@ -33,16 +34,23 @@ import type { ClaudeModelSelection } from './ClaudeSettingsDocument';
  * servers face; what would still stop on every call is each tool call, so for
  * as long as that server is declared the settings file allows it too.
  *
- * Claude Desktop only ever gets the routed pair, never a plain gateway route:
- * a cloud model is reached through the router or not at all, and while the
- * router is off there is nothing for Desktop's configLibrary to point at. The
- * pair uses the same picker-qualified router slug as Claude Code. The
- * `anthropic.` prefix satisfies Desktop's managed-config validator without
- * leaking a rival vendor's name from the cloud route into the model id.
+ * A running local model is the second model offered, and it comes from
+ * {@link LocalModelBinding} rather than the router's binding. It is independent
+ * of the switch in both directions: the gateway serves its route, and the
+ * router forwards a model name it does not recognize to that same gateway, so
+ * the entry resolves at whichever endpoint `ANTHROPIC_BASE_URL` currently names.
+ *
+ * Desktop and Claude Code are offered the same two models, and never a plain
+ * cloud route: a cloud model is reached through the router or not at all. Both
+ * use the picker-qualified `anthropic.` alias, which satisfies Desktop's
+ * managed-config validator without leaking a rival vendor's name into the model
+ * id — the router's slug and the local model's are both fixed and carry no
+ * vendor fragment to leak.
  */
 export class ClaudeGatewayIntegration {
   private readonly gateway: GatewayEndpoint;
   private readonly routerBinding: RouterBinding;
+  private readonly localBinding: LocalModelBinding;
   private readonly natives: ClaudeNativeModelCatalog;
   private readonly takeover: ClaudeConfigTakeover;
   private readonly mcp: ClaudeMcpTakeover;
@@ -53,6 +61,8 @@ export class ClaudeGatewayIntegration {
     gateway: GatewayEndpoint;
     /** Omitted only by a caller with no Router page; Claude then stays on the gateway. */
     routerBinding?: RouterBinding;
+    /** Omitted only by a caller with no local runtime; no local model is then offered. */
+    localBinding?: LocalModelBinding;
     natives?: ClaudeNativeModelCatalog;
     takeover?: ClaudeConfigTakeover;
     mcp?: ClaudeMcpTakeover;
@@ -63,6 +73,7 @@ export class ClaudeGatewayIntegration {
     const home = new ClaudeHome(options);
     this.gateway = options.gateway;
     this.routerBinding = options.routerBinding ?? new RouterBinding();
+    this.localBinding = options.localBinding ?? new LocalModelBinding();
     this.natives = options.natives ?? new ClaudeNativeModelCatalog();
     this.takeover = options.takeover ?? new ClaudeConfigTakeover({ ...options, home });
     // Its own ledger: `ledgerPath` in `options` names the settings ledger, and
@@ -208,51 +219,68 @@ export class ClaudeGatewayIntegration {
   }
 
   /**
-   * The routed pair in the picker-qualified shape Desktop accepts. Empty while
-   * the router is off, which `syncDesktop` reads as "hand the configLibrary
-   * back."
+   * What Desktop should offer, in the picker-qualified shape it accepts. Empty
+   * when neither the router nor a local model is serving, which `syncDesktop`
+   * reads as "hand the configLibrary back."
    */
   private buildDesktopModels(): DesktopInferenceModel[] {
-    const model = this.routerBinding.model;
-    if (model === null) {
-      return [];
+    return this.publishedSlugs().map((slug) => ({
+      name: ClaudeModelAlias.forRoute(slug),
+      labelOverride: slug
+    }));
+  }
+
+  /**
+   * The Tokkey route names to publish right now, router first.
+   *
+   * Router first so the routed pair heads the picker; the local model follows it
+   * and both precede the Anthropic natives. Shared by the two surfaces because
+   * they offer the same models and differ only in the shape each wants them in —
+   * having each build its own list is how the two would drift apart.
+   */
+  private publishedSlugs(): string[] {
+    const slugs: string[] = [];
+    if (this.routerBinding.model !== null) {
+      slugs.push(this.routerBinding.model.slug);
     }
-    return [{ name: ClaudeModelAlias.forRoute(model.slug), labelOverride: model.slug }];
+    if (this.localBinding.model !== null) {
+      slugs.push(this.localBinding.model.slug);
+    }
+    return slugs;
   }
 
   /**
    * The models to restrict Claude Code to, or null to leave its own choice.
    *
-   * The routed pair goes in through `ClaudeModelAlias.forRoute`, the same alias
-   * every other gateway route gets — no longer the one exception to that scheme
-   * it used to be. The router used to decide a turn's tier by parsing the model
-   * name it was sent. It now recognizes this picker-qualified fixed slug and
-   * reads the pairing out of `router_profiles` instead (see `RouterModel`).
+   * Both Tokkey models go in through `ClaudeModelAlias.forRoute`, the same alias
+   * every other gateway route gets — the routed pair is no longer the one
+   * exception to that scheme it used to be. The router used to decide a turn's
+   * tier by parsing the model name it was sent. It now recognizes its
+   * picker-qualified fixed slug and reads the pairing out of `router_profiles`
+   * instead (see `RouterModel`), and forwards the local model's slug, which it
+   * does not recognize, straight to the gateway that serves it.
    *
-   * `model` itself stays null even so. Setting it to the routed pair would move
-   * every session onto it the moment the switch goes on, silently overriding
-   * whatever the user already had selected — for no gain, since every request
-   * reaches the router regardless of which name Claude Code happens to send
-   * while it is bound. Null here means "leave the existing `model` key alone"
-   * (see `ClaudeSettingsDocument.setModelSelection`), which offers the routed
-   * model in the picker without forcing it.
+   * `model` itself stays null even so. Setting it would move every session onto
+   * whichever model Tokkey picked the moment it started serving, silently
+   * overriding what the user already had selected. Null here means "leave the
+   * existing `model` key alone" (see `ClaudeSettingsDocument.setModelSelection`),
+   * which offers both models in the picker without forcing either.
    *
-   * The whole selection is null while the router is off: the only thing left to
-   * impose then would be Anthropic's own list, which is what Claude Code
-   * already offers, and returning null here is what takes the routed model away
-   * again when the switch goes off.
+   * The whole selection is null when neither is serving: the only thing left to
+   * impose then would be Anthropic's own list, which is what Claude Code already
+   * offers, and returning null is what takes the last Tokkey entry back out.
    */
   private buildModelSelection(): ClaudeModelSelection | null {
-    const model = this.routerBinding.model;
-    if (model === null) {
+    const slugs = this.publishedSlugs();
+    if (slugs.length === 0) {
       return null;
     }
     return {
       model: null,
-      // The pair first, so it heads the picker rather than trailing six
-      // Anthropic entries the user would have to scroll past to find it.
+      // Tokkey's own first, so they head the picker rather than trailing six
+      // Anthropic entries the user would have to scroll past to find them.
       availableModels: [
-        ClaudeModelAlias.forRoute(model.slug),
+        ...slugs.map((slug) => ClaudeModelAlias.forRoute(slug)),
         ...this.natives.list().map((native) => native.slug)
       ]
     };

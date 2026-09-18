@@ -121,6 +121,20 @@ export class GatewayModelClient {
     });
   }
 
+  /**
+   * Removes one route by its gateway id.
+   *
+   * Idempotent at the gateway, so deleting a route another caller already
+   * removed is success rather than an error — which is what lets a teardown run
+   * without first proving the route is still there.
+   */
+  async deleteModel(modelId: string): Promise<void> {
+    await this.send('/model/delete', {
+      method: 'POST',
+      body: JSON.stringify({ id: modelId })
+    });
+  }
+
   /** Repoints one existing route without changing its stable gateway id or alias. */
   async updateModel(modelId: string, params: GatewayLitellmParams): Promise<void> {
     await this.send(`/model/${encodeURIComponent(modelId)}/update`, {

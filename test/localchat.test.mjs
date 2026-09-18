@@ -81,7 +81,7 @@ function chatRuntime(endpoint) {
     getLocalChatRuntimeState: () => ({
       status: 'ready',
       model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label },
-      contextWindowTokens: 16_384,
+      contextWindowTokens: 49_152,
       error: null
     }),
     chatCompletionsUrl: () => endpoint,
@@ -157,7 +157,7 @@ test('deploying a downloaded model starts the shared local runtime before it bec
       chatRuntimeState = {
         status: 'ready',
         model: { id: model.id, label: model.label },
-        contextWindowTokens: 16384,
+        contextWindowTokens: 49152,
         error: null
       };
       runtimePhase = runningPhase(model.id);
@@ -218,7 +218,7 @@ test('starting a discovered installed model starts the shared local runtime', as
         chatRuntimeState = {
           status: 'ready',
           model: { id: model.id, label: model.label },
-          contextWindowTokens: 16_384,
+          contextWindowTokens: 49_152,
           error: null
         };
         runtimePhase = runningPhase(model.id);
@@ -254,7 +254,7 @@ test('switching installed models stops the active Hub runtime before starting th
   let runtimeState = {
     status: 'ready',
     model: { id: 'first', label: 'First' },
-    contextWindowTokens: 16_384,
+    contextWindowTokens: 49_152,
     error: null
   };
   let runtimePhase = runningPhase('first');
@@ -290,7 +290,7 @@ test('switching installed models stops the active Hub runtime before starting th
         runtimeState = {
           status: 'ready',
           model: { id: model.id, label: model.label },
-          contextWindowTokens: 16_384,
+          contextWindowTokens: 49_152,
           error: null
         };
         runtimePhase = runningPhase(model.id);
@@ -348,7 +348,7 @@ test('local model deployment actions run one at a time so row state cannot resol
       runtimeState = {
         status: 'ready',
         model: { id: model.id, label: model.label },
-        contextWindowTokens: 16384,
+        contextWindowTokens: 49152,
         error: null
       };
       runtimePhase = runningPhase(model.id);
@@ -925,7 +925,7 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
     getLocalChatRuntimeState: () => ({
       status: 'ready',
       model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label },
-      contextWindowTokens: 16_384,
+      contextWindowTokens: 49_152,
       error: null
     }),
     subscribe: () => () => {}
@@ -965,7 +965,7 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
       start: {
         request: CHAT_REQUEST,
         modelLabel: LOCAL_MODEL.label,
-        contextWindowTokens: 16_384
+        contextWindowTokens: 49_152
       }
     },
     {
@@ -1050,7 +1050,7 @@ test('a failed Pet observer cannot interrupt an accepted Chat turn', () => {
       getLocalChatRuntimeState: () => ({
         status: 'ready',
         model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label },
-        contextWindowTokens: 16_384,
+        contextWindowTokens: 49_152,
         error: null
       }),
       subscribe: () => () => {}

@@ -59,10 +59,10 @@ test('the lifecycle button follows the server from Start through Stop and back',
   });
   // The press is answered before the main process has published anything.
   assert.deepEqual(buttonFor('idle', { modelId: null, busyModelId: MODEL_ID, busyAction: 'start' }), {
-    kind: 'start', label: 'Starting…', disabled: true, progress: TRACK
+    kind: 'start', label: 'Starting…', disabled: true, progress: null
   });
   assert.deepEqual(buttonFor('starting'), {
-    kind: 'start', label: 'Starting…', disabled: true, progress: TRACK
+    kind: 'start', label: 'Starting…', disabled: true, progress: null
   });
   assert.deepEqual(buttonFor('running'), {
     kind: 'stop', label: 'Stop', disabled: false, progress: null
@@ -81,13 +81,14 @@ test('the lifecycle button follows the server from Start through Stop and back',
   });
 });
 
-test('only an in-flight state wears the progress track the design draws', () => {
-  // Figma 531:817: the button is its own track while the server comes up, and
-  // a flat, pressable chip once it has settled either way.
+test('only a stop wears the progress track; a start says so in words', () => {
+  // Figma 531:817 draws the button as its own track, but a start has nothing to
+  // measure, so a partly-filled track would read as a percentage it cannot
+  // honour. "Starting…" on a dimmed button carries it without the implication.
   const inFlight = ['starting', 'stopping'].map((phase) => buttonFor(phase).progress);
   const settled = ['idle', 'running', 'failed'].map((phase) => buttonFor(phase).progress);
 
-  assert.deepEqual(inFlight, [TRACK, TRACK]);
+  assert.deepEqual(inFlight, [null, TRACK]);
   assert.deepEqual(settled, [null, null, null]);
 });
 
@@ -223,7 +224,7 @@ function createManager() {
       getLocalChatRuntimeState: () => ({
         status: published.phase === 'running' ? 'ready' : 'unavailable',
         model: published.modelId ? { id: published.modelId, label: 'Qwen3 8B' } : null,
-        contextWindowTokens: published.phase === 'running' ? 16384 : null,
+        contextWindowTokens: published.phase === 'running' ? 49152 : null,
         error: published.error
       }),
       startModel: async (model) => {

@@ -10,6 +10,7 @@ import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from threading import RLock
 from typing import Any
+from urllib.parse import urlparse
 
 import litellm
 from starlette.applications import Starlette
@@ -348,6 +349,100 @@ class ResponsesToolOutputNormalizer:
         if part_type == "input_image":
             return cls.IMAGE_NOTE.format(location=f" (file: {path})" if path else "")
         return f"[unsupported '{part_type}' tool output omitted]"
+
+
+class LocalGrammarCompatibility:
+    """Drop schema bounds that make a locally served model's grammar uncompilable.
+
+    llama.cpp constrains tool-call output with a GBNF grammar built from each
+    tool's JSON Schema, and it renders a bounded `maxLength` / `maxItems` as an
+    explicit repetition. That repetition is expanded, not referenced, so the
+    generated text grows with the bound -- and nesting multiplies it, because an
+    inner rule is expanded again inside every level that contains it. Past a
+    point the grammar no longer parses, and the server rejects the whole request
+    with HTTP 400 "Failed to initialize samplers: failed to parse grammar",
+    before a single token is generated.
+
+    Measured against the real thing rather than reasoned about: Claude Code's
+    `Artifact` tool declares `query.cursor` as a string of `maxLength` 4096, two
+    objects deep. On its own that one property sinks the turn. The same property
+    at the top level is fine, and nested at 1024 is fine, which is what shows
+    this to be a size limit rather than an unsupported construct.
+
+    Removing the bounds outright, rather than lowering them, is the deliberate
+    choice. A lowered bound is still a constraint on generation, so capping
+    `cursor` to something the grammar can hold would leave the model unable to
+    emit a pagination cursor longer than the cap -- trading a failed turn for a
+    silently truncated one. It would also need a threshold, and the safe
+    threshold depends on the size of the whole tool set, which is not knowable
+    from one property. Unbounded is both simpler and the only version verified
+    against the full 35-tool payload.
+
+    What is lost is a constraint on length alone. The value the model produces is
+    still checked by whoever receives the tool call, which is where an over-long
+    argument was always going to be caught. Every other keyword survives --
+    `pattern` included, which llama.cpp compiles without complaint -- and so does
+    every schema bound sent to a hosted provider, which has no such limit and
+    honours them properly.
+    """
+
+    #: Hosts that mean "served by this machine", and so by a llama.cpp built to
+    #: run on it. `0.0.0.0` is here because that is the address the local server
+    #: binds (see `buildTokenHubServerArguments`), and a route may name it back.
+    LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})
+
+    #: The bounds llama.cpp turns into an expanded repetition. The matching
+    #: minimums are left alone: they are small wherever they appear, and a
+    #: minimum bounds the start of a repetition rather than unrolling it.
+    EXPANDED_BOUNDS = ("maxLength", "maxItems")
+
+    @classmethod
+    def applies(cls, route: ModelRoute) -> bool:
+        """Whether this route is served from this machine."""
+        api_base = route.litellm_params.get("api_base")
+        if not isinstance(api_base, str) or not api_base:
+            return False
+        try:
+            return urlparse(api_base).hostname in cls.LOOPBACK_HOSTS
+        except ValueError:
+            # An unparseable endpoint is not evidence of a local one.
+            return False
+
+    @classmethod
+    def normalize(cls, payload: JSONMapping) -> JSONMapping:
+        """Return the payload with uncompilable tool bounds removed.
+
+        The same object is returned when nothing had to change, so a tool set
+        that declares no such bound copies nothing.
+        """
+        tools = payload.get("tools")
+        if not isinstance(tools, list) or not tools:
+            return payload
+        cleaned = [cls._strip(tool) for tool in tools]
+        if cleaned == tools:
+            return payload
+        return {**payload, "tools": cleaned}
+
+    @classmethod
+    def _strip(cls, node: Any) -> Any:
+        """Remove every expanded bound anywhere beneath one tool.
+
+        Walks the whole tool rather than reaching into a known path, because the
+        three wire shapes in play put the schema in three different places --
+        Anthropic's `input_schema`, Chat Completions' `function.parameters`, and
+        Responses' `parameters` -- and a bound can sit at any depth within any
+        of them. Depth is exactly what makes one dangerous, so none can be
+        assumed shallow enough to skip.
+        """
+        if isinstance(node, dict):
+            return {
+                key: cls._strip(value)
+                for key, value in node.items()
+                if not (key in cls.EXPANDED_BOUNDS and isinstance(value, int))
+            }
+        if isinstance(node, list):
+            return [cls._strip(item) for item in node]
+        return node
 
 
 class ModelDiscoveryCatalog:
@@ -694,6 +789,10 @@ class AmisGatewayApplication:
             if not isinstance(alias, str) or not alias:
                 return self._protocol_error(protocol, 400, "model must be a non-empty string")
             route = self._resolve_route(alias)
+            if LocalGrammarCompatibility.applies(route):
+                # Before anything reads the tools: both dispatch paths below
+                # carry this payload, and the native proxy forwards it verbatim.
+                payload = LocalGrammarCompatibility.normalize(payload)
             # Track before any provider work starts, so a cancel arriving while
             # the prompt is still being processed has something to stop.
             exchange = self._cancellations.register(

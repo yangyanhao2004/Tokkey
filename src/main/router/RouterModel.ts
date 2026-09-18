@@ -31,8 +31,17 @@ export interface RouterModelTier {
  * is assembled in exactly one place even though its slug no longer encodes it.
  */
 export class RouterModel {
-  /** What both pickers label the pair, regardless of which models it pairs. */
-  static readonly DISPLAY_NAME = 'Tokkey-Router';
+  /**
+   * What both pickers label the pair, regardless of which models it pairs.
+   *
+   * Unlike every other name here, this one is not a gateway route: the router
+   * intercepts it and resolves the pairing itself, so the gateway holds nothing
+   * under it. That makes this string part of the router binary's vocabulary
+   * rather than the gateway's — the binary has to recognize it, bare and under
+   * Claude's `anthropic.` prefix, or a turn named with it is forwarded on as an
+   * unrecognized name and 404s at a gateway that has no such route.
+   */
+  static readonly DISPLAY_NAME = 'Tokkey.Hybrid';
 
   private readonly local: RouterModelTier;
   private readonly cloud: RouterModelTier;

@@ -60,7 +60,7 @@ test('runtime builds the Dongle server arguments from detected paths', () => {
     '--cache-ram', '0',
     '-ub', '4096',
     '-b', '4096',
-    '-c', '16384',
+    '-c', '49152',
     '-fa', 'on',
     '--no-cache-prompt',
     '--rge', '0',
@@ -605,7 +605,7 @@ test('runtime rejects Start without a connected Dongle and publishes failed stat
   assert.deepEqual(runtime.getLocalChatRuntimeState(), {
     status: 'error',
     model: { id: 'model', label: 'model' },
-    contextWindowTokens: 16_384,
+    contextWindowTokens: 49_152,
     error: 'Insert an Amis Hub before starting a model.'
   });
   assert.throws(() => runtime.chatCompletionsUrl('model'), /Hub-authenticated local model is not running/);

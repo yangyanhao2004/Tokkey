@@ -13,8 +13,10 @@ from amis_gateway.app import (
     AmisGatewayApplication,
     ClientDisconnected,
     LiteLLMSDKCompatibility,
+    LocalGrammarCompatibility,
     ResponsesToolOutputNormalizer,
 )
+from amis_gateway.registry import ModelRoute
 from amis_gateway.cancellation import UpstreamAborted
 from amis_gateway.credentials import UpstreamTarget
 
@@ -1444,3 +1446,121 @@ async def test_cancelled_exchange_does_not_poison_next_turn_reusing_thread_heade
 
     assert next_turn.aborted is False
     next_turn.release()
+
+
+def local_route(api_base: str = "http://127.0.0.1:8081/v1") -> ModelRoute:
+    """One route served from this machine, as the local model registers it."""
+    return ModelRoute.from_management_payload(
+        {
+            "model_name": "Tokkey.Local",
+            "litellm_params": {"model": "openai/model.gguf", "api_base": api_base},
+            "model_info": {"created_by": "tokkey", "api_format": "openai_responses"},
+        }
+    )
+
+
+def artifact_query_tool() -> dict[str, Any]:
+    """The Claude Code property that sinks a local turn, in the Responses shape.
+
+    Copied from a captured request rather than invented: `query.cursor` is a
+    4096-long string two objects deep, and on its own it makes the grammar
+    uncompilable. `pattern` rides along because it must survive -- llama.cpp
+    compiles patterns without complaint, and an earlier version of this class
+    wrongly stripped them.
+    """
+    return {
+        "type": "function",
+        "name": "Artifact",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "object",
+                    "properties": {
+                        "cursor": {"type": "string", "maxLength": 4096},
+                        "where": {"type": "array", "maxItems": 10},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+                    },
+                },
+                "doc_id": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "pattern": r"^(?!\.\.?(?:\/|$))[A-Za-z0-9_\-.~:@+]{1,200}$",
+                },
+            },
+        },
+    }
+
+
+def test_local_grammar_compatibility_recognizes_a_model_served_here() -> None:
+    """Loopback means llama.cpp on this machine, whichever spelling names it."""
+    for api_base in (
+        "http://127.0.0.1:8081/v1",
+        "http://localhost:8081/v1",
+        "http://0.0.0.0:8081/v1",
+    ):
+        assert LocalGrammarCompatibility.applies(local_route(api_base)), api_base
+
+
+def test_local_grammar_compatibility_leaves_hosted_providers_alone() -> None:
+    """A hosted provider has no grammar limit, so nothing is taken from it."""
+    assert not LocalGrammarCompatibility.applies(local_route("https://provider.example/v1"))
+    # A route with no endpoint at all is resolved by the gateway, never locally.
+    assert not LocalGrammarCompatibility.applies(
+        ModelRoute.from_management_payload(
+            {
+                "model_name": "claude-opus-5",
+                "litellm_params": {"model": "anthropic/claude-opus-5"},
+                "model_info": {"created_by": "tokkey", "api_format": "anthropic"},
+            }
+        )
+    )
+
+
+def test_local_grammar_compatibility_removes_expanded_bounds_at_any_depth() -> None:
+    """The bounds go wherever they sit; every other keyword stays."""
+    payload = {"model": "Tokkey.Local", "tools": [artifact_query_tool()]}
+
+    cleaned = LocalGrammarCompatibility.normalize(payload)
+
+    properties = cleaned["tools"][0]["parameters"]["properties"]
+    query = properties["query"]["properties"]
+    assert "maxLength" not in query["cursor"]
+    assert "maxItems" not in query["where"]
+    # A shallow bound goes too: depth is what makes one dangerous, and nothing
+    # here can tell how deep the whole tool set nests it.
+    assert "maxLength" not in properties["doc_id"]
+    # Numeric bounds are not repetitions, so they are none of this class's business.
+    assert query["limit"] == {"type": "integer", "minimum": 1, "maximum": 1000}
+    # llama.cpp compiles patterns fine; stripping one would remove a working
+    # constraint for no reason. This is the regression an earlier version had.
+    assert "pattern" in properties["doc_id"]
+    assert properties["doc_id"]["type"] == "string"
+    # The caller's object is left intact for every other route in this request.
+    assert payload["tools"][0]["parameters"]["properties"]["doc_id"]["maxLength"] == 200
+
+
+def test_local_grammar_compatibility_finds_bounds_in_every_wire_shape() -> None:
+    """Anthropic, Chat Completions and Responses each nest the schema elsewhere."""
+    bounded = {"type": "string", "maxLength": 4096}
+    payload = {
+        "tools": [
+            {"name": "A", "input_schema": {"properties": {"a": dict(bounded)}}},
+            {"type": "function", "function": {"parameters": {"properties": {"a": dict(bounded)}}}},
+            {"type": "function", "parameters": {"properties": {"a": dict(bounded)}}},
+        ]
+    }
+
+    cleaned = LocalGrammarCompatibility.normalize(payload)
+
+    assert "maxLength" not in cleaned["tools"][0]["input_schema"]["properties"]["a"]
+    assert "maxLength" not in cleaned["tools"][1]["function"]["parameters"]["properties"]["a"]
+    assert "maxLength" not in cleaned["tools"][2]["parameters"]["properties"]["a"]
+
+
+def test_local_grammar_compatibility_returns_the_payload_untouched_when_clean() -> None:
+    """A tool set declaring no such bound pays nothing."""
+    payload = {"tools": [{"type": "function", "parameters": {"properties": {"a": {"type": "string"}}}}]}
+    assert LocalGrammarCompatibility.normalize(payload) is payload
+    assert LocalGrammarCompatibility.normalize({"model": "x"}) == {"model": "x"}
+    assert LocalGrammarCompatibility.normalize({"tools": []}) == {"tools": []}

@@ -1,4 +1,5 @@
 import type { GatewayEndpoint } from '../gateway/GatewayModelClient';
+import LocalModelBinding from '../models/LocalModelBinding';
 import RouterBinding from '../router/RouterBinding';
 import RouterModel from '../router/RouterModel';
 import CodexBundledCatalog from './CodexBundledCatalog';
@@ -16,10 +17,17 @@ import CodexHome from './CodexHome';
  * first: pointing Codex at a catalog that turned out empty would cost the user
  * their model picker, which is worse than not taking over at all.
  *
- * Which endpoint that is depends on the Router page's switch, and which model
- * is offered depends on it too — the router is the only thing that can serve a
- * routed pair, and it is the pair that is worth offering. So both come from
+ * Which endpoint that is depends on the Router page's switch, and so does one
+ * of the models offered — the router is the only thing that can serve a routed
+ * pair, and it is the pair that is worth offering. Both come from
  * {@link RouterBinding}, and both change together on every toggle.
+ *
+ * A running local model is the second row, and it comes from
+ * {@link LocalModelBinding} instead. It is independent of the switch in both
+ * directions: its route is served by the gateway, and the router forwards a
+ * model name it does not recognize to that same gateway, so the row resolves
+ * whichever endpoint Codex is currently pointed at. The two rows can therefore
+ * appear together, separately, or not at all.
  *
  * Both files are undone at quit by `CodexConfigTakeover`. The catalog file
  * itself is left on disk; with `model_catalog_json` gone from the restored
@@ -29,6 +37,7 @@ import CodexHome from './CodexHome';
 export class CodexGatewayIntegration {
   private readonly gateway: GatewayEndpoint;
   private readonly routerBinding: RouterBinding;
+  private readonly localBinding: LocalModelBinding;
   private readonly bundled: CodexBundledCatalog;
   private readonly generator: CodexCatalogGenerator;
   private readonly takeover: CodexConfigTakeover;
@@ -37,6 +46,8 @@ export class CodexGatewayIntegration {
     gateway: GatewayEndpoint;
     /** Omitted only by a caller with no Router page; the CLI then stays on the gateway. */
     routerBinding?: RouterBinding;
+    /** Omitted only by a caller with no local runtime; no local row is then offered. */
+    localBinding?: LocalModelBinding;
     bundled?: CodexBundledCatalog;
     generator?: CodexCatalogGenerator;
     takeover?: CodexConfigTakeover;
@@ -45,6 +56,7 @@ export class CodexGatewayIntegration {
     const home = new CodexHome(options);
     this.gateway = options.gateway;
     this.routerBinding = options.routerBinding ?? new RouterBinding();
+    this.localBinding = options.localBinding ?? new LocalModelBinding();
     this.bundled = options.bundled ?? new CodexBundledCatalog(options);
     this.generator =
       options.generator ??
@@ -133,32 +145,43 @@ export class CodexGatewayIntegration {
   }
 
   /**
-   * The rows Tokkey contributes to the catalog: the routed pair while the
-   * router is on, and nothing at all while it is off.
+   * The rows Tokkey contributes to the catalog: the routed pair while the router
+   * is on, the local model while one is running, both, or nothing at all.
    *
    * Nothing at all is the point of the empty case. The merge replaces every row
-   * Tokkey authored with this run's set, so returning none is what removes the
-   * routed row when the switch goes off — the same call that repoints Codex
-   * back at the gateway also takes away the model only the router could serve.
+   * Tokkey authored with this run's set, so a row simply missing from what is
+   * returned here is a row removed from the picker — which is how both the
+   * switch going off and a model stopping take their row away, with no removal
+   * path of their own.
    *
-   * A cloud model on its own is deliberately not offered. It is reachable
+   * A cloud model on its own is still deliberately not offered. It is reachable
    * through the gateway, but a turn sent to it is a turn the router never sees,
-   * which is the one thing the Router page exists to prevent.
+   * which is the one thing the Router page exists to prevent. The local model is
+   * the opposite case and is offered on its own: nothing about it is metered, so
+   * there is nothing for the router to miss.
    */
   private tokkeyModels(): CatalogModelInput[] {
-    const model = this.routerBinding.model;
-    if (model === null) {
-      return [];
-    }
-    return [
-      {
-        slug: model.slug,
+    const rows: CatalogModelInput[] = [];
+    const routed = this.routerBinding.model;
+    if (routed !== null) {
+      rows.push({
+        slug: routed.slug,
         displayName: RouterModel.DISPLAY_NAME,
         // The slug carries route names, which say nothing about which models
         // are paired; the description is where the picker can read them.
-        describedAs: model.description
-      }
-    ];
+        describedAs: routed.description
+      });
+    }
+    const local = this.localBinding.model;
+    if (local !== null) {
+      rows.push({
+        slug: local.slug,
+        // The model's own name, since the slug is fixed and names none.
+        displayName: local.displayName,
+        describedAs: local.description
+      });
+    }
+    return rows;
   }
 }
 

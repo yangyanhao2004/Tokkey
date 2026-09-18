@@ -8,6 +8,8 @@ import { CodexTomlDocument } from '../dist/main/codex/CodexTomlDocument.js';
 import { CodexCatalogGenerator, CatalogEntryFactory } from '../dist/main/codex/CodexCatalogGenerator.js';
 import { CodexConfigTakeover } from '../dist/main/codex/CodexConfigTakeover.js';
 import { CodexGatewayIntegration } from '../dist/main/codex/CodexGatewayIntegration.js';
+import { LocalModel } from '../dist/main/models/LocalModel.js';
+import { LocalModelBinding } from '../dist/main/models/LocalModelBinding.js';
 import { RouterBinding } from '../dist/main/router/RouterBinding.js';
 import { RouterModel } from '../dist/main/router/RouterModel.js';
 
@@ -477,6 +479,8 @@ const ROUTER_URL = 'http://127.0.0.1:5173';
 const CLOUD_ROUTE = 'custom-gpt-5.6-terra-openai-c05442';
 /** What the catalog carries for the routed pair: a fixed slug, same for every pairing. */
 const ROUTER_SLUG = RouterModel.DISPLAY_NAME;
+/** Same idea for a running local model: one fixed slug, whichever model it serves. */
+const LOCAL_SLUG = LocalModel.DISPLAY_NAME;
 
 /** A binding already switched on, as `RouterAgentIntegration.turnOn` leaves it. */
 function boundRouter() {
@@ -485,11 +489,19 @@ function boundRouter() {
   return binding;
 }
 
-function makeIntegration(home, { routerBinding, baseUrl = GATEWAY_URL } = {}) {
+/** A binding already published, as `LocalModelAgentIntegration.connect` leaves it. */
+function boundLocalModel(label = 'Qwen3 4B') {
+  const binding = new LocalModelBinding();
+  binding.bind(new LocalModel(label));
+  return binding;
+}
+
+function makeIntegration(home, { routerBinding, localBinding, baseUrl = GATEWAY_URL } = {}) {
   const codexHome = codexHomeOf(home);
   return new CodexGatewayIntegration({
     gateway: { startIfNeeded: async () => {}, baseUrl: () => baseUrl },
     routerBinding: routerBinding ?? new RouterBinding(),
+    localBinding: localBinding ?? new LocalModelBinding(),
     bundled: new FakeBundledCatalog([nativeEntry('gpt-5.5', { tool_mode: 'code_mode_only' })]),
     homeDirectory: home,
     codexHome
@@ -517,7 +529,7 @@ test('catalogues the routed pair beside codex own models and points codex at the
   // The native model keeps Codex's own row rather than a derived clone.
   assert.deepEqual(catalog.models.map((entry) => entry.slug), ['gpt-5.5', ROUTER_SLUG]);
   assert.equal(CatalogEntryFactory.isTokkeyAuthored(catalog.models[0]), false);
-  assert.equal(catalog.models[1].display_name, 'Tokkey-Router');
+  assert.equal(catalog.models[1].display_name, RouterModel.DISPLAY_NAME);
   assert.equal(catalog.models[1].supports_search_tool, false);
   assert.equal('tool_mode' in catalog.models[1], false);
   // The slug shows only route names, so the description names both models.
@@ -593,5 +605,68 @@ test('does not point codex at a catalog that came out empty', async () => {
   assert.ok(!config.includes('model_catalog_json'));
   // The gateway is still wired up: only the model list could not be built.
   assert.ok(config.includes('model_provider = "tokkey"'));
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('catalogues a running local model on its own while the router is off', async () => {
+  const home = makeHome();
+  const configPath = writeConfig(home, USER_CONFIG);
+  const integration = makeIntegration(home, { localBinding: boundLocalModel() });
+
+  assert.equal(await integration.activate(), true);
+
+  const catalog = readCatalog(home);
+  assert.deepEqual(catalog.models.map((entry) => entry.slug), ['gpt-5.5', LOCAL_SLUG]);
+  // The slug is fixed, so the picker's label is where the model names itself.
+  assert.equal(catalog.models[1].display_name, 'Qwen3 4B');
+  assert.ok(catalog.models[1].description.includes('local Qwen3 4B'));
+  // Nothing routed is bound, so Codex stays on the gateway.
+  assert.ok(readFileSync(configPath, 'utf8').includes(`base_url = "${GATEWAY_URL}/v1"`));
+
+  integration.deactivate();
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('catalogues the routed pair and the local model together', async () => {
+  const home = makeHome();
+  writeConfig(home, USER_CONFIG);
+  const integration = makeIntegration(home, {
+    routerBinding: boundRouter(),
+    localBinding: boundLocalModel()
+  });
+
+  assert.equal(await integration.activate(), true);
+
+  // Both rows, router first; the router forwards the local slug to the gateway.
+  assert.deepEqual(
+    readCatalog(home).models.map((entry) => entry.slug),
+    ['gpt-5.5', ROUTER_SLUG, LOCAL_SLUG]
+  );
+
+  integration.deactivate();
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('a local model starting and stopping adds and removes only its own row', async () => {
+  const home = makeHome();
+  writeConfig(home, USER_CONFIG);
+  const localBinding = new LocalModelBinding();
+  const integration = makeIntegration(home, { routerBinding: boundRouter(), localBinding });
+  await integration.activate();
+  assert.deepEqual(readCatalog(home).models.map((entry) => entry.slug), ['gpt-5.5', ROUTER_SLUG]);
+
+  localBinding.bind(new LocalModel('Qwen3 4B'));
+  await integration.sync();
+  assert.deepEqual(
+    readCatalog(home).models.map((entry) => entry.slug),
+    ['gpt-5.5', ROUTER_SLUG, LOCAL_SLUG]
+  );
+
+  // A stopped model takes its row with it and leaves the routed pair standing.
+  localBinding.release();
+  await integration.sync();
+  assert.deepEqual(readCatalog(home).models.map((entry) => entry.slug), ['gpt-5.5', ROUTER_SLUG]);
+
+  integration.deactivate();
   rmSync(home, { recursive: true, force: true });
 });

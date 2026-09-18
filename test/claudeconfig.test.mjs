@@ -8,6 +8,8 @@ import { ClaudeSettingsDocument } from '../dist/main/claude/ClaudeSettingsDocume
 import { ClaudeConfigTakeover } from '../dist/main/claude/ClaudeConfigTakeover.js';
 import { ClaudeGatewayIntegration } from '../dist/main/claude/ClaudeGatewayIntegration.js';
 import { ClaudeDesktopConfigLibrary } from '../dist/main/claude/ClaudeDesktopConfigLibrary.js';
+import { LocalModel } from '../dist/main/models/LocalModel.js';
+import { LocalModelBinding } from '../dist/main/models/LocalModelBinding.js';
 import { RouterBinding } from '../dist/main/router/RouterBinding.js';
 import { RouterModel } from '../dist/main/router/RouterModel.js';
 
@@ -248,6 +250,7 @@ const CLOUD_ROUTE = 'custom-gpt-5.6-terra-openai-c05442';
 
 /** The picker-qualified fixed slug the router recognizes for every pairing. */
 const ROUTER_ALIAS = `anthropic.${RouterModel.DISPLAY_NAME}`;
+const LOCAL_ALIAS = `anthropic.${LocalModel.DISPLAY_NAME}`;
 
 const GATEWAY_URL = 'http://127.0.0.1:4173';
 const ROUTER_URL = 'http://127.0.0.1:5173';
@@ -268,10 +271,18 @@ function boundRouter() {
   return binding;
 }
 
-function makeIntegration(home, { routerBinding, baseUrl = GATEWAY_URL } = {}) {
+/** A binding already published, as `LocalModelAgentIntegration.connect` leaves it. */
+function boundLocalModel(label = 'Qwen3 4B') {
+  const binding = new LocalModelBinding();
+  binding.bind(new LocalModel(label));
+  return binding;
+}
+
+function makeIntegration(home, { routerBinding, localBinding, baseUrl = GATEWAY_URL } = {}) {
   return new ClaudeGatewayIntegration({
     gateway: { startIfNeeded: async () => {}, baseUrl: () => baseUrl },
     routerBinding: routerBinding ?? new RouterBinding(),
+    localBinding: localBinding ?? new LocalModelBinding(),
     homeDirectory: home,
     claudeHome: claudeHomeOf(home)
   });
@@ -588,5 +599,94 @@ test('a takeover with no models to offer is refused', () => {
 
   assert.deepEqual(readDesktopMeta(home), foreign);
   assert.equal(existsSync(tokkeyEntryPathOf(home)), false);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('offers a running local model while the router is off, on the gateway', async () => {
+  const home = makeHome();
+  const settingsPath = writeSettings(home, USER_SETTINGS);
+  const integration = makeIntegration(home, { localBinding: boundLocalModel() });
+
+  assert.equal(await integration.activate(), true);
+
+  const taken = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  // Nothing routed is bound, so the endpoint stays the gateway that serves it.
+  assert.equal(taken.env.ANTHROPIC_BASE_URL, GATEWAY_URL);
+  // The user's own model is left alone; the local model is offered, not forced.
+  assert.equal(taken.model, 'opus');
+  assert.equal(taken.availableModels[0], LOCAL_ALIAS);
+  assert.ok(taken.availableModels.includes('claude-opus-5'));
+  // The router is off, so its tool server must not be declared.
+  assert.equal(existsSync(userConfigPathOf(home)), false);
+
+  integration.deactivate();
+  assertSettingsRestored(settingsPath);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('offers the routed pair and the local model together, pair first', async () => {
+  const home = makeHome();
+  const settingsPath = writeSettings(home, USER_SETTINGS);
+  const integration = makeIntegration(home, {
+    routerBinding: boundRouter(),
+    localBinding: boundLocalModel()
+  });
+
+  assert.equal(await integration.activate(), true);
+
+  const taken = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  assert.deepEqual(taken.availableModels.slice(0, 2), [ROUTER_ALIAS, LOCAL_ALIAS]);
+  // Claude Code follows the router, which forwards the local slug downstream.
+  assert.equal(taken.env.ANTHROPIC_BASE_URL, ROUTER_URL);
+
+  integration.deactivate();
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('a local model starting and stopping adds and removes only its own entry', async () => {
+  const home = makeHome();
+  const settingsPath = writeSettings(home, USER_SETTINGS);
+  const localBinding = new LocalModelBinding();
+  const integration = makeIntegration(home, { routerBinding: boundRouter(), localBinding });
+  await integration.activate();
+  assert.equal(JSON.parse(readFileSync(settingsPath, 'utf8')).availableModels[0], ROUTER_ALIAS);
+
+  localBinding.bind(new LocalModel('Qwen3 4B'));
+  assert.equal(await integration.syncSettings(), true);
+  assert.deepEqual(
+    JSON.parse(readFileSync(settingsPath, 'utf8')).availableModels.slice(0, 2),
+    [ROUTER_ALIAS, LOCAL_ALIAS]
+  );
+
+  // A stopped model takes its entry with it and leaves the routed pair standing.
+  localBinding.release();
+  assert.equal(await integration.syncSettings(), true);
+  const after = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  assert.equal(after.availableModels.includes(LOCAL_ALIAS), false);
+  assert.equal(after.availableModels[0], ROUTER_ALIAS);
+
+  integration.deactivate();
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('the last model going away hands claude its own picker back', async () => {
+  const home = makeHome();
+  const settingsPath = writeSettings(home, USER_SETTINGS);
+  const localBinding = boundLocalModel();
+  const integration = makeIntegration(home, { localBinding });
+  await integration.activate();
+  assert.ok(JSON.parse(readFileSync(settingsPath, 'utf8')).availableModels.includes(LOCAL_ALIAS));
+
+  localBinding.release();
+  assert.equal(await integration.syncSettings(), true);
+
+  // Nothing of Tokkey's is left to impose, so the whole restriction comes off.
+  const after = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  assert.equal(after.availableModels, undefined);
+  assert.equal(after.enforceAvailableModels, undefined);
+  assert.equal(after.model, 'opus');
+
+  integration.deactivate();
+  assertSettingsRestored(settingsPath);
   rmSync(home, { recursive: true, force: true });
 });

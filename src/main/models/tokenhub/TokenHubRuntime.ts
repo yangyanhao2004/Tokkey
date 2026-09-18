@@ -51,7 +51,7 @@ export function buildTokenHubServerArguments(options: {
     '--cache-ram', '0',
     '-ub', '4096',
     '-b', '4096',
-    '-c', '16384',
+    '-c', '49152',
     '-fa', 'on',
     '--no-cache-prompt',
     '--rge', '0',
@@ -60,7 +60,7 @@ export function buildTokenHubServerArguments(options: {
   ];
 }
 
-const SERVER_CONTEXT_WINDOW_TOKENS = 16_384;
+const SERVER_CONTEXT_WINDOW_TOKENS = 49_152;
 const DEVICE_SCAN_INTERVAL_MS = 1_000;
 const SERVER_READINESS_TIMEOUT_MS = 180_000;
 const SERVER_STOP_GRACE_MS = 3_000;
