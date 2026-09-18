@@ -15,6 +15,9 @@ import { GatewayModelClient } from '../dist/main/gateway/GatewayModelClient.js';
 
 const CODEX_VERSION = 'codex-cli 0.151.0';
 
+/** What `which codex` reports when Codex was installed the standalone way. */
+const CODEX_ON_PATH = '/usr/local/bin/codex';
+
 /** One entry shaped like the bundled catalog's, including the fields we drop. */
 function catalogEntry(slug, overrides = {}) {
   return {
@@ -35,7 +38,7 @@ function catalogJson(entries) {
   return JSON.stringify({ models: entries });
 }
 
-/** A shell runner that answers the two commands the catalog issues. */
+/** A shell runner that answers the lookup and the two commands that follow it. */
 class FakeShellRunner {
   constructor({ version = CODEX_VERSION, catalog = null, failing = false } = {}) {
     this.version = version;
@@ -47,7 +50,10 @@ class FakeShellRunner {
   async run(command) {
     this.commands.push(command);
     if (this.failing) {
-      return { exitCode: 127, timedOut: false, output: ['zsh: command not found: codex'] };
+      return { exitCode: 1, timedOut: false, output: ['codex not found'] };
+    }
+    if (command === 'which codex') {
+      return { exitCode: 0, timedOut: false, output: [CODEX_ON_PATH] };
     }
     if (command.includes('--version')) {
       return { exitCode: 0, timedOut: false, output: [this.version] };
@@ -59,6 +65,28 @@ class FakeShellRunner {
 function makeHome() {
   const home = mkdtempSync(path.join(tmpdir(), 'tokkey-codex-'));
   return home;
+}
+
+/**
+ * A catalog rooted entirely inside one temporary home. `codexHome` is pinned
+ * too, so a CODEX_HOME in the environment running the tests cannot point the
+ * locator at the real Codex install.
+ */
+function nativeCatalog(runner, home) {
+  return new CodexNativeModelCatalog({
+    runner,
+    homeDirectory: home,
+    codexHome: path.join(home, '.codex')
+  });
+}
+
+/** Plants the binary the Codex desktop app installs under the Codex home. */
+function installCodexApp(home) {
+  const binDirectory = path.join(home, '.codex', 'packages', 'standalone', 'current', 'bin');
+  mkdirSync(binDirectory, { recursive: true });
+  const executable = path.join(binDirectory, 'codex');
+  writeFileSync(executable, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  return executable;
 }
 
 test('keeps only listed models and drops the instruction blobs', async () => {
@@ -74,7 +102,7 @@ test('keeps only listed models and drops the instruction blobs', async () => {
     ]
   });
 
-  const models = await new CodexNativeModelCatalog({ runner, homeDirectory: home }).list();
+  const models = await nativeCatalog(runner, home).list();
 
   assert.deepEqual(
     models.map((model) => model.slug),
@@ -106,11 +134,11 @@ test('reuses the cache when the installed codex version is unchanged', async () 
   );
   const runner = new FakeShellRunner({ catalog: [catalogJson([catalogEntry('gpt-5.6-sol')])] });
 
-  const models = await new CodexNativeModelCatalog({ runner, homeDirectory: home }).list();
+  const models = await nativeCatalog(runner, home).list();
 
   assert.deepEqual(models.map((model) => model.slug), ['gpt-5.5']);
   // Only the version probe ran; the expensive catalog call was skipped.
-  assert.deepEqual(runner.commands, ['codex --version']);
+  assert.deepEqual(runner.commands, ['which codex', `'${CODEX_ON_PATH}' --version`]);
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -123,7 +151,7 @@ test('refreshes the cache when codex has been upgraded', async () => {
   );
   const runner = new FakeShellRunner({ catalog: [catalogJson([catalogEntry('gpt-5.5')])] });
 
-  const models = await new CodexNativeModelCatalog({ runner, homeDirectory: home }).list();
+  const models = await nativeCatalog(runner, home).list();
 
   assert.deepEqual(models.map((model) => model.slug), ['gpt-5.5']);
   rmSync(home, { recursive: true, force: true });
@@ -138,7 +166,7 @@ test('falls back to the cached list when codex cannot be run', async () => {
   );
   const runner = new FakeShellRunner({ failing: true });
 
-  const models = await new CodexNativeModelCatalog({ runner, homeDirectory: home }).list();
+  const models = await nativeCatalog(runner, home).list();
 
   assert.deepEqual(models.map((model) => model.slug), ['gpt-5.5']);
   rmSync(home, { recursive: true, force: true });
@@ -147,10 +175,7 @@ test('falls back to the cached list when codex cannot be run', async () => {
 test('returns nothing rather than throwing when codex is absent and nothing is cached', async () => {
   const home = makeHome();
 
-  const models = await new CodexNativeModelCatalog({
-    runner: new FakeShellRunner({ failing: true }),
-    homeDirectory: home
-  }).list();
+  const models = await nativeCatalog(new FakeShellRunner({ failing: true }), home).list();
 
   assert.deepEqual(models, []);
   rmSync(home, { recursive: true, force: true });
@@ -162,7 +187,7 @@ test('survives a debug command whose output shape changed', async () => {
     catalog: ['not json at all', JSON.stringify({ unexpected: 'shape' })]
   });
 
-  const models = await new CodexNativeModelCatalog({ runner, homeDirectory: home }).list();
+  const models = await nativeCatalog(runner, home).list();
 
   assert.deepEqual(models, []);
   rmSync(home, { recursive: true, force: true });
@@ -174,7 +199,7 @@ test('finds the catalog even when the shell writes a warning first', async () =>
     catalog: ['zsh: some rc-file warning', catalogJson([catalogEntry('gpt-5.5')])]
   });
 
-  const models = await new CodexNativeModelCatalog({ runner, homeDirectory: home }).list();
+  const models = await nativeCatalog(runner, home).list();
 
   assert.deepEqual(models.map((model) => model.slug), ['gpt-5.5']);
   rmSync(home, { recursive: true, force: true });
@@ -183,11 +208,31 @@ test('finds the catalog even when the shell writes a warning first', async () =>
 test('runs the codex CLI once however many callers ask for the list', async () => {
   const home = makeHome();
   const runner = new FakeShellRunner({ catalog: [catalogJson([catalogEntry('gpt-5.5')])] });
-  const catalog = new CodexNativeModelCatalog({ runner, homeDirectory: home });
+  const catalog = nativeCatalog(runner, home);
 
   await Promise.all([catalog.list(), catalog.list(), catalog.list()]);
 
-  assert.deepEqual(runner.commands, ['codex --version', 'codex debug models --bundled']);
+  assert.deepEqual(runner.commands, [
+    'which codex',
+    `'${CODEX_ON_PATH}' --version`,
+    `'${CODEX_ON_PATH}' debug models --bundled`
+  ]);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('prefers the CLI the codex app installed over whatever PATH offers', async () => {
+  const home = makeHome();
+  const executable = installCodexApp(home);
+  const runner = new FakeShellRunner({ catalog: [catalogJson([catalogEntry('gpt-5.5')])] });
+
+  const models = await nativeCatalog(runner, home).list();
+
+  assert.deepEqual(models.map((model) => model.slug), ['gpt-5.5']);
+  // PATH is never consulted: the app's install is the one PATH may not know.
+  assert.deepEqual(runner.commands, [
+    `'${executable}' --version`,
+    `'${executable}' debug models --bundled`
+  ]);
   rmSync(home, { recursive: true, force: true });
 });
 

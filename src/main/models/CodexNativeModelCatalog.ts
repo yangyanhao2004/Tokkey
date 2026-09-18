@@ -28,6 +28,7 @@ export class CodexNativeModelCatalog {
       bundled?: CodexBundledCatalog;
       runner?: ShellRunnerContract;
       homeDirectory?: string;
+      codexHome?: string;
     } = {}
   ) {
     this.bundled = options.bundled ?? new CodexBundledCatalog(options);

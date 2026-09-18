@@ -5,10 +5,11 @@ import { ShellRunner } from '../agents/ShellRunner';
 import type { ShellRunner as ShellRunnerContract } from '../agents/AgentTypes';
 import TokkeyHome from '../storage/TokkeyHome';
 import type { CatalogDocument, CatalogEntry } from './CodexCatalogFile';
+import CodexCliLocator from './CodexCliLocator';
 
 /** The Codex CLI prints its bundled catalog as one JSON document on stdout. */
-const CATALOG_COMMAND = 'codex debug models --bundled';
-const VERSION_COMMAND = 'codex --version';
+const CATALOG_ARGUMENTS = 'debug models --bundled';
+const VERSION_ARGUMENTS = '--version';
 
 /** The catalog embeds every model's full prompt template, so it takes a moment. */
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -39,12 +40,21 @@ export interface BundledCatalogCache {
  */
 export class CodexBundledCatalog {
   private readonly runner: ShellRunnerContract;
+  private readonly cli: CodexCliLocator;
   private readonly cacheFilePath: string;
   /** Shared by every caller during one launch, so the CLI runs at most once. */
   private discovery: Promise<CatalogEntry[]> | null = null;
 
-  constructor(options: { runner?: ShellRunnerContract; homeDirectory?: string } = {}) {
+  constructor(
+    options: {
+      runner?: ShellRunnerContract;
+      cli?: CodexCliLocator;
+      homeDirectory?: string;
+      codexHome?: string;
+    } = {}
+  ) {
     this.runner = options.runner ?? new ShellRunner();
+    this.cli = options.cli ?? new CodexCliLocator(options);
     this.cacheFilePath = new TokkeyHome(options).pathFor('codex-bundled-catalog.json');
   }
 
@@ -72,17 +82,19 @@ export class CodexBundledCatalog {
   /** Resolves the rows, preferring the cache written for this CLI version. */
   private async discover(): Promise<CatalogEntry[]> {
     const cached = this.readCache();
-    const version = await this.installedVersion();
-    if (!version) {
-      // Codex is not installed or not on PATH. A cached catalog is still the
-      // best answer available; it just cannot be refreshed right now.
+    const executable = await this.cli.resolve();
+    const version = executable ? await this.installedVersion(executable) : '';
+    if (!executable || !version) {
+      // Codex is not installed, or the binary that is there cannot be run. A
+      // cached catalog is still the best answer available; it just cannot be
+      // refreshed right now.
       return cached?.models ?? [];
     }
     if (cached?.codexVersion === version) {
       return cached.models;
     }
 
-    const models = await this.readBundledCatalog();
+    const models = await this.readBundledCatalog(executable);
     if (!models) {
       return cached?.models ?? [];
     }
@@ -91,15 +103,15 @@ export class CodexBundledCatalog {
   }
 
   /** The installed CLI version, or an empty string when Codex cannot be run. */
-  private async installedVersion(): Promise<string> {
-    const result = await this.runShell(VERSION_COMMAND);
+  private async installedVersion(executable: string): Promise<string> {
+    const result = await this.runCodex(executable, VERSION_ARGUMENTS);
     if (result === null) return '';
     return result.find((line) => line.trim().length > 0)?.trim() ?? '';
   }
 
   /** The rows the CLI reports, or null when its output was unusable. */
-  private async readBundledCatalog(): Promise<CatalogEntry[] | null> {
-    const output = await this.runShell(CATALOG_COMMAND);
+  private async readBundledCatalog(executable: string): Promise<CatalogEntry[] | null> {
+    const output = await this.runCodex(executable, CATALOG_ARGUMENTS);
     if (output === null) return null;
 
     const models = this.parseCatalogDocument(output);
@@ -132,8 +144,9 @@ export class CodexBundledCatalog {
     return null;
   }
 
-  /** Runs one command, returning its output lines or null when it failed. */
-  private async runShell(command: string): Promise<string[] | null> {
+  /** Runs the located CLI once, returning its output or null when it failed. */
+  private async runCodex(executable: string, args: string): Promise<string[] | null> {
+    const command = CodexCliLocator.commandFor(executable, args);
     try {
       const result = await this.runner.run(command, {
         shell: '/bin/zsh',
