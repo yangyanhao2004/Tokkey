@@ -1540,6 +1540,83 @@ def test_local_grammar_compatibility_removes_expanded_bounds_at_any_depth() -> N
     assert payload["tools"][0]["parameters"]["properties"]["doc_id"]["maxLength"] == 200
 
 
+def test_local_grammar_compatibility_spells_out_shorthand_classes() -> None:
+    r"""`\d` and friends break the build below the top level; `[0-9]` does not."""
+    expand = LocalGrammarCompatibility.expand_shorthand
+    # Figma's `upload_assets` declares nodeIds as an array of exactly this.
+    assert expand(r"^\d+[:-]\d+$") == "^[0-9]+[:-][0-9]+$"
+    # Inside a set the brackets have to come off, or the set nests and breaks.
+    assert expand(r"^[\w-]+$") == "^[A-Za-z0-9_-]+$"
+    assert expand(r"^[\d]+$") == "^[0-9]+$"
+    assert expand(r"^\D+$") == "^[^0-9]+$"
+    # A pattern GBNF already accepts is returned unchanged, bounded quantifier
+    # and all -- only the spelling of a shorthand ever changes.
+    assert expand("^[0-9a-zA-Z]{22,128}$") == "^[0-9a-zA-Z]{22,128}$"
+    # An escaped backslash is consumed as a pair, so this is a literal `\` then
+    # `d`, not a digit class.
+    assert expand(r"a\\db") == r"a\\db"
+
+
+def test_local_grammar_compatibility_drops_a_pattern_it_cannot_spell_out() -> None:
+    """A negated class inside a set has no set-member spelling, so it goes.
+
+    Losing the constraint costs a validation the receiver still performs;
+    keeping it costs the whole turn.
+    """
+    assert LocalGrammarCompatibility.expand_shorthand(r"^[\D]+$") is None
+
+    payload = {
+        "tools": [
+            {
+                "type": "function",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "a": {"type": "string", "pattern": r"^[\D]+$"},
+                        "b": {"type": "string", "pattern": r"^\d+$"},
+                    },
+                },
+            }
+        ]
+    }
+
+    properties = LocalGrammarCompatibility.normalize(payload)["tools"][0]["parameters"]["properties"]
+
+    assert "pattern" not in properties["a"]
+    # The one that could be spelled out keeps its constraint.
+    assert properties["b"]["pattern"] == "^[0-9]+$"
+
+
+def test_local_grammar_compatibility_rewrites_patterns_nested_in_array_items() -> None:
+    """Depth is what makes a shorthand dangerous, so `items` is reached too."""
+    payload = {
+        "tools": [
+            {
+                "type": "function",
+                "name": "upload_assets",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "nodeIds": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 60,
+                            "items": {"type": "string", "pattern": r"^\d+[:-]\d+$"},
+                        }
+                    },
+                },
+            }
+        ]
+    }
+
+    node_ids = LocalGrammarCompatibility.normalize(payload)["tools"][0]["parameters"]["properties"]["nodeIds"]
+
+    assert node_ids["items"]["pattern"] == "^[0-9]+[:-][0-9]+$"
+    assert "maxItems" not in node_ids
+    # A minimum bounds where a repetition starts rather than unrolling it.
+    assert node_ids["minItems"] == 1
+
+
 def test_local_grammar_compatibility_finds_bounds_in_every_wire_shape() -> None:
     """Anthropic, Chat Completions and Responses each nest the schema elsewhere."""
     bounded = {"type": "string", "maxLength": 4096}

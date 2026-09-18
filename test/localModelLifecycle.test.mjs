@@ -224,7 +224,7 @@ function createManager() {
       getLocalChatRuntimeState: () => ({
         status: published.phase === 'running' ? 'ready' : 'unavailable',
         model: published.modelId ? { id: published.modelId, label: 'Qwen3 8B' } : null,
-        contextWindowTokens: published.phase === 'running' ? 49152 : null,
+        contextWindowTokens: published.phase === 'running' ? 65535 : null,
         error: published.error
       }),
       startModel: async (model) => {

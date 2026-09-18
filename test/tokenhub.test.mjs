@@ -60,7 +60,7 @@ test('runtime builds the Dongle server arguments from detected paths', () => {
     '--cache-ram', '0',
     '-ub', '4096',
     '-b', '4096',
-    '-c', '49152',
+    '-c', '65535',
     '-fa', 'on',
     '--no-cache-prompt',
     '--rge', '0',

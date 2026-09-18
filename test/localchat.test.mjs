@@ -157,7 +157,7 @@ test('deploying a downloaded model starts the shared local runtime before it bec
       chatRuntimeState = {
         status: 'ready',
         model: { id: model.id, label: model.label },
-        contextWindowTokens: 49152,
+        contextWindowTokens: 65535,
         error: null
       };
       runtimePhase = runningPhase(model.id);
@@ -348,7 +348,7 @@ test('local model deployment actions run one at a time so row state cannot resol
       runtimeState = {
         status: 'ready',
         model: { id: model.id, label: model.label },
-        contextWindowTokens: 49152,
+        contextWindowTokens: 65535,
         error: null
       };
       runtimePhase = runningPhase(model.id);

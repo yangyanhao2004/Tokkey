@@ -352,38 +352,38 @@ class ResponsesToolOutputNormalizer:
 
 
 class LocalGrammarCompatibility:
-    """Drop schema bounds that make a locally served model's grammar uncompilable.
+    r"""Rewrite tool schemas a locally served model cannot compile into a grammar.
 
     llama.cpp constrains tool-call output with a GBNF grammar built from each
-    tool's JSON Schema, and it renders a bounded `maxLength` / `maxItems` as an
-    explicit repetition. That repetition is expanded, not referenced, so the
-    generated text grows with the bound -- and nesting multiplies it, because an
-    inner rule is expanded again inside every level that contains it. Past a
-    point the grammar no longer parses, and the server rejects the whole request
-    with HTTP 400 "Failed to initialize samplers: failed to parse grammar",
-    before a single token is generated.
+    tool's JSON Schema. Two things in an ordinary schema defeat that build, and
+    both cost the same thing: not a degraded tool but a dead turn, rejected with
+    HTTP 400 "Failed to initialize samplers: failed to parse grammar" before a
+    single token is generated.
 
-    Measured against the real thing rather than reasoned about: Claude Code's
-    `Artifact` tool declares `query.cursor` as a string of `maxLength` 4096, two
-    objects deep. On its own that one property sinks the turn. The same property
-    at the top level is fine, and nested at 1024 is fine, which is what shows
-    this to be a size limit rather than an unsupported construct.
+    **Expanded bounds.** `maxLength` and `maxItems` are rendered as an explicit
+    repetition, expanded rather than referenced, so the grammar grows with the
+    bound -- and nesting multiplies it. Claude Code's `Artifact` tool declares
+    `query.cursor` as a 4096-long string two objects deep, which sinks the turn
+    on its own. The same property at the top level is fine, and nested at 1024 is
+    fine, which is what shows this to be a size limit rather than a bad keyword.
 
-    Removing the bounds outright, rather than lowering them, is the deliberate
-    choice. A lowered bound is still a constraint on generation, so capping
-    `cursor` to something the grammar can hold would leave the model unable to
-    emit a pagination cursor longer than the cap -- trading a failed turn for a
-    silently truncated one. It would also need a threshold, and the safe
-    threshold depends on the size of the whole tool set, which is not knowable
-    from one property. Unbounded is both simpler and the only version verified
-    against the full 35-tool payload.
+    **Shorthand character classes.** `\d`, `\w`, `\s` and their negations break
+    the build wherever the pattern sits below the top level -- inside array
+    `items`, or one object deeper. Figma's `upload_assets` declares `nodeIds` as
+    an array of `^\d+[:-]\d+$`, and that one property sinks a turn too. The same
+    pattern spelled `^[0-9]+[:-][0-9]+$` compiles without complaint, which is
+    what makes this a rewrite rather than a removal: the constraint survives
+    exactly, only its spelling changes.
 
-    What is lost is a constraint on length alone. The value the model produces is
-    still checked by whoever receives the tool call, which is where an over-long
-    argument was always going to be caught. Every other keyword survives --
-    `pattern` included, which llama.cpp compiles without complaint -- and so does
-    every schema bound sent to a hosted provider, which has no such limit and
-    honours them properly.
+    Bounds are dropped rather than lowered. A lowered bound still constrains
+    generation, so capping `cursor` would leave the model unable to emit a
+    pagination cursor longer than the cap -- trading a failed turn for a
+    silently truncated one -- and the safe cap depends on the size of the whole
+    tool set, which no single property can know.
+
+    All of it applies only to routes served from this machine. A hosted provider
+    has no such limit and honours these keywords properly, so touching them there
+    would remove working constraints to fix a problem that does not exist.
     """
 
     #: Hosts that mean "served by this machine", and so by a llama.cpp built to
@@ -395,6 +395,27 @@ class LocalGrammarCompatibility:
     #: minimums are left alone: they are small wherever they appear, and a
     #: minimum bounds the start of a repetition rather than unrolling it.
     EXPANDED_BOUNDS = ("maxLength", "maxItems")
+
+    #: Shorthand classes as a standalone expression, e.g. `\d+` -> `[0-9]+`.
+    SHORTHAND = {
+        "d": "[0-9]",
+        "w": "[A-Za-z0-9_]",
+        "s": "[ \\t\\n\\r\\f\\v]",
+        "D": "[^0-9]",
+        "W": "[^A-Za-z0-9_]",
+        "S": "[^ \\t\\n\\r\\f\\v]",
+    }
+
+    #: The same classes written for use *inside* a set, e.g. `[\w-]` ->
+    #: `[A-Za-z0-9_-]`. A nested `[...]` there would be a syntax error, so the
+    #: brackets come off. The negated forms have no such spelling -- "not a
+    #: digit" cannot be written as members of a set -- so they are absent, and a
+    #: pattern needing one is dropped instead of mangled.
+    SHORTHAND_IN_SET = {
+        "d": "0-9",
+        "w": "A-Za-z0-9_",
+        "s": " \\t\\n\\r\\f\\v",
+    }
 
     @classmethod
     def applies(cls, route: ModelRoute) -> bool:
@@ -410,39 +431,79 @@ class LocalGrammarCompatibility:
 
     @classmethod
     def normalize(cls, payload: JSONMapping) -> JSONMapping:
-        """Return the payload with uncompilable tool bounds removed.
+        """Return the payload with every tool schema made compilable.
 
         The same object is returned when nothing had to change, so a tool set
-        that declares no such bound copies nothing.
+        that is already compilable copies nothing.
         """
         tools = payload.get("tools")
         if not isinstance(tools, list) or not tools:
             return payload
-        cleaned = [cls._strip(tool) for tool in tools]
+        cleaned = [cls._rewrite(tool) for tool in tools]
         if cleaned == tools:
             return payload
         return {**payload, "tools": cleaned}
 
     @classmethod
-    def _strip(cls, node: Any) -> Any:
-        """Remove every expanded bound anywhere beneath one tool.
+    def _rewrite(cls, node: Any) -> Any:
+        """Apply both repairs anywhere beneath one tool.
 
         Walks the whole tool rather than reaching into a known path, because the
         three wire shapes in play put the schema in three different places --
         Anthropic's `input_schema`, Chat Completions' `function.parameters`, and
-        Responses' `parameters` -- and a bound can sit at any depth within any
-        of them. Depth is exactly what makes one dangerous, so none can be
+        Responses' `parameters` -- and either problem can sit at any depth within
+        any of them. Depth is exactly what makes one dangerous, so nothing can be
         assumed shallow enough to skip.
         """
         if isinstance(node, dict):
-            return {
-                key: cls._strip(value)
-                for key, value in node.items()
-                if not (key in cls.EXPANDED_BOUNDS and isinstance(value, int))
-            }
+            rewritten: JSONMapping = {}
+            for key, value in node.items():
+                if key in cls.EXPANDED_BOUNDS and isinstance(value, int):
+                    continue
+                if key == "pattern" and isinstance(value, str):
+                    expanded = cls.expand_shorthand(value)
+                    # None means the pattern cannot be spelled without a
+                    # shorthand. Dropping it loses a constraint; keeping it
+                    # loses the turn.
+                    if expanded is not None:
+                        rewritten[key] = expanded
+                    continue
+                rewritten[key] = cls._rewrite(value)
+            return rewritten
         if isinstance(node, list):
-            return [cls._strip(item) for item in node]
+            return [cls._rewrite(item) for item in node]
         return node
+
+    @classmethod
+    def expand_shorthand(cls, pattern: str) -> str | None:
+        """Spell out every shorthand class, or return None if one cannot be.
+
+        Set membership is tracked while scanning because the two contexts need
+        different spellings, and because a `]` only closes a set when one is
+        open. `\\\\` is consumed as a pair so the `d` in a literal backslash
+        followed by `d` is never mistaken for a digit class.
+        """
+        out: list[str] = []
+        index = 0
+        in_set = False
+        while index < len(pattern):
+            char = pattern[index]
+            if char == "\\" and index + 1 < len(pattern):
+                escaped = pattern[index + 1]
+                table = cls.SHORTHAND_IN_SET if in_set else cls.SHORTHAND
+                if escaped in cls.SHORTHAND and escaped not in table:
+                    # A negated class inside a set; see SHORTHAND_IN_SET.
+                    return None
+                out.append(table.get(escaped, char + escaped))
+                index += 2
+                continue
+            if char == "[":
+                in_set = True
+            elif char == "]":
+                in_set = False
+            out.append(char)
+            index += 1
+        return "".join(out)
 
 
 class ModelDiscoveryCatalog:
