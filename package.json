@@ -22,7 +22,7 @@
     "gateway:freeze:clean": "npm run gateway:freeze -- --clean",
     "kill:app": "pkill -f \"$PWD/node_modules/[e]lectron/dist\" ; true",
     "start": "npm run gateway:freeze && npm run build && npm run kill:app && node scripts/electron-dev.js .",
-    "dev": "npm run gateway:freeze && npm run build && npm run kill:app && node scripts/electron-dev.js . --dev",
+    "dev": "npm install && npm run gateway:freeze && npm run build && npm run kill:app && node scripts/electron-dev.js . --dev",
     "evidence": "npm run gateway:freeze && npm run build && npm run kill:app && node scripts/electron-dev.js . --evidence"
   },
   "devDependencies": {
