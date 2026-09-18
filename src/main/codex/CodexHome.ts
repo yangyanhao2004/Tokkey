@@ -28,8 +28,12 @@ export class CodexHome {
     return path.join(options.homeDirectory ?? os.homedir(), '.codex');
   }
 
-  /** Expands a leading `~`, which the shell resolves but Node's path helpers do not. */
-  private static expandUser(value: string): string {
+  /**
+   * Expands a leading `~`, which the shell resolves but Node's path helpers do
+   * not. Public because every path read out of `config.toml` needs the same
+   * rule: the file is hand-written, so `~` appears in it wherever a path does.
+   */
+  static expandUser(value: string): string {
     if (value === '~') return os.homedir();
     if (value.startsWith('~/')) return path.join(os.homedir(), value.slice(2));
     return value;

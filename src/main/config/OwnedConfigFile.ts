@@ -208,8 +208,13 @@ export class OwnedConfigFile {
         text = entry.before === null ? editor.clear(text) : editor.write(text, entry.before);
         delete ledger[editor.id];
       }
-      this.writeFile(text);
+      // The ledger goes down first, so this is a write-ahead log in fact and
+      // not just in name: a crash between the two leaves a ledger describing a
+      // takeover that never happened, and the restore that follows finds each
+      // slot holding something other than `after` and leaves it alone. The
+      // other order loses the user's own values outright.
       this.saveLedger(ledger);
+      this.writeFile(text);
       return true;
     } catch (error: unknown) {
       // The CLI keeps working with whatever it already had; only the

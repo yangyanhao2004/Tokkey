@@ -1,123 +1,63 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import type { GatewayEndpoint } from '../gateway/GatewayModelClient';
 import GatewayPortResolver from '../gateway/GatewayPortResolver';
-import TokkeyHome from '../storage/TokkeyHome';
-import CodexProviderConfig, { type CodexProviderEndpoint } from './CodexProviderConfig';
+import CodexProviderConfig from './CodexProviderConfig';
 
 /** Spellings of "this machine" that a loopback URL may use. */
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
 
-/** How long a probe of an unfamiliar endpoint may hold up the launch. */
-const PROBE_TIMEOUT_MS = 5000;
-
-/** Injected so tests do not reach the network. */
-export type EndpointFetch = (input: string, init: RequestInit) => Promise<Response>;
-
 /**
- * Asks an OpenAI-compatible endpoint whether it serves the models Tokkey routes.
+ * The endpoint Tokkey serves Codex's models from, read from `config.toml`.
  *
- * A base URL alone proves nothing — anything can answer on a port. Listing the
- * models is the cheapest question whose answer distinguishes a real upstream
- * for `gpt-5.5` from a proxy, a captive portal, or another local tool.
+ * That file names where the Codex CLI itself sends these models, and it is the
+ * answer whenever it gives one: the user configured it for the CLI, and Tokkey
+ * serving the same models from somewhere else would be a disagreement with the
+ * tool it is standing in for.
  *
- * Both path shapes are tried because a Codex `base_url` may or may not already
- * carry `/v1`, and the CLI appends its own path either way.
- */
-export class OpenAiModelsProbe {
-  private static readonly PATHS = ['/models', '/v1/models'];
-
-  private readonly fetcher: EndpointFetch;
-  private readonly timeoutMs: number;
-
-  constructor(options: { fetcher?: EndpointFetch; timeoutMs?: number } = {}) {
-    this.fetcher = options.fetcher ?? ((input, init) => fetch(input, init));
-    this.timeoutMs = options.timeoutMs ?? PROBE_TIMEOUT_MS;
-  }
-
-  /** Whether this endpoint lists at least one GPT model. */
-  async servesGptModels(endpoint: CodexProviderEndpoint): Promise<boolean> {
-    const base = endpoint.baseUrl.replace(/\/+$/, '');
-    for (const suffix of OpenAiModelsProbe.PATHS) {
-      const identifiers = await this.listModels(`${base}${suffix}`, endpoint.apiKey);
-      if (identifiers.some((identifier) => /gpt/i.test(identifier))) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /** The model identifiers one listing returns, empty when it cannot be read. */
-  private async listModels(url: string, apiKey: string | null): Promise<string[]> {
-    try {
-      const response = await this.fetcher(url, {
-        method: 'GET',
-        headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-        signal: AbortSignal.timeout(this.timeoutMs)
-      });
-      if (!response.ok) return [];
-      return this.identifiersIn(await response.json());
-    } catch (error: unknown) {
-      console.error(`[CodexModels] Could not list models at ${url}:`, error);
-      return [];
-    }
-  }
-
-  /** Reads model ids out of either listing shape an endpoint may answer with. */
-  private identifiersIn(payload: unknown): string[] {
-    const entries = Array.isArray(payload)
-      ? payload
-      : (payload as { data?: unknown })?.data ?? (payload as { models?: unknown })?.models;
-    if (!Array.isArray(entries)) return [];
-    return entries
-      .map((entry) => (typeof entry === 'string' ? entry : (entry as { id?: unknown })?.id))
-      .filter((identifier): identifier is string => typeof identifier === 'string');
-  }
-}
-
-/**
- * The endpoint Tokkey serves Codex native models from, remembered across launches.
+ * The one thing the file cannot be trusted about is Tokkey's own address,
+ * because pointing the Codex CLI at Tokkey rewrites `config.toml` with this
+ * gateway's URL. Reading that back would register the gateway as its own
+ * upstream, so the gateway's own address is refused.
  *
- * `config.toml` cannot be trusted to still name the user's own upstream, because
- * pointing the Codex CLI at Tokkey rewrites that file with this gateway's own
- * address. Reading it back on the next launch would register the gateway as its
- * own upstream — a loop that then feeds itself, since every later launch reads
- * what the previous one adopted.
+ * Nothing here asks the endpoint whether it is real. An earlier version listed
+ * its models and required a GPT-shaped id among them, which assumed the user had
+ * not curated their own models — the very thing `model_catalog_json` exists to
+ * let them do, and which `CodexUserCatalog` now honors. A custom relay serving
+ * custom slugs would fail that test and be refused. The user's own configuration
+ * is a better authority than a guess about naming.
  *
- * So the original endpoint is written down the first time it is seen, and that
- * record is what the routes are built from. The file is only ever replaced by a
- * candidate that clears both bars:
+ * This reads `config.toml` and nothing else. An earlier version also kept the
+ * last non-gateway endpoint in a file of its own, to answer while a takeover was
+ * in force or after a crash that never undid one. Both are already handled one
+ * step earlier and better: `CodexConfigTakeover` runs last on the way up and
+ * `recoverInterruptedSession` runs first, so by the time `resolve` reads the
+ * file it holds the user's own provider — see the ordering in `TokkeyApp`. The
+ * remembered copy only added a second, unvalidated record of a fact the takeover
+ * ledger already owns, and one that nothing ever aged out: a user who switched
+ * back to the official API kept being routed to the relay they had abandoned,
+ * because the switch reads here as "no endpoint" and left the record untouched.
  *
- * 1. It is not the gateway's own address, which is the one endpoint that cannot
- *    answer for these models because it is the thing asking. Every other local
- *    address is a legitimate candidate — a relay a user runs on this machine is
- *    still a relay — and is judged the same way a remote one is.
- * 2. It answers a model listing containing GPT models, so a user who genuinely
- *    moved to a different relay is followed, and a stale or wrong address is not.
- *
- * A launch that cannot reach the candidate keeps the remembered endpoint, which
- * is why an offline start still routes exactly as the last online one did.
+ * A null answer means "no endpoint configured", which the gateway reads as
+ * OpenAI's public API — see `_native_codex_target` in `credentials.py`, which
+ * owns that default so it is defined in exactly one place. That is also the
+ * right answer for a provider naming no `base_url`, which is how the Codex CLI
+ * itself spells "the official API".
  */
 export class CodexUpstreamEndpoint {
   private readonly config: CodexProviderConfig;
-  private readonly probe: OpenAiModelsProbe;
   private readonly gateway: GatewayEndpoint | null;
-  private readonly recordFilePath: string;
-  /** Shared by every caller during one launch, so the probe runs at most once. */
+  /** Shared by every caller during one launch, so the file is read at most once. */
   private resolution: Promise<string | null> | null = null;
 
   constructor(
     options: {
       config?: CodexProviderConfig;
-      probe?: OpenAiModelsProbe;
       gateway?: GatewayEndpoint;
       homeDirectory?: string;
+      codexHome?: string;
     } = {}
   ) {
     this.config = options.config ?? new CodexProviderConfig(options);
-    this.probe = options.probe ?? new OpenAiModelsProbe();
     this.gateway = options.gateway ?? null;
-    this.recordFilePath = new TokkeyHome(options).pathFor('codex-upstream-endpoint.json');
   }
 
   /** The endpoint to register routes with, or null when there is none to use. */
@@ -126,57 +66,16 @@ export class CodexUpstreamEndpoint {
     return this.resolution;
   }
 
-  /** Compares what is remembered with what Codex is configured with now. */
+  /** Takes what Codex is configured with now, unless that is this gateway. */
   private async decide(): Promise<string | null> {
-    const remembered = await this.readRecord();
     const candidate = await this.config.read();
     if (candidate === null || this.isGatewayItself(candidate.baseUrl)) {
-      // Either Codex names no endpoint, or it names the gateway that is asking
-      // — which is what pointing the Codex CLI at Tokkey writes into that file.
-      return remembered;
-    }
-
-    const normalized = this.normalize(candidate.baseUrl);
-    if (remembered === normalized) return remembered;
-    if (remembered === null) {
-      // Nothing was ever recorded, so this is the user's own configuration
-      // rather than a change to it, and it is taken as the starting point.
-      await this.writeRecord(normalized);
-      return normalized;
-    }
-    if (await this.probe.servesGptModels(candidate)) {
-      await this.writeRecord(normalized);
-      return normalized;
-    }
-    console.error(
-      `[CodexModels] Keeping ${remembered}: ${normalized} lists no GPT models to serve.`
-    );
-    return remembered;
-  }
-
-  /** The remembered endpoint, or null when nothing usable is on disk. */
-  private async readRecord(): Promise<string | null> {
-    try {
-      const parsed: unknown = JSON.parse(await readFile(this.recordFilePath, 'utf8'));
-      const { baseUrl } = parsed as Partial<CodexUpstreamEndpointRecord>;
-      return typeof baseUrl === 'string' && baseUrl.trim().length > 0 ? baseUrl.trim() : null;
-    } catch {
-      // Absent or corrupt: the next usable candidate becomes the record.
+      // Either Codex names no endpoint — no file, or a provider that defines no
+      // `base_url`, which means OpenAI's own API — or it names the gateway that
+      // is asking, which is what pointing the Codex CLI at Tokkey writes there.
       return null;
     }
-  }
-
-  /** Remembers one endpoint so a later rewrite of `config.toml` cannot lose it. */
-  private async writeRecord(baseUrl: string): Promise<void> {
-    const record: CodexUpstreamEndpointRecord = { baseUrl };
-    try {
-      await mkdir(path.dirname(this.recordFilePath), { recursive: true });
-      await writeFile(this.recordFilePath, JSON.stringify(record, null, 2), 'utf8');
-    } catch (error: unknown) {
-      // This launch still routes correctly; only the next one pays for the
-      // lost write, by re-deciding from whatever config.toml says then.
-      console.error('[CodexModels] Could not record the Codex upstream endpoint:', error);
-    }
+    return this.normalize(candidate.baseUrl);
   }
 
   /** Drops a trailing slash so two spellings of one endpoint compare equal. */
@@ -189,11 +88,12 @@ export class CodexUpstreamEndpoint {
    *
    * Both the running port and the default one are refused. The running port is
    * the address a rewrite would be carrying right now; the default is the one
-   * almost every rewrite carried, and a record seeded from a launch whose
-   * gateway had moved to a fallback port would loop just as durably.
+   * almost every rewrite carried, and a `config.toml` an interrupted launch left
+   * taken over names whichever port that launch's gateway had bound, not this
+   * one's.
    *
-   * An unparseable URL is not the gateway: the probe judges those, and guessing
-   * here would drop a usable endpoint.
+   * An unparseable URL is not the gateway: it is some spelling this code does
+   * not recognize, and guessing here would drop a usable endpoint.
    */
   private isGatewayItself(baseUrl: string): boolean {
     let url: URL;
@@ -219,11 +119,6 @@ export class CodexUpstreamEndpoint {
     }
     return ports;
   }
-}
-
-/** What the record file holds. */
-interface CodexUpstreamEndpointRecord {
-  baseUrl: string;
 }
 
 export default CodexUpstreamEndpoint;

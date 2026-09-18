@@ -330,6 +330,7 @@ export class CodexCatalogGenerator {
   private readonly factory = new CatalogEntryFactory();
   private readonly merger = new CatalogMerger();
   private readonly nativeSource: () => CatalogDocument | null;
+  private readonly retiredSlugs: () => string[];
 
   constructor(options: {
     catalogPath: string;
@@ -339,9 +340,15 @@ export class CodexCatalogGenerator {
      * hand over a cached result.
      */
     nativeSource?: () => CatalogDocument | null;
+    /**
+     * Slugs an earlier run seeded that this one no longer does, which the merge
+     * drops instead of carrying. Read synchronously, like the seed itself.
+     */
+    retiredSlugs?: () => string[];
   }) {
     this.catalogPath = options.catalogPath;
     this.nativeSource = options.nativeSource ?? (() => null);
+    this.retiredSlugs = options.retiredSlugs ?? (() => []);
   }
 
   get path(): string {
@@ -352,22 +359,29 @@ export class CodexCatalogGenerator {
   generate(models: readonly CatalogModelInput[]): CatalogGenerationResult {
     const existing = this.store.read(this.catalogPath);
     const existingModels = existing?.models ?? [];
-    // The bundled catalog is authoritative for the native rows. It is a dump of
-    // the very CLI that will read this file, so a row on disk under the same
-    // slug is never anything but an older copy of the same row, and adopting
-    // the dump is what lets a CLI upgrade reach the picker: preserving the disk
-    // copy instead froze the natives at whatever the first run happened to see,
-    // and a model added by a later release could never appear.
+    // The seed is authoritative for the native rows. It comes from the CLI's own
+    // bundled dump, or from the catalog the user configured, so a row on disk
+    // under the same slug is never anything but an older copy of the same row,
+    // and adopting the seed is what lets a change on either side reach the
+    // picker: preserving the disk copy instead froze the natives at whatever
+    // the first run happened to see, and neither a model added by a later CLI
+    // release nor one the user has just configured could ever appear.
     //
     // An empty seed means Codex could not be run, not that it ships no models,
     // so nothing is superseded and the rows on disk are left exactly as they
     // are. Rows the seed does not name keep their place either — a row another
     // tool wrote is that tool's business, and a native the CLI has since
     // dropped is indistinguishable from one.
+    //
+    // Retired slugs are superseded too, and they are the one case where a row
+    // the seed does not name still goes: they were seeded by an earlier run
+    // from a source this one no longer uses, so leaving them would let a model
+    // the user has since removed outlive the decision to remove it.
     const natives = this.readNatives();
-    const supersededSlugs = new Set(
-      natives.flatMap((entry) => (typeof entry.slug === 'string' ? [entry.slug] : []))
-    );
+    const supersededSlugs = new Set([
+      ...natives.flatMap((entry) => (typeof entry.slug === 'string' ? [entry.slug] : [])),
+      ...this.readRetiredSlugs()
+    ]);
     const carried = existingModels.filter(
       (entry) => !(typeof entry.slug === 'string' && supersededSlugs.has(entry.slug))
     );
@@ -390,6 +404,17 @@ export class CodexCatalogGenerator {
   private static omitDerivedFields(entry: CatalogEntry): CatalogEntry {
     const kept = Object.entries(entry).filter(([key]) => !OMITTED_FIELDS.includes(key));
     return Object.fromEntries(kept);
+  }
+
+  /** The slugs to drop from disk, or none when the source cannot say. */
+  private readRetiredSlugs(): string[] {
+    try {
+      return this.retiredSlugs();
+    } catch (error: unknown) {
+      // Carrying a stale row is survivable; failing to write the file is not.
+      console.error('[CodexCatalog] Could not read the retired slugs:', error);
+      return [];
+    }
   }
 
   /** The native rows, or none when the source is absent or unreadable. */

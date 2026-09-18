@@ -6,6 +6,7 @@ import CloudModelConnector from './models/CloudModelConnector';
 import CodexNativeModelRegistrar from './models/CodexNativeModelRegistrar';
 import ClaudeNativeModelRegistrar from './models/ClaudeNativeModelRegistrar';
 import CodexGatewayIntegration from './codex/CodexGatewayIntegration';
+import CodexNativeCatalogSource from './codex/CodexNativeCatalogSource';
 import ClaudeGatewayIntegration from './claude/ClaudeGatewayIntegration';
 import RouterProcessManager from './router/RouterProcessManager';
 import RouterAgentIntegration from './router/RouterAgentIntegration';
@@ -88,7 +89,14 @@ export class TokkeyApp {
       resourcesPath: app.isPackaged ? process.resourcesPath : undefined
     });
     this.cloudModelConnector = CloudModelConnector.forGateway(this.gatewayProcessManager);
-    this.codexNativeModelRegistrar = CodexNativeModelRegistrar.forGateway(this.gatewayProcessManager);
+    // One decision about where Codex's models come from — the user's own
+    // catalog, or the CLI's bundled one — shared by the two things that act on
+    // it: the registrar that routes them and the integration that lists them.
+    const codexCatalogSource = new CodexNativeCatalogSource();
+    this.codexNativeModelRegistrar = CodexNativeModelRegistrar.forGateway(
+      this.gatewayProcessManager,
+      { source: codexCatalogSource }
+    );
     this.claudeNativeModelRegistrar = ClaudeNativeModelRegistrar.forGateway(this.gatewayProcessManager);
     // Read by both CLI integrations on every write, and by nothing else: it is
     // the single answer to "is the router on", so the two can never disagree
@@ -100,7 +108,8 @@ export class TokkeyApp {
     this.codexGatewayIntegration = new CodexGatewayIntegration({
       gateway: this.gatewayProcessManager,
       routerBinding: this.routerBinding,
-      localBinding: this.localModelBinding
+      localBinding: this.localModelBinding,
+      source: codexCatalogSource
     });
     this.claudeGatewayIntegration = new ClaudeGatewayIntegration({
       gateway: this.gatewayProcessManager,

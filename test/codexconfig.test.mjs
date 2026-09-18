@@ -404,6 +404,40 @@ test('adopts the bundled rows over the stale copies already on disk', () => {
   rmSync(home, { recursive: true, force: true });
 });
 
+test('drops the rows a previous launch seeded and the new source retired', () => {
+  const home = makeHome();
+  const catalogPath = path.join(home, 'amis-catalog.json');
+  // What a launch seeded from the bundled catalog, plus a row another tool
+  // wrote, which no source of ours ever names.
+  writeFileSync(
+    catalogPath,
+    JSON.stringify({
+      models: [
+        nativeEntry('gpt-5.5'),
+        nativeEntry('gpt-6-astra'),
+        { slug: 'other/model', description: 'Routed via something else.' }
+      ]
+    })
+  );
+  // This launch seeds from the user's own catalog, which keeps neither.
+  const generator = new CodexCatalogGenerator({
+    catalogPath,
+    nativeSource: () => ({ models: [nativeEntry('my-relay-opus')] }),
+    retiredSlugs: () => ['gpt-5.5', 'gpt-6-astra']
+  });
+
+  const result = generator.generate([{ slug: 'first' }]);
+
+  // The models the user removed are gone; the foreign row is still carried,
+  // because retiring rows is only ever about the rows we put there.
+  assert.deepEqual(result.models.map((entry) => entry.slug), [
+    'other/model',
+    'my-relay-opus',
+    'first'
+  ]);
+  rmSync(home, { recursive: true, force: true });
+});
+
 test('writes byte-identical output when nothing changed', () => {
   const home = makeHome();
   const generator = makeGenerator(home, [nativeEntry('gpt-5.5')]);
@@ -457,10 +491,11 @@ test('exposes router MCP tools directly for code-mode templates and fallback row
 // CodexGatewayIntegration
 // ---------------------------------------------------------------------------
 
-/** A bundled catalog that never shells out. */
-class FakeBundledCatalog {
-  constructor(models) {
+/** A catalog source that never shells out and never reads `config.toml`. */
+class FakeCatalogSource {
+  constructor(models, retired = []) {
     this.models = models;
+    this.retired = retired;
   }
 
   async list() {
@@ -469,6 +504,10 @@ class FakeBundledCatalog {
 
   readCached() {
     return { models: this.models };
+  }
+
+  retiredSlugs() {
+    return this.retired;
   }
 }
 
@@ -502,7 +541,7 @@ function makeIntegration(home, { routerBinding, localBinding, baseUrl = GATEWAY_
     gateway: { startIfNeeded: async () => {}, baseUrl: () => baseUrl },
     routerBinding: routerBinding ?? new RouterBinding(),
     localBinding: localBinding ?? new LocalModelBinding(),
-    bundled: new FakeBundledCatalog([nativeEntry('gpt-5.5', { tool_mode: 'code_mode_only' })]),
+    source: new FakeCatalogSource([nativeEntry('gpt-5.5', { tool_mode: 'code_mode_only' })]),
     homeDirectory: home,
     codexHome
   });
@@ -596,7 +635,7 @@ test('does not point codex at a catalog that came out empty', async () => {
   // No router model and no bundled natives: nothing to catalogue.
   await new CodexGatewayIntegration({
     gateway: { startIfNeeded: async () => {}, baseUrl: () => GATEWAY_URL },
-    bundled: new FakeBundledCatalog([]),
+    source: new FakeCatalogSource([]),
     homeDirectory: home,
     codexHome: codexHomeOf(home)
   }).activate();

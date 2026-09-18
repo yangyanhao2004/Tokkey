@@ -1,4 +1,5 @@
 import type { CodexNativeModel } from '../../shared/types';
+import type CodexNativeCatalogSource from '../codex/CodexNativeCatalogSource';
 import GatewayModelClient, {
   type GatewayEndpoint,
   type GatewayModelRoute
@@ -13,11 +14,12 @@ const CODEX_NATIVE_API_FORMAT = 'openai_responses';
 const OPENAI_PREFIX = 'openai';
 
 /**
- * Registers the Codex CLI's own models as gateway routes.
+ * Registers the models the Codex CLI itself would offer as gateway routes.
  *
- * The route is derived from the CLI's own configuration — the bundled catalog
- * for the models, the remembered provider endpoint for where they are served
- * from — and the gateway holds it in memory, so every launch rebuilds the set.
+ * The route is derived from the CLI's own configuration — the catalog the user
+ * configured, or the CLI's bundled one when they configured none, for the
+ * models; the remembered provider endpoint for where they are served from — and
+ * the gateway holds it in memory, so every launch rebuilds the set.
  *
  * The route carries the endpoint Codex itself would call and no key at all.
  * That split is deliberate: the endpoint is a durable fact about this machine,
@@ -45,9 +47,18 @@ export class CodexNativeModelRegistrar {
     this.client = options.client;
   }
 
-  /** Builds the default wiring around one gateway supervisor. */
-  static forGateway(gateway: GatewayEndpoint): CodexNativeModelRegistrar {
+  /**
+   * Builds the default wiring around one gateway supervisor.
+   *
+   * `source` is the catalog decision, shared with `CodexGatewayIntegration` so
+   * the models routed here are exactly the models offered there.
+   */
+  static forGateway(
+    gateway: GatewayEndpoint,
+    options: { source?: CodexNativeCatalogSource } = {}
+  ): CodexNativeModelRegistrar {
     return new CodexNativeModelRegistrar({
+      catalog: new CodexNativeModelCatalog(options),
       client: new GatewayModelClient({ gateway }),
       // The endpoint resolver needs the same supervisor: the one address it
       // must never adopt is that gateway's own.
@@ -56,7 +67,7 @@ export class CodexNativeModelRegistrar {
   }
 
   /**
-   * Creates a route for every listed Codex model the gateway does not have.
+   * Creates a route for every listed model the gateway does not have.
    *
    * Returns the models now routable, whether this call created them or found
    * them already there — the caller wants the resulting state, not a diff.

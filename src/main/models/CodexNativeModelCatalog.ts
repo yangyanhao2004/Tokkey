@@ -1,5 +1,5 @@
-import CodexBundledCatalog from '../codex/CodexBundledCatalog';
 import type { CatalogEntry } from '../codex/CodexCatalogFile';
+import CodexNativeCatalogSource from '../codex/CodexNativeCatalogSource';
 import type { ShellRunner as ShellRunnerContract } from '../agents/AgentTypes';
 import type { CodexNativeModel } from '../../shared/types';
 
@@ -9,36 +9,41 @@ import type { CodexNativeModel } from '../../shared/types';
  * The bundled catalog also carries `hide` entries — retired versions, and
  * internal ones like `codex-auto-review` — which are not general chat models
  * and would only clutter the Router page.
+ *
+ * A row that names no visibility at all is listed. Every bundled row names one,
+ * so this only decides for a hand-written catalog, where the field is optional
+ * and a row nobody marked hidden is a row the author meant to use.
  */
 const LISTED_VISIBILITY = 'list';
 
 /**
  * The Codex models the Router page can offer, projected down to what it shows.
  *
- * The rows themselves come from `CodexBundledCatalog`, which owns the CLI call
- * and the cache. This class keeps only the handful of descriptive fields the UI
- * and the route registrar use — the full rows are ~40KB each, almost all of it
- * per-model instruction templates neither one has any use for.
+ * The rows themselves come from `CodexNativeCatalogSource`, which owns the
+ * choice between the user's own catalog and the one compiled into the CLI. This
+ * class keeps only the handful of descriptive fields the UI and the route
+ * registrar use — the full rows are ~40KB each, almost all of it per-model
+ * instruction templates neither one has any use for.
  */
 export class CodexNativeModelCatalog {
-  private readonly bundled: CodexBundledCatalog;
+  private readonly source: CodexNativeCatalogSource;
 
   constructor(
     options: {
-      bundled?: CodexBundledCatalog;
+      source?: CodexNativeCatalogSource;
       runner?: ShellRunnerContract;
       homeDirectory?: string;
       codexHome?: string;
     } = {}
   ) {
-    this.bundled = options.bundled ?? new CodexBundledCatalog(options);
+    this.source = options.source ?? new CodexNativeCatalogSource(options);
   }
 
-  /** The listed Codex models, in the order the bundled catalog names them. */
+  /** The listed Codex models, in the order the source catalog names them. */
   async list(): Promise<CodexNativeModel[]> {
-    const models = await this.bundled.list();
+    const models = await this.source.list();
     return models
-      .filter((entry) => entry.visibility === LISTED_VISIBILITY)
+      .filter((entry) => entry.visibility === undefined || entry.visibility === LISTED_VISIBILITY)
       .map((entry) => this.toNativeModel(entry))
       .filter((model): model is CodexNativeModel => model !== null);
   }

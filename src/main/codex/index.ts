@@ -6,5 +6,7 @@ export { CatalogEntryFactory, CatalogMerger, CodexCatalogGenerator } from './Cod
 export type { CatalogGenerationResult, CatalogModelInput } from './CodexCatalogGenerator';
 export { CodexBundledCatalog } from './CodexBundledCatalog';
 export type { BundledCatalogCache } from './CodexBundledCatalog';
+export { CodexUserCatalog } from './CodexUserCatalog';
+export { CodexNativeCatalogSource } from './CodexNativeCatalogSource';
 export { CodexConfigTakeover } from './CodexConfigTakeover';
 export { CodexGatewayIntegration } from './CodexGatewayIntegration';

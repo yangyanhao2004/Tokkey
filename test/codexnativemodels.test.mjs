@@ -4,13 +4,11 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+import { CodexNativeCatalogSource } from '../dist/main/codex/CodexNativeCatalogSource.js';
 import { CodexNativeModelCatalog } from '../dist/main/models/CodexNativeModelCatalog.js';
 import { CodexNativeModelRegistrar } from '../dist/main/models/CodexNativeModelRegistrar.js';
 import { CodexProviderConfig } from '../dist/main/models/CodexProviderConfig.js';
-import {
-  CodexUpstreamEndpoint,
-  OpenAiModelsProbe
-} from '../dist/main/models/CodexUpstreamEndpoint.js';
+import { CodexUpstreamEndpoint } from '../dist/main/models/CodexUpstreamEndpoint.js';
 import { GatewayModelClient } from '../dist/main/gateway/GatewayModelClient.js';
 
 const CODEX_VERSION = 'codex-cli 0.151.0';
@@ -236,6 +234,143 @@ test('prefers the CLI the codex app installed over whatever PATH offers', async 
   rmSync(home, { recursive: true, force: true });
 });
 
+// ---------------------------------------------------------------------------
+// CodexNativeCatalogSource: the user's own catalog beats the bundled one
+// ---------------------------------------------------------------------------
+
+/** Writes a `config.toml` into the throwaway codex home. */
+function writeCodexConfig(home, toml) {
+  const codexHome = path.join(home, '.codex');
+  mkdirSync(codexHome, { recursive: true });
+  writeFileSync(path.join(codexHome, 'config.toml'), toml);
+}
+
+/** Writes a catalog of the user's own, outside the codex home, and returns its path. */
+function writeUserCatalog(home, entries) {
+  const filePath = path.join(home, 'my-models.json');
+  writeFileSync(filePath, catalogJson(entries));
+  return filePath;
+}
+
+/** A runner whose bundled catalog holds one model nobody would curate by hand. */
+function bundledRunner(slug = 'gpt-5.5') {
+  return new FakeShellRunner({ catalog: [catalogJson([catalogEntry(slug)])] });
+}
+
+test('serves the models the user configured instead of codex own', async () => {
+  const home = makeHome();
+  const catalogPath = writeUserCatalog(home, [
+    catalogEntry('my-relay-opus'),
+    catalogEntry('my-relay-sonnet')
+  ]);
+  writeCodexConfig(home, `model_catalog_json = "${catalogPath}"\n`);
+
+  const models = await nativeCatalog(bundledRunner(), home).list();
+
+  assert.deepEqual(models.map((model) => model.slug), ['my-relay-opus', 'my-relay-sonnet']);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('keeps codex own models when config.toml names no catalog', async () => {
+  const home = makeHome();
+  writeCodexConfig(home, 'model_provider = "openai"\n');
+
+  const models = await nativeCatalog(bundledRunner(), home).list();
+
+  assert.deepEqual(models.map((model) => model.slug), ['gpt-5.5']);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('refuses to seed itself from the catalog tokkey generates', async () => {
+  const home = makeHome();
+  // What a takeover writes — and what a takeover an earlier run never undid
+  // leaves behind. Seeding from it would feed Tokkey's output back in.
+  const generated = path.join(home, '.codex', 'amis-catalog.json');
+  writeCodexConfig(home, `model_catalog_json = "${generated}"\n`);
+  writeFileSync(generated, catalogJson([catalogEntry('stale-row')]));
+
+  const models = await nativeCatalog(bundledRunner(), home).list();
+
+  assert.deepEqual(models.map((model) => model.slug), ['gpt-5.5']);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('falls back to codex own models when the configured catalog is unusable', async () => {
+  for (const [name, contents] of [
+    ['absent', null],
+    ['unparseable', 'not json at all'],
+    ['empty', catalogJson([])],
+    // Every row was written by Tokkey, so nothing is left once they are dropped.
+    ['tokkey-authored only', JSON.stringify({
+      models: [catalogEntry('tokkey-row', { description: 'Routed via Tokkey → gpt-5.5.' })]
+    })]
+  ]) {
+    const home = makeHome();
+    const catalogPath = path.join(home, 'my-models.json');
+    if (contents !== null) writeFileSync(catalogPath, contents);
+    writeCodexConfig(home, `model_catalog_json = "${catalogPath}"\n`);
+
+    const models = await nativeCatalog(bundledRunner(), home).list();
+
+    assert.deepEqual(models.map((model) => model.slug), ['gpt-5.5'], `${name} catalog`);
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('lists a hand-written row that names no visibility, and hides one that does', async () => {
+  const home = makeHome();
+  const catalogPath = writeUserCatalog(home, [
+    // The field is optional in a hand-written file: unmarked means listed.
+    catalogEntry('unmarked', { visibility: undefined }),
+    catalogEntry('hidden', { visibility: 'hide' })
+  ]);
+  writeCodexConfig(home, `model_catalog_json = "${catalogPath}"\n`);
+
+  const models = await nativeCatalog(bundledRunner(), home).list();
+
+  assert.deepEqual(models.map((model) => model.slug), ['unmarked']);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('reports the bundled rows a user catalog retires, and none when it wins', async () => {
+  const home = makeHome();
+  const catalogPath = writeUserCatalog(home, [catalogEntry('my-relay-opus'), catalogEntry('gpt-5.5')]);
+  writeCodexConfig(home, `model_catalog_json = "${catalogPath}"\n`);
+  const runner = new FakeShellRunner({
+    catalog: [catalogJson([catalogEntry('gpt-5.5'), catalogEntry('gpt-6-astra')])]
+  });
+
+  const source = new CodexNativeCatalogSource({
+    runner,
+    homeDirectory: home,
+    codexHome: path.join(home, '.codex')
+  });
+  await source.list();
+
+  // `gpt-5.5` survives because the user kept it; `gpt-6-astra` is a row an
+  // earlier launch would have seeded and this one must take back.
+  assert.deepEqual(source.retiredSlugs(), ['gpt-6-astra']);
+  assert.deepEqual(source.readCached().models.map((entry) => entry.slug), [
+    'my-relay-opus',
+    'gpt-5.5'
+  ]);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('retires nothing when codex own catalog is the one being served', async () => {
+  const home = makeHome();
+  const source = new CodexNativeCatalogSource({
+    runner: bundledRunner(),
+    homeDirectory: home,
+    codexHome: path.join(home, '.codex')
+  });
+
+  await source.list();
+
+  assert.deepEqual(source.retiredSlugs(), []);
+  rmSync(home, { recursive: true, force: true });
+});
+
 /** Writes one `config.toml` and returns the reader pointed at it. */
 function providerConfigFor(toml) {
   const home = makeHome();
@@ -309,7 +444,7 @@ test('reports no endpoint when config.toml is missing, empty, or malformed', asy
   rmSync(home, { recursive: true, force: true });
 });
 
-// --- Remembering the endpoint across launches -------------------------------
+// --- Resolving the endpoint to route from ----------------------------------
 
 /** A config.toml stand-in, so endpoint tests state the candidate directly. */
 class StubProviderConfig {
@@ -322,43 +457,20 @@ class StubProviderConfig {
   }
 }
 
-/** A models listing that answers for one endpoint and 404s for every other. */
-function modelsProbeFor(serving = {}) {
-  const asked = [];
-  const fetcher = async (url) => {
-    asked.push(url);
-    const models = serving[url];
-    if (!models) return new Response('{}', { status: 404 });
-    return new Response(JSON.stringify({ data: models.map((id) => ({ id })) }), { status: 200 });
-  };
-  return { probe: new OpenAiModelsProbe({ fetcher }), asked };
-}
-
-/** The record file as one launch would leave it behind. */
-function recordedEndpoint(home) {
-  const file = path.join(home, '.tokkey', 'codex-upstream-endpoint.json');
-  try {
-    return JSON.parse(readFileSync(file, 'utf8')).baseUrl;
-  } catch {
-    return null;
-  }
-}
-
 /** A supervisor reporting the port this launch's gateway bound. */
 function gatewayOn(port) {
   return { startIfNeeded: async () => {}, baseUrl: () => `http://127.0.0.1:${port}` };
 }
 
-function endpointFor({ home, candidate, probe, gateway }) {
+function endpointFor({ home, candidate, gateway }) {
   return new CodexUpstreamEndpoint({
     homeDirectory: home,
     config: new StubProviderConfig(candidate),
-    probe: probe ?? modelsProbeFor().probe,
     gateway: gateway ?? gatewayOn(4000)
   });
 }
 
-test('records the endpoint codex was configured with on the first launch', async () => {
+test('takes the endpoint codex is configured with', async () => {
   const home = makeHome();
 
   const resolved = await endpointFor({
@@ -366,30 +478,22 @@ test('records the endpoint codex was configured with on the first launch', async
     candidate: { baseUrl: 'https://api.onetokens.net/', apiKey: null }
   }).resolve();
 
-  // The trailing slash is dropped so the next launch recognizes the same URL.
+  // The trailing slash is dropped so two spellings of one endpoint compare equal.
   assert.equal(resolved, 'https://api.onetokens.net');
-  assert.equal(recordedEndpoint(home), 'https://api.onetokens.net');
   rmSync(home, { recursive: true, force: true });
 });
 
-test('keeps the recorded endpoint when codex has been pointed at the gateway', async () => {
+test('reports no endpoint when the configured provider names none', async () => {
   const home = makeHome();
-  await endpointFor({
-    home,
-    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
-  }).resolve();
 
-  const resolved = await endpointFor({
-    home,
-    candidate: { baseUrl: 'http://localhost:4000/v1', apiKey: null }
-  }).resolve();
-
-  assert.equal(resolved, 'https://api.onetokens.net');
-  assert.equal(recordedEndpoint(home), 'https://api.onetokens.net');
+  // What `model_provider` pointed at a provider with no `base_url` reads as —
+  // the Codex CLI's own spelling of "the official API". The gateway owns that
+  // default, so nothing is substituted here.
+  assert.equal(await endpointFor({ home, candidate: null }).resolve(), null);
   rmSync(home, { recursive: true, force: true });
 });
 
-test('never records the gateway itself, even with nothing recorded yet', async () => {
+test('never adopts the gateway itself as its own upstream', async () => {
   const home = makeHome();
 
   const resolved = await endpointFor({
@@ -398,7 +502,6 @@ test('never records the gateway itself, even with nothing recorded yet', async (
   }).resolve();
 
   assert.equal(resolved, null);
-  assert.equal(recordedEndpoint(home), null);
   rmSync(home, { recursive: true, force: true });
 });
 
@@ -412,135 +515,58 @@ test('refuses the gateway on a fallback port as well as the default one', async 
   }).resolve();
 
   assert.equal(resolved, null);
-  assert.equal(recordedEndpoint(home), null);
   rmSync(home, { recursive: true, force: true });
 });
 
-test('adopts another local server that serves gpt models', async () => {
+test('adopts another local server the user pointed codex at', async () => {
   const home = makeHome();
-  await endpointFor({
-    home,
-    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
-  }).resolve();
-  const { probe } = modelsProbeFor({
-    'http://localhost:1234/v1/models': ['gpt-oss-120b']
-  });
 
   const resolved = await endpointFor({
     home,
-    candidate: { baseUrl: 'http://localhost:1234/v1', apiKey: null },
-    probe
+    candidate: { baseUrl: 'http://localhost:1234/v1', apiKey: null }
   }).resolve();
 
   // A relay a user runs on this machine is still a relay; only the gateway's
   // own address is refused.
   assert.equal(resolved, 'http://localhost:1234/v1');
-  assert.equal(recordedEndpoint(home), 'http://localhost:1234/v1');
   rmSync(home, { recursive: true, force: true });
 });
 
-test('follows a move to another relay that serves gpt models', async () => {
+test('follows a relay that serves no gpt models at all', async () => {
   const home = makeHome();
-  await endpointFor({
-    home,
-    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
-  }).resolve();
-  const { probe, asked } = modelsProbeFor({
-    'https://relay.example/v1/models': ['gpt-5.5', 'claude-opus-5']
-  });
 
   const resolved = await endpointFor({
     home,
-    candidate: { baseUrl: 'https://relay.example/v1', apiKey: 'sk-relay' },
-    probe
+    candidate: { baseUrl: 'https://ollama.example/v1', apiKey: null }
   }).resolve();
 
-  assert.equal(resolved, 'https://relay.example/v1');
-  assert.equal(recordedEndpoint(home), 'https://relay.example/v1');
-  assert.deepEqual(asked, ['https://relay.example/v1/models']);
+  // A user who curated their own catalog serves models by their own names. The
+  // endpoint is theirs to choose, and nothing here second-guesses it by asking
+  // the relay to name a model this app recognizes.
+  assert.equal(resolved, 'https://ollama.example/v1');
   rmSync(home, { recursive: true, force: true });
 });
 
-test('keeps the recorded endpoint when the new one serves no gpt models', async () => {
+test('reads config.toml once however many callers ask', async () => {
   const home = makeHome();
-  await endpointFor({
-    home,
-    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
-  }).resolve();
-  const { probe, asked } = modelsProbeFor({
-    'https://ollama.example/v1/models': ['llama-4', 'qwen-3']
+  let reads = 0;
+  const endpoint = new CodexUpstreamEndpoint({
+    homeDirectory: home,
+    config: {
+      async read() {
+        reads += 1;
+        return { baseUrl: 'https://relay.example/v1', apiKey: null };
+      }
+    },
+    gateway: gatewayOn(4000)
   });
 
-  const resolved = await endpointFor({
-    home,
-    candidate: { baseUrl: 'https://ollama.example', apiKey: null },
-    probe
-  }).resolve();
+  const [first, second] = await Promise.all([endpoint.resolve(), endpoint.resolve()]);
 
-  assert.equal(resolved, 'https://api.onetokens.net');
-  assert.equal(recordedEndpoint(home), 'https://api.onetokens.net');
-  // Both path shapes are tried before the candidate is turned down.
-  assert.deepEqual(asked, ['https://ollama.example/models', 'https://ollama.example/v1/models']);
+  assert.equal(first, 'https://relay.example/v1');
+  assert.equal(second, 'https://relay.example/v1');
+  assert.equal(reads, 1);
   rmSync(home, { recursive: true, force: true });
-});
-
-test('keeps the recorded endpoint when the new one cannot be reached', async () => {
-  const home = makeHome();
-  await endpointFor({
-    home,
-    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
-  }).resolve();
-  const offline = new OpenAiModelsProbe({
-    fetcher: async () => {
-      throw new Error('getaddrinfo ENOTFOUND relay.example');
-    }
-  });
-
-  const resolved = await endpointFor({
-    home,
-    candidate: { baseUrl: 'https://relay.example/v1', apiKey: null },
-    probe: offline
-  }).resolve();
-
-  assert.equal(resolved, 'https://api.onetokens.net');
-  rmSync(home, { recursive: true, force: true });
-});
-
-test('does not probe an unchanged endpoint', async () => {
-  const home = makeHome();
-  await endpointFor({
-    home,
-    candidate: { baseUrl: 'https://api.onetokens.net', apiKey: null }
-  }).resolve();
-  const { probe, asked } = modelsProbeFor();
-
-  const resolved = await endpointFor({
-    home,
-    candidate: { baseUrl: 'https://api.onetokens.net/', apiKey: null },
-    probe
-  }).resolve();
-
-  assert.equal(resolved, 'https://api.onetokens.net');
-  assert.deepEqual(asked, []);
-  rmSync(home, { recursive: true, force: true });
-});
-
-test('sends the provider key when probing an endpoint that needs one', async () => {
-  const seen = [];
-  const probe = new OpenAiModelsProbe({
-    fetcher: async (url, init) => {
-      seen.push(init.headers.Authorization);
-      return new Response(JSON.stringify({ data: [{ id: 'gpt-5.5' }] }), { status: 200 });
-    }
-  });
-
-  const served = await probe.servesGptModels({
-    baseUrl: 'https://relay.example/v1',
-    apiKey: 'sk-relay'
-  });
-
-  assert.equal(served, true);
-  assert.deepEqual(seen, ['Bearer sk-relay']);
 });
 
 /** A catalog stub so registrar tests do not touch the shell or the disk. */

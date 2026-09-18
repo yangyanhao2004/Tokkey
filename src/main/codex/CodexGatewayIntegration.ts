@@ -2,18 +2,18 @@ import type { GatewayEndpoint } from '../gateway/GatewayModelClient';
 import LocalModelBinding from '../models/LocalModelBinding';
 import RouterBinding from '../router/RouterBinding';
 import RouterModel from '../router/RouterModel';
-import CodexBundledCatalog from './CodexBundledCatalog';
 import CodexCatalogGenerator, { type CatalogModelInput } from './CodexCatalogGenerator';
 import CodexConfigTakeover from './CodexConfigTakeover';
 import CodexHome from './CodexHome';
+import CodexNativeCatalogSource from './CodexNativeCatalogSource';
 
 /**
  * Makes the Codex CLI see what Tokkey serves, while Tokkey runs.
  *
  * Two files do the work together and neither is useful without the other. The
- * catalog lists the models — the ones Codex ships with, plus the Tokkey model —
- * and `config.toml` points Codex at both the catalog and the endpoint that
- * answers for it. So they are written as a pair, and the catalog is written
+ * catalog lists the models — the ones Codex would have offered anyway, plus the
+ * Tokkey model — and `config.toml` points Codex at both the catalog and the
+ * endpoint that answers for it. So they are written as a pair, and the catalog is written
  * first: pointing Codex at a catalog that turned out empty would cost the user
  * their model picker, which is worse than not taking over at all.
  *
@@ -30,15 +30,16 @@ import CodexHome from './CodexHome';
  * appear together, separately, or not at all.
  *
  * Both files are undone at quit by `CodexConfigTakeover`. The catalog file
- * itself is left on disk; with `model_catalog_json` gone from the restored
- * config nothing reads it, and keeping it means the next launch starts from the
- * natives it already holds instead of shelling out to the CLI again.
+ * itself is left on disk; with `model_catalog_json` restored to whatever the
+ * user had — their own catalog, or nothing — Codex stops reading ours, and
+ * keeping the file means the next launch starts from the natives it already
+ * holds instead of shelling out to the CLI again.
  */
 export class CodexGatewayIntegration {
   private readonly gateway: GatewayEndpoint;
   private readonly routerBinding: RouterBinding;
   private readonly localBinding: LocalModelBinding;
-  private readonly bundled: CodexBundledCatalog;
+  private readonly source: CodexNativeCatalogSource;
   private readonly generator: CodexCatalogGenerator;
   private readonly takeover: CodexConfigTakeover;
 
@@ -48,7 +49,8 @@ export class CodexGatewayIntegration {
     routerBinding?: RouterBinding;
     /** Omitted only by a caller with no local runtime; no local row is then offered. */
     localBinding?: LocalModelBinding;
-    bundled?: CodexBundledCatalog;
+    /** Share one with the registrar, so both route and list the same models. */
+    source?: CodexNativeCatalogSource;
     generator?: CodexCatalogGenerator;
     takeover?: CodexConfigTakeover;
     homeDirectory?: string;
@@ -57,12 +59,13 @@ export class CodexGatewayIntegration {
     this.gateway = options.gateway;
     this.routerBinding = options.routerBinding ?? new RouterBinding();
     this.localBinding = options.localBinding ?? new LocalModelBinding();
-    this.bundled = options.bundled ?? new CodexBundledCatalog(options);
+    this.source = options.source ?? new CodexNativeCatalogSource(options);
     this.generator =
       options.generator ??
       new CodexCatalogGenerator({
         catalogPath: home.catalogPath,
-        nativeSource: () => this.bundled.readCached()
+        nativeSource: () => this.source.readCached(),
+        retiredSlugs: () => this.source.retiredSlugs()
       });
     this.takeover = options.takeover ?? new CodexConfigTakeover({ ...options, home });
   }
@@ -87,9 +90,10 @@ export class CodexGatewayIntegration {
       console.error('[CodexConfig] Nothing is serving; Codex was left as configured.');
       return false;
     }
-    // Refreshing the bundled catalog is what seeds the native rows, and it
-    // shells out to the CLI, so it happens here rather than inside the writer.
-    await this.bundled.list();
+    // Resolving the source is what seeds the native rows, and it reads both
+    // `config.toml` and the CLI, so it happens here rather than inside the
+    // writer — and before the takeover, while that file is still the user's.
+    await this.source.list();
     const catalogPath = await this.writeCatalog();
     return this.takeover.activate(baseUrl, catalogPath, this.routerBinding.mcpUrl);
   }
