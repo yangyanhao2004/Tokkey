@@ -21,6 +21,7 @@ interface AccountContextValue {
   signInWithGoogle(): Promise<AccountOperationResult<AccountState>>;
   cancelGoogleSignIn(): Promise<void>;
   signOut(): Promise<AccountOperationResult<AccountState>>;
+  refreshState(): Promise<void>;
 }
 
 const SIGNED_OUT_STATE: AccountState = { status: 'signedOut', profile: null };
@@ -49,27 +50,23 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   const [isRestoring, setIsRestoring] = useState(true);
   const [restoreError, setRestoreError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let isCurrent = true;
-    void window.tokkey.getAccountState()
-      .then((result) => {
-        if (!isCurrent) return;
-        if (result.ok) {
-          setState(result.value);
-        } else {
-          setRestoreError(result.error.message);
-        }
-      })
-      .catch(() => {
-        if (isCurrent) setRestoreError('Authentication is temporarily unavailable.');
-      })
-      .finally(() => {
-        if (isCurrent) setIsRestoring(false);
-      });
-    return () => {
-      isCurrent = false;
-    };
+  /**
+   * Re-reads the main-process account. Main discards a credential whose access
+   * token has expired, so this is also how a lapsed session becomes signedOut.
+   */
+  const refreshState = useCallback(async () => {
+    const result = await AccountOperationFallback.run(() => window.tokkey.getAccountState());
+    if (result.ok) {
+      setState(result.value);
+      setRestoreError(null);
+    } else {
+      setRestoreError(result.error.message);
+    }
   }, []);
+
+  useEffect(() => {
+    void refreshState().finally(() => setIsRestoring(false));
+  }, [refreshState]);
 
   const requestEmailCode = useCallback((email: string) => {
     return AccountOperationFallback.run(() => window.tokkey.requestEmailVerificationCode(email));
@@ -114,10 +111,12 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     verifyEmail,
     signInWithGoogle,
     cancelGoogleSignIn,
-    signOut
+    signOut,
+    refreshState
   }), [
     cancelGoogleSignIn,
     isRestoring,
+    refreshState,
     requestEmailCode,
     restoreError,
     signInWithGoogle,

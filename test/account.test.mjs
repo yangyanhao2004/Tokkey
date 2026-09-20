@@ -295,6 +295,31 @@ test('storage failure leaves the service signed out and revokes the issued refre
   assert.deepEqual(stateResult, { ok: true, value: { status: 'signedOut', profile: null } });
 });
 
+test('an expired access token is discarded, revoked, and reported as signed out', async () => {
+  const backend = new RecordingAccountBackend();
+  const vault = new MemoryCredentialVault({
+    credential: { ...TEST_CREDENTIAL, accessTokenExpiresAt: '2020-01-01T00:00:00.000Z' }
+  });
+  const service = new AccountService(backend, vault, new FixedGoogleAuthorizer(), 'client-id');
+
+  const stateResult = await service.getState();
+
+  assert.deepEqual(stateResult, { ok: true, value: { status: 'signedOut', profile: null } });
+  assert.equal(vault.credential, null);
+  assert.deepEqual(backend.revokedTokens, ['test-refresh-token']);
+});
+
+test('a still-valid access token restores the authenticated profile', async () => {
+  const backend = new RecordingAccountBackend();
+  const vault = new MemoryCredentialVault({ credential: TEST_CREDENTIAL });
+  const service = new AccountService(backend, vault, new FixedGoogleAuthorizer(), 'client-id');
+
+  const stateResult = await service.getState();
+
+  assert.deepEqual(stateResult, { ok: true, value: { status: 'authenticated', profile: TEST_PROFILE } });
+  assert.deepEqual(backend.revokedTokens, []);
+});
+
 test('Google authorizer spawns, validates, and closes an IPv4 loopback callback server', async () => {
   const browserProbe = new LoopbackBrowserProbe();
   const authorizer = new GoogleOAuthAuthorizer({

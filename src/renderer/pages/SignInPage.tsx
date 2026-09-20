@@ -25,6 +25,15 @@ export function SignInPage() {
   const submittedCode = useRef<string | null>(null);
   const isGooglePending = useRef(false);
 
+  const refreshAccount = account.refreshState;
+
+  useEffect(() => {
+    // Opening the account page revalidates the restored session, so a signed-in
+    // user whose access token has expired lands on the sign-in form instead of
+    // a stale profile.
+    void refreshAccount();
+  }, [refreshAccount]);
+
   useEffect(() => {
     return () => {
       if (isGooglePending.current) void account.cancelGoogleSignIn();

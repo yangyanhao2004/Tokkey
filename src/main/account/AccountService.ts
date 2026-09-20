@@ -23,6 +23,7 @@ export default class AccountService {
   async getState(): Promise<AccountOperationResult<AccountState>> {
     return this.perform(async () => {
       await this.restoreIfNeeded();
+      await this.discardExpiredSession();
       return this.currentState();
     });
   }
@@ -77,6 +78,26 @@ export default class AccountService {
       }
       return this.currentState();
     });
+  }
+
+  /**
+   * Drops a session whose access token has already lapsed. There is no refresh
+   * exchange, so an expired token means the user must sign in again; the
+   * in-memory drop is authoritative and cleanup is best effort because the
+   * session is already dead either way.
+   */
+  private async discardExpiredSession(): Promise<void> {
+    if (!this.credential || !this.hasExpired(this.credential.accessTokenExpiresAt)) return;
+    const refreshToken = this.credential.refreshToken;
+    this.credential = null;
+    await this.vault.clear().catch(() => undefined);
+    await this.backend.logout(refreshToken).catch(() => undefined);
+  }
+
+  /** An unreadable expiry cannot be trusted, so it counts as expired. */
+  private hasExpired(accessTokenExpiresAt: string): boolean {
+    const expiresAtMs = Date.parse(accessTokenExpiresAt);
+    return Number.isNaN(expiresAtMs) || expiresAtMs <= Date.now();
   }
 
   /** Saves before publishing authenticated state and revokes on storage failure. */
