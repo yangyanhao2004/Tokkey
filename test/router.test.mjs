@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
+import { build } from 'esbuild';
 
 import { LocalPortResolver } from '../dist/main/process/LocalPortResolver.js';
 import { RouterHealthProbe } from '../dist/main/router/RouterHealthProbe.js';
 import { RouterProcessManager } from '../dist/main/router/RouterProcessManager.js';
 import { RouterRuntimeLocator } from '../dist/main/router/RouterRuntimeLocator.js';
+
+// The Router page's copy lives in the renderer, which is bundled rather than
+// emitted to `dist`, so it is built here the way the app builds it.
+const { outputFiles } = await build({
+  entryPoints: ['src/renderer/pages/routerContent.ts'],
+  bundle: true, write: false, format: 'esm', platform: 'node'
+});
+const {
+  describeRunningLocalModel,
+  routerErrorMessage,
+  routerRequirementNotice,
+  routerStatusMessage
+} = await import(
+  `data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString('base64')}`
+);
 
 const PROJECT_ROOT = '/repo';
 const OWN_EXECUTABLE = '/repo/resources/RouterRuntime/arm64/router/router-darwin-arm64';
@@ -343,4 +359,101 @@ test('port resolver reclaims 5033 from a router this app left behind', async () 
 
   assert.equal(await resolver.resolve(OWN_EXECUTABLE), 5033);
   assert.deepEqual(terminated, [321]);
+});
+
+test('page reports a start failure apart from the status line', () => {
+  const failed = { phase: 'error', port: null, baseUrl: null, dashboardUrl: null, error: 'port 5033 is held' };
+
+  // The status line sits inside the toggle card and the failure below it, so a
+  // failed start must reach exactly one of them.
+  assert.equal(routerStatusMessage(failed), null);
+  assert.equal(routerErrorMessage(failed), 'Could not start Router: port 5033 is held');
+});
+
+test('page names a failure with no reason rather than saying nothing', () => {
+  const failed = { phase: 'error', port: null, baseUrl: null, dashboardUrl: null, error: null };
+
+  assert.equal(routerErrorMessage(failed), 'Could not start Router: unknown error');
+});
+
+test('page keeps the status line for the phases that are not failures', () => {
+  const running = { phase: 'running', port: 51000, baseUrl: null, dashboardUrl: null, error: null };
+  const starting = { phase: 'starting', port: null, baseUrl: null, dashboardUrl: null, error: null };
+  const stopped = { phase: 'stopped', port: null, baseUrl: null, dashboardUrl: null, error: null };
+
+  assert.equal(routerStatusMessage(running), 'Running on port 51000.');
+  assert.equal(routerStatusMessage(starting), 'Starting Router...');
+  assert.equal(routerStatusMessage(stopped), null);
+  for (const state of [running, starting, stopped]) {
+    assert.equal(routerErrorMessage(state), null);
+  }
+});
+
+test('page names the unmet requirement that refused the switch', () => {
+  assert.match(routerRequirementNotice('signedOut').before, /signed-in Tokkey account/);
+  assert.match(routerRequirementNotice('deviceMissing').before, /hub key is not inserted/);
+  assert.match(routerRequirementNotice('modelNotRunning').before, /No local model is running/);
+  assert.equal(routerRequirementNotice(null), null);
+});
+
+test('page links the requirement to the page that clears it', () => {
+  // The words naming a page are the link, so reading the line back must give
+  // the whole sentence with nothing dropped at the seams.
+  const signIn = routerRequirementNotice('signedOut');
+  assert.deepEqual(signIn.link, { label: 'Sign in here.', route: 'sign-in' });
+  assert.equal(
+    signIn.before + signIn.link.label + signIn.after,
+    'Router needs a signed-in Tokkey account. Your session has ended or never started. Sign in here.'
+  );
+
+  const localModel = routerRequirementNotice('modelNotRunning');
+  assert.deepEqual(localModel.link, { label: 'Tokkey page', route: 'tokkey' });
+  assert.equal(
+    localModel.before + localModel.link.label + localModel.after,
+    'No local model is running. Start a local model from Tokkey page and try again.'
+  );
+
+  // A missing hub key is fixed on the desk, not on another page.
+  assert.equal(routerRequirementNotice('deviceMissing').link, null);
+});
+
+test('local summary card names the model the runtime is actually serving', () => {
+  const installed = [
+    { id: 'qwen:q4', name: 'Qwen3.5 35B Q4_K_M', provider: 'Qwen', series: 'qwen3-5', fileName: 'q.gguf', sizeBytes: 1, downloadedAt: 0, filePath: '/q.gguf' }
+  ];
+  const running = {
+    phase: 'running',
+    modelId: 'qwen:q4',
+    endpoint: 'http://127.0.0.1:8081/v1',
+    error: null,
+    device: null
+  };
+
+  // The card reports the address it serves on, as the cloud card reports the
+  // host it reaches.
+  assert.deepEqual(describeRunningLocalModel(running, installed), {
+    name: 'Qwen3.5 35B Q4_K_M',
+    detail: '127.0.0.1:8081'
+  });
+
+  // A scan that has not landed yet must not read as nothing running.
+  assert.equal(describeRunningLocalModel(running, null).name, 'qwen:q4');
+  assert.equal(
+    describeRunningLocalModel({ ...running, endpoint: null }, installed).detail,
+    'Running on this Mac'
+  );
+});
+
+test('local summary card claims nothing until a model is serving', () => {
+  const installed = [];
+
+  // Every phase short of `running` leaves the card on its placeholder, because
+  // a model still loading cannot answer a request yet.
+  for (const phase of ['idle', 'starting', 'stopping', 'stopped', 'error']) {
+    const state = { phase, modelId: 'qwen:q4', endpoint: null, error: null, device: null };
+    assert.equal(describeRunningLocalModel(state, installed), null);
+  }
+
+  const nameless = { phase: 'running', modelId: null, endpoint: null, error: null, device: null };
+  assert.equal(describeRunningLocalModel(nameless, installed), null);
 });

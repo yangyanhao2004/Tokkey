@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useCallback, useMemo, type ReactNode } from 'react';
 import {
   CLOUD_MODELS_EMPTY_MESSAGE,
   CLOUD_MODELS_SUBTITLE,
@@ -6,6 +6,7 @@ import {
   CLOUD_MODELS_UNAVAILABLE_PREFIX,
   CLOUD_MODEL_CONNECT_FAILED_PREFIX,
   CLOUD_MODEL_SUMMARY,
+  describeRunningLocalModel,
   ICON_BASE_PATH,
   LOCAL_MODEL_SUMMARY,
   NO_CLOUD_MODEL_DETAIL,
@@ -14,15 +15,22 @@ import {
   NO_LOCAL_MODEL_NAME,
   ROUTER_TOGGLE_DESCRIPTION,
   ROUTER_TOGGLE_TITLE,
+  routerErrorNotice,
+  routerRequirementNotice,
   routerStatusMessage,
   selectButtonLabel,
   toCloudModel,
   type CloudModel,
-  type ModelSummary
+  type ModelSummary,
+  type RouterNotice
 } from './routerContent';
 import { useCloudModelCards, type CloudModelCards } from '../hooks/useCloudModelCards';
+import { useInstalledModels } from '../hooks/useInstalledModels';
 import { useRouterRuntime } from '../hooks/useRouterRuntime';
+import { useRouterStartGate } from '../hooks/useRouterStartGate';
+import { useNavigation } from '../components/NavigationProvider';
 import { PageShell } from '../components/PageShell';
+import type { RouteId } from '../routing';
 import { PushButton } from '../components/PushButton';
 import { Switch } from '../components/Switch';
 import { TitleBlock } from '../components/TitleBlock';
@@ -110,6 +118,44 @@ function RouterToggleCard({ isRouterOn, isBusy, status, onChange }: RouterToggle
         </p>
       )}
     </section>
+  );
+}
+
+interface RouterErrorNoticeProps {
+  notice: RouterNotice;
+  /** Follows the words in the line that name a page, when it has any. */
+  onFollowLink: (route: RouteId) => void;
+}
+
+/**
+ * The one line under the toggle card: why the router refused to start, or which
+ * requirement the click did not meet. It sits outside the card so a refusal
+ * reads as the answer to the click rather than as part of the switch's own
+ * description.
+ *
+ * Where the line names the page that clears the requirement, those words are
+ * the link, so the fix is one click from the refusal.
+ */
+function RouterErrorNotice({ notice, onFollowLink }: RouterErrorNoticeProps) {
+  const { link } = notice;
+  return (
+    <p
+      className="text-[10px] leading-[12px] text-status-error-text"
+      data-testid="router-error"
+    >
+      {notice.before}
+      {link && (
+        <button
+          type="button"
+          className="underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-text-primary"
+          onClick={() => onFollowLink(link.route)}
+          data-testid="router-error-link"
+        >
+          {link.label}
+        </button>
+      )}
+      {notice.after}
+    </p>
   );
 }
 
@@ -295,6 +341,11 @@ export function RouterPage() {
   // turns it on and stays honest if the process later fails or exits.
   const router = useRouterRuntime();
   const isRouterOn = router.isOn;
+  // The same hook the Tokkey page runs on, for the same reason: it is the one
+  // place the local runtime's events land, so this card follows a model being
+  // started or stopped elsewhere in the window without being told.
+  const localModels = useInstalledModels();
+  const runningLocalModel = describeRunningLocalModel(localModels.runtime, localModels.models);
   const cloudModels = useCloudModelCards();
   const models = useMemo(() => (cloudModels.cards ?? []).map(toCloudModel), [cloudModels.cards]);
   // Selecting a card is what connects it, so the connected card is the
@@ -302,18 +353,45 @@ export function RouterPage() {
   const selectedModel = models.find((model) => model.id === cloudModels.connectedCardId);
   const notice = buildCloudModelsNotice(cloudModels, models.length);
 
+  // Turning the switch on is gated on a live session, a connected Tokkey and a
+  // running local model, so the click asks first and only starts the router once
+  // all three are answered. A blocked click outranks whatever the last start
+  // left behind, being the newer answer to the newer click.
+  const { navigate } = useNavigation();
+  const startGate = useRouterStartGate();
+  const toggleRouter = useCallback(
+    (nextOn: boolean) => {
+      if (!nextOn) {
+        startGate.clear();
+        router.toggle(false);
+        return;
+      }
+      void startGate.check().then((blockedBy) => {
+        if (blockedBy === null) router.toggle(true);
+      });
+    },
+    [router, startGate]
+  );
+
+  const routerNotice =
+    routerRequirementNotice(startGate.blockedBy) ?? routerErrorNotice(router.state);
+
   return (
     <PageShell
       title="Router"
       subtitle="Simple tasks run on your Tokkey. Hard ones go to a cloud model."
       testId="router"
     >
-      <RouterToggleCard
-        isRouterOn={isRouterOn}
-        isBusy={router.isBusy}
-        status={routerStatusMessage(router.state)}
-        onChange={router.toggle}
-      />
+      <div className="flex w-full shrink-0 flex-col gap-1.5">
+        <RouterToggleCard
+          isRouterOn={isRouterOn}
+          isBusy={router.isBusy || startGate.isChecking}
+          status={routerStatusMessage(router.state)}
+          onChange={toggleRouter}
+        />
+
+        {routerNotice && <RouterErrorNotice notice={routerNotice} onFollowLink={navigate} />}
+      </div>
 
       {/* The pair only reports what Router routes between, so it fades with it.
           The cards hold nothing focusable, so dimming alone is enough here. */}
@@ -324,8 +402,8 @@ export function RouterPage() {
       >
         <ModelSummaryCard
           summary={LOCAL_MODEL_SUMMARY}
-          name={NO_LOCAL_MODEL_NAME}
-          detail={NO_LOCAL_MODEL_DETAIL}
+          name={runningLocalModel?.name ?? NO_LOCAL_MODEL_NAME}
+          detail={runningLocalModel?.detail ?? NO_LOCAL_MODEL_DETAIL}
           testId="local-model-summary"
         />
         <ModelSummaryCard

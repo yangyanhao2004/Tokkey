@@ -21,7 +21,8 @@ interface AccountContextValue {
   signInWithGoogle(): Promise<AccountOperationResult<AccountState>>;
   cancelGoogleSignIn(): Promise<void>;
   signOut(): Promise<AccountOperationResult<AccountState>>;
-  refreshState(): Promise<void>;
+  /** Re-reads the account and returns it, or null when the read itself failed. */
+  refreshState(): Promise<AccountState | null>;
 }
 
 const SIGNED_OUT_STATE: AccountState = { status: 'signedOut', profile: null };
@@ -54,14 +55,15 @@ export function AccountProvider({ children }: { children: ReactNode }) {
    * Re-reads the main-process account. Main discards a credential whose access
    * token has expired, so this is also how a lapsed session becomes signedOut.
    */
-  const refreshState = useCallback(async () => {
+  const refreshState = useCallback(async (): Promise<AccountState | null> => {
     const result = await AccountOperationFallback.run(() => window.tokkey.getAccountState());
-    if (result.ok) {
-      setState(result.value);
-      setRestoreError(null);
-    } else {
+    if (!result.ok) {
       setRestoreError(result.error.message);
+      return null;
     }
+    setState(result.value);
+    setRestoreError(null);
+    return result.value;
   }, []);
 
   useEffect(() => {
