@@ -223,6 +223,9 @@ export class TokkeyApp {
     app.whenReady().then(() => this.onReady());
     app.on('activate', () => this.onActivate());
     app.on('window-all-closed', () => this.onWindowAllClosed());
+    // Pet is not closable, so destroy it before Electron tries to close windows.
+    // Waiting until will-quit would prevent that event from ever being reached.
+    app.on('before-quit', () => this.petRuntimeCoordinator.stop('application quit'));
     app.on('will-quit', () => this.onWillQuit());
     this.bindCrashHandler();
   }

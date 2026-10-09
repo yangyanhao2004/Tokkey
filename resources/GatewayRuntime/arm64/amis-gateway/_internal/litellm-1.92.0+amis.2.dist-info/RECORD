@@ -1,6 +1,6 @@
-../../../bin/lite,sha256=X9hPZpjIdAQw4VLK0ffR6s_zURK6gEJsnWKh_8booqA,366
-../../../bin/litellm,sha256=diIDX5lpPDYGIztC5P1fiANLQ8NXCJsfUxsHicStCrk,363
-../../../bin/litellm-proxy,sha256=X9hPZpjIdAQw4VLK0ffR6s_zURK6gEJsnWKh_8booqA,366
+../../../bin/lite,sha256=YLXlThdtPlRBwNTTJjZMw0WdperHFTu1z971imyR-bs,348
+../../../bin/litellm,sha256=fkzSRTVGpXjpQcYwLUEUwE8X6rqG1FJA7aKh8BZ6Hqc,345
+../../../bin/litellm-proxy,sha256=YLXlThdtPlRBwNTTJjZMw0WdperHFTu1z971imyR-bs,348
 litellm-1.92.0+amis.2.dist-info/INSTALLER,sha256=5hhM4Q4mYTT9z6QB6PGpUAW81PGNFrYrdXMj4oM_6ak,2
 litellm-1.92.0+amis.2.dist-info/METADATA,sha256=ztGMHqct8o7IkAnfj6CFVJ2yCSRCKIaDD_uTMlA8PDo,41010
 litellm-1.92.0+amis.2.dist-info/RECORD,,
@@ -2857,7 +2857,7 @@ litellm/router_utils/response_headers.py,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NM
 litellm/router_utils/router_callbacks/track_deployment_metrics.py,sha256=JLeDv9hWO0luGiV965RtS5TnDFlhOXYMMl50SEULcXU,2120
 litellm/router_utils/search_api_router.py,sha256=CZG-3-TH2NVALENTi_KpNEA3M0vL8_oy-WhPHX3NcLg,8838
 litellm/rust_bridge/__init__.py,sha256=4_s9SpYpOlBVZak-X7vLo3GKfZj3__OLVkmFejU5DFQ,264
-litellm/rust_bridge/_native.cpython-312-darwin.so,sha256=VMkXjZS9ZnLUYAvdAf5dJvHVyC5Rv27nykVF_AJZNLY,5461648
+litellm/rust_bridge/_native.cpython-312-darwin.so,sha256=jiInu9aXdPRPcPSGlpj00CO15oHAP7Heb2l2CdfwTnw,5754000
 litellm/rust_bridge/loader.py,sha256=-ct4pdkzhzyZKLHKq94jativveWTce5GeD_jyD4aE2A,815
 litellm/rust_bridge/ocr.py,sha256=Ee-_Hx-v417DYO5RVF6RWaKOTjQBDDuM1scxoD5YLe4,4188
 litellm/sandbox/__init__.py,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0

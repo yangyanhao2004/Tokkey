@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { constants, rmSync } from 'node:fs';
+import { constants, createWriteStream, rmSync } from 'node:fs';
 import { access, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -51,7 +51,7 @@ export function buildTokenHubServerArguments(options: {
     '--cache-ram', '0',
     '-ub', '4096',
     '-b', '4096',
-    '-c', '65535',
+    '-c', '32768',
     '-fa', 'on',
     '--no-cache-prompt',
     '--rge', '0',
@@ -65,6 +65,7 @@ const DEVICE_SCAN_INTERVAL_MS = 1_000;
 const SERVER_READINESS_TIMEOUT_MS = 180_000;
 const SERVER_STOP_GRACE_MS = 3_000;
 const MAX_DIAGNOSTIC_LENGTH = 32 * 1024;
+const LLAMA_SERVER_LOG_PATH = '/Users/amis/yyh/Tokkey/llama-server.log';
 
 interface DeviceProbing {
   connectedDevices(vendorId?: number, productId?: number): Promise<TokenHubDevice[]>;
@@ -95,6 +96,44 @@ class ProcessOutput {
 
   diagnostic(): string {
     return this.value.trim();
+  }
+}
+
+/**
+ * Writes a child process stream to a file, prefixing each line with a wall-clock
+ * timestamp. llama-server's own `--log-timestamps` only reports time since the
+ * server started, so the real time is added here as the bytes arrive.
+ */
+class TimestampedLogWriter {
+  private buffer = '';
+
+  constructor(private readonly stream: NodeJS.WritableStream) {}
+
+  append(data: Buffer): void {
+    this.buffer += data.toString('utf8');
+    const lines = this.buffer.split('\n');
+    this.buffer = lines.pop() ?? '';
+    for (const line of lines) {
+      this.stream.write(`${TimestampedLogWriter.wallClockTime()} ${line}\n`);
+    }
+  }
+
+  end(): void {
+    if (this.buffer) {
+      this.stream.write(`${TimestampedLogWriter.wallClockTime()} ${this.buffer}\n`);
+      this.buffer = '';
+    }
+  }
+
+  /** Local wall-clock time with millisecond precision, e.g. "14:03:27.431". */
+  private static wallClockTime(): string {
+    return new Date().toLocaleTimeString('en-GB', {
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      fractionalSecondDigits: 3
+    });
   }
 }
 
@@ -463,10 +502,22 @@ export class TokenHubRuntime implements LocalModelRuntime {
       stdio: ['ignore', 'pipe', 'pipe']
     });
     const output = new ProcessOutput();
-    child.stdout?.on('data', (data: Buffer) => output.append(data));
-    child.stderr?.on('data', (data: Buffer) => output.append(data));
+    const logStream = createWriteStream(LLAMA_SERVER_LOG_PATH, { flags: 'w' });
+    const logWriter = new TimestampedLogWriter(logStream);
+    child.stdout?.on('data', (data: Buffer) => {
+      output.append(data);
+      logWriter.append(data);
+    });
+    child.stderr?.on('data', (data: Buffer) => {
+      output.append(data);
+      logWriter.append(data);
+    });
     const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
-      child.once('close', (code, signal) => resolve({ code, signal }));
+      child.once('close', (code, signal) => {
+        logWriter.end();
+        logStream.end();
+        resolve({ code, signal });
+      });
       child.once('error', () => resolve({ code: child.exitCode, signal: child.signalCode }));
     });
     try {
@@ -475,12 +526,15 @@ export class TokenHubRuntime implements LocalModelRuntime {
         child.once('error', reject);
       });
     } catch (cause) {
+      logWriter.end();
+      logStream.end();
       await Promise.allSettled([
         rm(workingDirectory, { recursive: true, force: true }),
         this.removeStagedServer(resources.serverPath)
       ]);
       throw new Error(`The Amis Hub llama-server could not be launched: ${String(cause)}`);
     }
+    console.info(`[TokenHub] llama-server log: ${LLAMA_SERVER_LOG_PATH}`);
     return {
       child,
       serverPath: resources.serverPath,
