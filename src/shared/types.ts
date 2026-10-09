@@ -370,6 +370,7 @@ export interface TokkeyApi {
   openLocalChatSession(sessionId: string): Promise<LocalChatWorkspace>;
   closeLocalChatSession(sessionId: string): Promise<LocalChatWorkspace>;
   getLocalChatRuntimeState(): Promise<LocalChatRuntimeState>;
+  onLocalChatRuntimeStateChanged(listener: (state: LocalChatRuntimeState) => void): () => void;
   startLocalChatTurn(request: LocalChatTurnRequest): Promise<LocalChatTurnStarted>;
   cancelLocalChatTurn(turnId: string): Promise<void>;
   onLocalChatEvent(listener: LocalChatEventListener): () => void;

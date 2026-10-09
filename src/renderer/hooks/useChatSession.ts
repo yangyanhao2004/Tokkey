@@ -178,6 +178,7 @@ export function useChatSession(): ChatSessionController {
   const pendingMessageDeltasRef = useRef(new Map<string, PendingMessageDeltas>());
   const messageFlushFrameRef = useRef<number | null>(null);
   const runtimeStateRef = useRef(runtimeState);
+  const runtimeReadVersionRef = useRef(0);
 
   useEffect(() => {
     runtimeStateRef.current = runtimeState;
@@ -207,13 +208,14 @@ export function useChatSession(): ChatSessionController {
   }, [applyWorkspace, handleWorkspaceError]);
 
   const refreshRuntimeState = useCallback(async () => {
+    const version = ++runtimeReadVersionRef.current;
     try {
       const nextState = await window.tokkey.getLocalChatRuntimeState();
-      if (mountedRef.current) {
+      if (mountedRef.current && version === runtimeReadVersionRef.current) {
         setRuntimeState(nextState);
       }
     } catch (error) {
-      if (mountedRef.current) {
+      if (mountedRef.current && version === runtimeReadVersionRef.current) {
         setRuntimeState({
           status: 'error',
           model: null,
@@ -387,10 +389,17 @@ export function useChatSession(): ChatSessionController {
   useEffect(() => {
     mountedRef.current = true;
     const removeLocalChatEventListener = window.tokkey.onLocalChatEvent(handleLocalChatEvent);
+    const removeRuntimeStateListener = window.tokkey.onLocalChatRuntimeStateChanged((nextState) => {
+      if (!mountedRef.current) return;
+      runtimeReadVersionRef.current += 1;
+      setRuntimeState(nextState);
+    });
     void Promise.all([refreshRuntimeState(), loadWorkspace()]);
     return () => {
       mountedRef.current = false;
+      runtimeReadVersionRef.current += 1;
       removeLocalChatEventListener();
+      removeRuntimeStateListener();
       if (messageFlushFrameRef.current !== null) {
         window.cancelAnimationFrame(messageFlushFrameRef.current);
       }

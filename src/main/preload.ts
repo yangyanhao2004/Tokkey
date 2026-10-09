@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type {
   ClientVersionInfo,
   LocalChatEvent,
+  LocalChatRuntimeState,
   LocalModelRuntimeState,
   PetInteraction,
   PetRuntimeState,
@@ -122,6 +123,11 @@ class PreloadBridge {
       openLocalChatSession: (sessionId) => ipcRenderer.invoke('chat:open-session', sessionId),
       closeLocalChatSession: (sessionId) => ipcRenderer.invoke('chat:close-session', sessionId),
       getLocalChatRuntimeState: () => ipcRenderer.invoke('chat:get-runtime-state'),
+      onLocalChatRuntimeStateChanged: (listener) => {
+        const handler = (_event: IpcRendererEvent, state: LocalChatRuntimeState) => listener(state);
+        ipcRenderer.on('chat:runtime-state-changed', handler);
+        return () => ipcRenderer.removeListener('chat:runtime-state-changed', handler);
+      },
       startLocalChatTurn: (request) => ipcRenderer.invoke('chat:start-turn', request),
       cancelLocalChatTurn: (turnId) => ipcRenderer.invoke('chat:cancel-turn', turnId),
       onLocalChatEvent: (listener) => {

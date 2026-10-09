@@ -1031,6 +1031,25 @@ test('IPC controller keeps persisted turns, SSE events, and runtime selection in
   assert.deepEqual(calls.at(-1), { type: 'cancel', turnId: CHAT_REQUEST.turnId });
 });
 
+test('runtime failure broadcasts the Chat availability projection without its endpoint', () => {
+  let publishRuntimeState;
+  let chatState = { status: 'ready', model: { id: LOCAL_MODEL.id, label: LOCAL_MODEL.label }, contextWindowTokens: 49_152, error: null };
+  const controller = new IpcController({
+    accountService: {}, chatSessionStore: {}, localChatTurnExecutor: {}, localModelManager: {},
+    tokenHubRuntime: {
+      getLocalChatRuntimeState: () => chatState,
+      subscribe: (listener) => { publishRuntimeState = listener; return () => {}; }
+    }
+  });
+  const events = [];
+  controller.broadcast = (channel, payload) => events.push({ channel, payload });
+  chatState = { ...chatState, status: 'error', error: 'Process exited with SIGKILL' };
+  publishRuntimeState({ phase: 'failed', modelId: LOCAL_MODEL.id, endpoint: null, error: chatState.error, device: null });
+  assert.deepEqual(events.map(e => e.channel), ['models:runtime-state-changed', 'chat:runtime-state-changed']);
+  assert.deepEqual(events[1].payload, chatState);
+  assert.equal(Object.hasOwn(events[1].payload, 'endpoint'), false);
+});
+
 test('a failed Pet observer cannot interrupt an accepted Chat turn', () => {
   let turnStarted = false;
   const controller = new IpcController({

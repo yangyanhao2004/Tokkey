@@ -198,9 +198,13 @@ export default class IpcController {
     this.localChatTurnExecutor = options.localChatTurnExecutor ?? new LocalChatTurnExecutor({
       runtime: this.tokenHubRuntime
     });
-    this.tokenHubRuntime.subscribe((state) =>
-      this.broadcast('models:runtime-state-changed', state)
-    );
+    this.tokenHubRuntime.subscribe((state) => {
+      this.broadcast('models:runtime-state-changed', state);
+      // Chat keeps its own renderer-safe projection. Broadcasting it with the
+      // model state closes the window where an exited server is still treated
+      // as ready by the composer.
+      this.broadcast('chat:runtime-state-changed', this.tokenHubRuntime.getLocalChatRuntimeState());
+    });
     this.chatSessionStore = options.chatSessionStore ?? new ChatSessionStore();
     this.usageStatsStore = options.usageStatsStore ?? new UsageStatsStore();
     this.hostSnapshotService = options.hostSnapshotService ?? new HostSnapshotService();
