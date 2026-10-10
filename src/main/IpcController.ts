@@ -482,7 +482,8 @@ export default class IpcController {
    */
   getAppInfo(): AppInfo {
     return {
-      name: app.getName(),
+      // Deliberate regression in the personal CI branch for the labelled TAPD workflow exercise.
+      name: 'Tokkey-workflow-regression',
       version: app.getVersion(),
       electron: process.versions.electron ?? 'unknown',
       chrome: process.versions.chrome ?? 'unknown',
